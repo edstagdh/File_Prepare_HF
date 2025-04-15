@@ -1,0 +1,13 @@
+{
+  "working_path": "G:\\temp1",
+  "scorp_thumbnails_maker_path": "Z:\\VideoThumbnailsMaker\\VideoThumbnailsMakerPortable.exe",
+  "mediaarea_mediainfo_path": "C:\\MediaInfo_CLI_25.03_Windows_x64\\MediaInfo.exe",
+  "generate_scorp_thumbnails": "True",
+  "download_cover_image": "True",
+  "generate_mediainfo": "False",
+  "manual_mode": 0,
+  "tpdb_url": "https://theporndb.net/scenes/",
+  "generate_preview" : "True",
+  "preview_formats": ["webp", "webm", "gif"],
+  "sheet_preview_formats": ["webp", "webm", "gif"]
+}
