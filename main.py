@@ -141,7 +141,7 @@ async def process_files():
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
             logger.info(f"End file: {filename}")
-            failed_files.append(filename)
+            failed_files.append(str(file))
             continue  # Skip to the next file
 
         formatted_filename_performers_names = await format_performers(performers, 2)  # This includes sanitization of performer names
@@ -225,7 +225,7 @@ async def process_files():
         except Exception as e:
             logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
             logger.info(f"End file: {filename}")
-            failed_files.append(filename)
+            failed_files.append(str(file))
             continue  # Skip to the next file
 
     # Finished processing
