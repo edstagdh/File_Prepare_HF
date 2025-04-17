@@ -1,10 +1,11 @@
-import subprocess
 import cv2
+import json
 import numpy as np
 import os
 import re
 import requests
 import shutil
+import subprocess
 import textwrap
 import time
 from io import BytesIO
@@ -622,11 +623,11 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical):
     file_path = os.path.join(directory, new_filename)
     logger.info(f"Processing file: {file_path}")
 
-    temp_output = await reencode_to_hevc(file_path)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical)
 
     if temp_output is None:
         logger.debug(f"Already HEVC, skipping re-encode: {file_path}")
@@ -740,7 +741,33 @@ def format_bitrate(size_kib, elapsed_time):
     return f"{bitrate_kbps:.1f} kbps"
 
 
-async def reencode_to_hevc(file_path):
+async def get_video_resolution(file_path):
+    """Get the video resolution and bitrate using ffprobe."""
+    cmd = (
+        f'ffprobe -v error -select_streams v:0 '
+        f'-show_entries stream=width,height,bit_rate '
+        f'-of json "{file_path}"'
+    )
+    stdout, stderr, code = await run_command(cmd)
+    if code != 0:
+        logger.error(f"Failed to get resolution/bitrate for {file_path}. Error: {stderr}")
+        return None, None, None
+
+    try:
+        data = json.loads(stdout)
+        stream = data["streams"][0]
+        width = stream.get("width")
+        height = stream.get("height")
+        bitrate = stream.get("bit_rate", 0)
+        if bitrate is None:
+            bitrate = 0
+        return width, height, int(bitrate)
+    except Exception as e:
+        logger.exception(f"Error parsing resolution/bitrate for {file_path}: {e}")
+        return None, None, None
+
+
+async def re_encode_to_hevc(file_path, is_vertical):
     """Re-encode the given file to HEVC and show progress.
 
     Returns:
@@ -750,6 +777,8 @@ async def reencode_to_hevc(file_path):
     """
     if await is_hevc_encoded(file_path):
         return None
+
+    width, height, bit_rate = await get_video_resolution(file_path)
 
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
@@ -766,9 +795,25 @@ async def reencode_to_hevc(file_path):
         "-x265-params", "crf=22",
         "-c:a", "aac",
         "-b:a", "128k",
-        "-map_metadata", "0",
-        temp_output
+        "-map_metadata", "0"
     ]
+
+    # Add scale filter if resolution is higher than 1080p
+    if width and height:
+        if not is_vertical and (width > 1920 or height > 1080):
+            ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
+        elif is_vertical and height > 1080:
+            ffmpeg_cmd += ["-vf", "scale=-2:1080"]
+
+    # Enforce bitrate limits for high-bitrate non-vertical videos
+    if not is_vertical and bit_rate and bit_rate > 20_000_000:
+        ffmpeg_cmd += [
+            "-minrate", "2M",
+            "-maxrate", "10M",
+            "-bufsize", "5M"
+        ]
+
+    ffmpeg_cmd.append(temp_output)
 
     start_time = time.time()
     last_update_time = 0
@@ -793,27 +838,30 @@ async def reencode_to_hevc(file_path):
                 elapsed_human = format_eta(elapsed)
                 speed = float(speed_match.group(1).replace('x', '')) if speed_match else 1.0
 
-                if duration > 0 and speed > 0:
-                    est_total_time = duration / speed
-                    remaining = max(0, int(est_total_time) - int(elapsed))
-                    eta_human = format_eta(remaining)
+                if encoded_time > 0:  # Only proceed if encoded_time is greater than zero
+                    if duration > 0 and speed > 0:
+                        est_total_time = duration / speed
+                        remaining = max(0, int(est_total_time) - int(elapsed))
+                        eta_human = format_eta(remaining)
 
-                    predicted_size_kib = (current_size_kib / encoded_time) * duration
-                    predicted_size = format_size(predicted_size_kib)
+                        predicted_size_kib = (current_size_kib / encoded_time) * duration
+                        predicted_size = format_size(predicted_size_kib)
 
-                    estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
+                        estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
 
-                    logger.info(
-                        f"Progress: Encoded {encoded_time:.2f}s / {duration}s "
-                        f"({(encoded_time / duration) * 100:.1f}%), "
-                        f"Speed: {speed:.2f}x, "
-                        f"Elapsed: {elapsed_human}, "
-                        f"ETA: {eta_human}, "
-                        f"Predicted Final Size: {predicted_size}, "
-                        f"Estimated Bitrate: {estimated_bitrate}"
-                    )
+                        logger.info(
+                            f"Progress: Encoded {encoded_time:.2f}s / {duration}s "
+                            f"({(encoded_time / duration) * 100:.1f}%), "
+                            f"Speed: {speed:.2f}x, "
+                            f"Elapsed: {elapsed_human}, "
+                            f"ETA: {eta_human}, "
+                            f"Predicted Final Size: {predicted_size}, "
+                            f"Estimated Bitrate: {estimated_bitrate}"
+                        )
+                    else:
+                        logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
                 else:
-                    logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
+                    logger.warning("Encoded time is zero, skipping bitrate prediction.")
 
                 last_update_time = now
 

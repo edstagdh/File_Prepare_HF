@@ -41,6 +41,8 @@ async def process_files():
 
     if generate_face_portrait_pic:
         from mtcnn import MTCNN
+    else:
+        MTCNN = None
     # Verify working path
     if not os.path.isdir(directory):
         logger.error("Please enter a valid directory path.")
@@ -200,7 +202,7 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_filename, directory, keep_original_file]),
+                (re_encode_hevc, re_encode_video, [new_filename, directory, keep_original_file, is_vertical]),
                 (download_cover_image, image_download_and_conversion, [image_url, tpdb_image_url, filename_base_name, new_filename_base_name, file_path]),
                 (generate_scorp_thumbnails, generate_scorp_thumbnails_and_conversion, [new_filename_base_name, directory, filename_base_name, scorp_exe_path]),
                 (generate_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path]),
