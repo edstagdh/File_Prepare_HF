@@ -648,8 +648,10 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         final_output = os.path.join(directory, new_filename)
         shutil.move(temp_output, final_output)
         logger.info(f"Replaced original file with HEVC version: {final_output}")
+        return True
     except Exception as e:
         logger.error(f"Failed to replace {file_path}: {e}")
+        return False
 
 
 async def get_video_duration(filepath):
