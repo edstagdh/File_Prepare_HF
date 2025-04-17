@@ -1,5 +1,4 @@
 import subprocess
-
 import cv2
 import numpy as np
 import os
@@ -14,12 +13,7 @@ from loguru import logger
 from mutagen.mp4 import MP4
 from Utilities import run_command
 from TPDB_API_Processing import get_performer_profile_picture
-from mtcnn import MTCNN
 from PIL import Image, ImageDraw, ImageFont
-
-
-# Initialize MTCNN detector
-detector = MTCNN()
 
 
 async def get_existing_title(input_file):
@@ -65,10 +59,10 @@ async def get_existing_description(input_file):
 
 
 async def image_download_and_conversion(image_url: str,
-                                   alt_image_url: str,
-                                   original_name: str,
-                                   new_name: str,
-                                   target_dir: str) -> bool:
+                                        alt_image_url: str,
+                                        original_name: str,
+                                        new_name: str,
+                                        target_dir: str) -> bool:
     try:
         os.makedirs(target_dir, exist_ok=True)
         target_path = Path(target_dir)
@@ -98,8 +92,16 @@ async def image_download_and_conversion(image_url: str,
             response.raise_for_status()
 
             content_type = response.headers.get('Content-Type', '')
+
             if not content_type.startswith('image/'):
-                raise ValueError(f"URL does not contain an image: {url}")
+                logger.warning(f"No or unexpected Content-Type for URL: {url} (Got: '{content_type}')")
+                # Try to validate by attempting to open as image
+                try:
+                    img = Image.open(BytesIO(response.content))
+                    img.verify()  # Verifies it's an image but doesn't keep it open
+                    # logger.debug("Image verified via content inspection.")
+                except Exception as e:
+                    raise ValueError(f"URL does not contain a valid image: {url}") from e
 
             return response
 
@@ -148,7 +150,7 @@ async def generate_scorp_thumbnails_and_conversion(filename, directory, original
     """
     if not os.path.isfile(scorp_exe_path):
         logger.error(f"Invalid path to thumbnails_maker executable: {scorp_exe_path}")
-        return
+        return False
 
     base_name = filename
     og_base_name = original_filename
@@ -158,72 +160,102 @@ async def generate_scorp_thumbnails_and_conversion(filename, directory, original
     if base_name == og_base_name:
         if os.path.isfile(webp_thumb_path):
             logger.info(f"WebP thumbnail already exists: {webp_thumb_path}")
-            return
+            return True
         if os.path.isfile(jpg_thumb_path):
             logger.info(f"JPG thumbnail exists: {jpg_thumb_path}. Converting to WebP...")
             try:
                 success = await convert_image_to_webp(Path(jpg_thumb_path))
                 if not success:
                     logger.error(f"Failed to convert JPG to WebP for: {jpg_thumb_path}")
-                return
+                    return False
+                else:
+                    return True
             except Exception as e:
                 logger.error(f"Exception during conversion to WebP: {e}")
-                return
+                return False
 
         # Generate thumbnail
         full_video_path = os.path.join(directory, f"{filename}.mp4")
         command = f'"{scorp_exe_path}" "{full_video_path}" /silent'
         try:
-            stdout, stderr, code = await run_command(command)
+            _, _, _ = await run_command(command)
         except Exception as e:
             logger.error(f"Failed to execute thumbnail generator: {e}")
-            return
+            return False
 
         if os.path.isfile(jpg_thumb_path):
             try:
                 success = await convert_image_to_webp(Path(jpg_thumb_path))
                 if success:
                     logger.info(f"Thumbnail generated and converted successfully for {filename}")
+                    return True
                 else:
                     logger.error(f"Thumbnail generated but conversion to WebP failed for {filename}")
+                    return False
             except Exception as e:
                 logger.error(f"Exception during WebP conversion: {e}")
+                return False
         else:
             logger.error(f"Thumbnail generation failed, JPG not found: {jpg_thumb_path}")
-
-        return
-
-    # Case: filename != original_filename
-    og_jpg_path = os.path.join(directory, f"{og_base_name}_thumbnails.jpg")
-    og_webp_path = os.path.join(directory, f"{og_base_name}_thumbnails.webp")
-
-    if os.path.isfile(og_webp_path):
-        new_webp_path = os.path.join(directory, f"{base_name}_thumbnails.webp")
-        try:
-            os.rename(og_webp_path, new_webp_path)
-            logger.info(f"Renamed existing WebP thumbnail from {og_webp_path} to {new_webp_path}")
-        except Exception as e:
-            logger.error(f"Failed to rename WebP thumbnail: {e}")
-        return
-
-    if os.path.isfile(og_jpg_path):
-        new_jpg_path = os.path.join(directory, f"{base_name}_thumbnails.jpg")
-        try:
-            os.rename(og_jpg_path, new_jpg_path)
-            logger.info(f"Renamed existing JPG thumbnail from {og_jpg_path} to {new_jpg_path}")
-            try:
-                success = await convert_image_to_webp(Path(new_jpg_path))
-                if success:
-                    logger.info(f"Converted renamed JPG to WebP: {new_jpg_path}")
-                else:
-                    logger.error(f"Failed to convert renamed JPG to WebP: {new_jpg_path}")
-            except Exception as e:
-                logger.error(f"Exception during conversion of renamed JPG: {e}")
-        except Exception as e:
-            logger.error(f"Failed to rename JPG thumbnail: {e}")
-
+            return False
     else:
-        logger.info(f"No existing thumbnails found for original filename: {og_base_name}")
+        # Case: filename != original_filename
+        og_jpg_path = os.path.join(directory, f"{og_base_name}_thumbnails.jpg")
+        og_webp_path = os.path.join(directory, f"{og_base_name}_thumbnails.webp")
+
+        if os.path.isfile(og_webp_path):
+            new_webp_path = os.path.join(directory, f"{base_name}_thumbnails.webp")
+            try:
+                os.rename(og_webp_path, new_webp_path)
+                logger.info(f"Renamed existing WebP thumbnail from {og_webp_path} to {new_webp_path}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to rename WebP thumbnail: {e}")
+                return False
+        elif os.path.isfile(og_jpg_path):
+            new_jpg_path = os.path.join(directory, f"{base_name}_thumbnails.jpg")
+            try:
+                os.rename(og_jpg_path, new_jpg_path)
+                logger.info(f"Renamed existing JPG thumbnail from {og_jpg_path} to {new_jpg_path}")
+                try:
+                    success = await convert_image_to_webp(Path(new_jpg_path))
+                    if success:
+                        logger.info(f"Converted renamed JPG to WebP: {new_jpg_path}")
+                        return True
+                    else:
+                        logger.error(f"Failed to convert renamed JPG to WebP: {new_jpg_path}")
+                        return False
+                except Exception as e:
+                    logger.error(f"Exception during conversion of renamed JPG: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"Failed to rename JPG thumbnail: {e}")
+                return False
+        else:
+            # Generate thumbnail
+            full_video_path = os.path.join(directory, f"{filename}.mp4")
+            command = f'"{scorp_exe_path}" "{full_video_path}" /silent'
+            try:
+                _, _, _ = await run_command(command)
+            except Exception as e:
+                logger.error(f"Failed to execute thumbnail generator: {e}")
+                return False
+
+            if os.path.isfile(jpg_thumb_path):
+                try:
+                    success = await convert_image_to_webp(Path(jpg_thumb_path))
+                    if success:
+                        logger.info(f"Thumbnail generated and converted successfully for {filename}")
+                        return True
+                    else:
+                        logger.error(f"Thumbnail generated but conversion to WebP failed for {filename}")
+                        return False
+                except Exception as e:
+                    logger.error(f"Exception during WebP conversion: {e}")
+                    return False
+            else:
+                logger.error(f"Thumbnail generation failed, JPG not found: {jpg_thumb_path}")
+                return False
 
 
 async def convert_image_to_webp(source_path: Path, output_name: str = None, quality: int = 85) -> bool:
@@ -254,7 +286,7 @@ async def convert_image_to_webp(source_path: Path, output_name: str = None, qual
         return False
 
 
-async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit):
+async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
@@ -272,7 +304,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         logger.success(f"Created/verified directory: {faces_dir}")
     except Exception:
         logger.exception(f"Failed to create directory in: {directory}")
-        return
+        return False
 
     for data in performers:
         try:
@@ -283,34 +315,48 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             performer_id = data[1]
             logger.debug(f"Processing performer {performer_name}, ID: {performer_id}")
             performer_posters, performer_slug = await get_performer_profile_picture(performer_name, performer_id, posters_limit)
-            if performer_slug:
-                performer_url = tpdb_performer_url + performer_slug
-                # logger.debug(f"Performer URL: {performer_url}")
+            # performer_url = tpdb_performer_url + performer_slug if performer_slug else ""
+            # logger.debug(f"Performer URL: {performer_url}")
             downloaded_files = await download_poster_images(performer_posters, faces_dir, performer_slug, posters_limit)
             if not downloaded_files:
                 return False
+            if "already downloaded" in downloaded_files:
+                continue
             font_size = 18  # Font size
             text_color = (255, 255, 255)  # Text color (black)
             position_percentage = 0.8
             for file in downloaded_files:
-                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage)
+                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN)
 
         except Exception:
             logger.exception(f"Error processing performer {performer_name}, ID: {performer_id}")
+            return False
+    return True
 
 
 async def download_poster_images(poster_urls: list[str], faces_dir: str, performer_slug: str, posters_limit: int):
     """
-    Downloads up to the first 3 successful performer poster images, saves them as webp format.
+    Downloads up to the first N successful performer poster images, saves them as webp format.
 
-    :param posters_limit:
     :param poster_urls: List of poster image URLs
     :param faces_dir: Directory to save the downloaded images
     :param performer_slug: Slug to include in the saved filename
-    :return: List of successfully saved poster file paths, or False if none were saved
+    :param posters_limit: Max number of images to download
+    :return: List of successfully saved poster file paths, or ["already downloaded"] if they exist, or False if none were saved
     """
     os.makedirs(faces_dir, exist_ok=True)
     downloaded_files = []
+
+    # Check if images already exist for the performer
+    existing_files = [
+        f for f in os.listdir(faces_dir)
+        if f.startswith(performer_slug) and f.lower().endswith(".webp")
+    ]
+
+    if existing_files:
+        downloaded_files.append("already downloaded")
+        logger.info(f"Performer posters already exist in {faces_dir}")
+        return downloaded_files
 
     for index, url in enumerate(poster_urls, start=1):
         if len(downloaded_files) >= posters_limit:
@@ -341,11 +387,11 @@ async def download_poster_images(poster_urls: list[str], faces_dir: str, perform
         return False
 
 
-async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage):
+async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
-    bounding_boxes, keypoints, image = await detect_faces(image_path)
+    bounding_boxes, keypoints, image = await detect_faces(image_path, MTCNN)
 
     if len(bounding_boxes) == 0:
         logger.error(f"No faces detected in image: {image_path}")
@@ -468,7 +514,11 @@ async def overlay_text(
     logger.success(f"Saved output image as WebP: {output_file}")
 
 
-async def detect_faces(image_path, threshold=0.95):  # Adjust the threshold here
+async def detect_faces(image_path, MTCNN):  # Adjust the threshold here
+
+    threshold = 0.95
+
+    detector = MTCNN()
     # Load the image
     image = cv2.imread(image_path)
 
@@ -489,7 +539,7 @@ async def detect_faces(image_path, threshold=0.95):  # Adjust the threshold here
             bounding_boxes.append(face['box'])  # Get the bounding box (x, y, width, height)
             keypoints.append(face['keypoints'])  # Get the keypoints (left eye, right eye, etc.)
         else:
-            logger.debug(f"Confidence level not high enough to pass threshold({threshold}): {face['confidence']:.2f}")
+            # logger.debug(f"Confidence level not high enough to pass threshold({threshold}): {face['confidence']:.2f}")
             pass
 
     return bounding_boxes, keypoints, image
@@ -542,7 +592,7 @@ async def create_long_vertical_elliptical_mask(image, blur_kernel_size=21):
     axes = (width // 2, height // 2)  # Horizontal axis is smaller; vertical axis is larger for elongated ellipse
 
     # Draw a filled white ellipse in the center
-    cv2.ellipse(mask, center, axes, 0, 0, 360, (255), thickness=-1)
+    cv2.ellipse(mask, center, axes, 0, 0, 360, 255, thickness=-1)
 
     # Apply Gaussian blur to smooth the edges of the ellipse
     blurred_mask = cv2.GaussianBlur(mask, (blur_kernel_size, blur_kernel_size), 0)
@@ -579,12 +629,12 @@ async def re_encode_video(new_filename, directory, keep_original_file):
     temp_output = await reencode_to_hevc(file_path)
 
     if temp_output is None:
-        logger.info(f"Already HEVC, skipping re-encode: {file_path}")
-        return
+        logger.debug(f"Already HEVC, skipping re-encode: {file_path}")
+        return True
 
     if temp_output is False:
         logger.error(f"Skipping deletion, re-encoding failed for {file_path}")
-        return
+        return False
 
     try:
         if keep_original_file:
@@ -614,6 +664,41 @@ async def get_video_duration(filepath):
         logger.error(f"Invalid FPS value for file: {filepath}")
         return 0
     return int(frame_count // fps)
+
+
+async def get_video_fps(video_path: str) -> float:
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video file: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+    return round(fps)
+
+
+async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bool]:
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video file: {video_path}")
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    # Match only specific standard resolutions
+    if height >= 2160:
+        resolution = "2160p"
+    elif height >= 1080:
+        resolution = "1080p"
+    elif height >= 720:
+        resolution = "720p"
+    else:
+        resolution = f"{height}p"
+
+    is_vertical = height > width
+    return resolution, is_vertical
 
 
 def parse_ffmpeg_time(time_str):
@@ -651,7 +736,7 @@ def format_bitrate(size_kib, elapsed_time):
     """Calculate the bitrate from size and elapsed time and format it."""
     if elapsed_time <= 0:
         return "N/A"
-    bitrate_kbps = (size_kib * 8) / (elapsed_time)
+    bitrate_kbps = (size_kib * 8) / elapsed_time
     return f"{bitrate_kbps:.1f} kbps"
 
 
@@ -664,7 +749,6 @@ async def reencode_to_hevc(file_path):
         False: If encoding failed.
     """
     if await is_hevc_encoded(file_path):
-        logger.info(f"Skipping re-encode, file is already HEVC: {file_path}")
         return None
 
     directory, filename = os.path.split(file_path)
@@ -763,6 +847,20 @@ async def is_hevc_encoded(file_path):
         return False
 
 
+async def get_video_codec(file_path):
+    """Return the codec name of the first video stream in a video file using ffprobe."""
+    command = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+
+    try:
+        stdout, stderr, code = await run_command(command)
+        codec_name = stdout.strip().lower()
+        return codec_name
+
+    except Exception as e:
+        logger.error(f"Error getting codec for {file_path}: {e}")
+        return None
+
+
 async def update_metadata(input_file, title, description, re_encode_hevc):
     """
     Updates the metadata of an MP4 video file with the specified title, description, and adds "HEVC" to the Tags field.
@@ -774,6 +872,9 @@ async def update_metadata(input_file, title, description, re_encode_hevc):
 
     Returns:
         bool: True if the metadata update was successful, False otherwise.
+        :param description:
+        :param title:
+        :param input_file:
         :param re_encode_hevc:
     """
     try:

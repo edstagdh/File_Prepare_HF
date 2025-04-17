@@ -75,9 +75,7 @@ async def verify_ffmpeg_and_ffprobe():
                 pass
 
             if version_ok or date_ok:
-                logger.debug(
-                    f"{tool_name} passed check (version_ok={version_ok}, date_ok={date_ok})."
-                )
+                # logger.debug(f"{tool_name} passed check (version_ok={version_ok}, date_ok={date_ok}).")
                 return True, 0
             else:
                 logger.error(f"{tool_name} did not meet version or build date requirements.")
@@ -346,6 +344,88 @@ async def generate_mediainfo_file(filename, mediainfo_path):
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
-
         # Return False indicating failure
         return False
+
+
+async def generate_template_video(
+        new_title: str,
+        scene_pretty_date: str,
+        scene_description: str,
+        formatted_names: str,
+        fps: float,
+        resolution: str,
+        is_vertical: bool,
+        codec: str,
+        extension: str,
+        directory: str,
+        new_filename_base_name: str,
+) -> bool:
+    # Path to the script's directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    template_path = os.path.join(script_dir, "HF_Template.txt")
+    media_info_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
+
+    if not os.path.isfile(template_path):
+        raise FileNotFoundError(f"Template file not found: {template_path}")
+
+    if not os.path.isfile(media_info_path):
+        raise FileNotFoundError(f"Media info file not found: {media_info_path}")
+
+    # Load the template content
+    with open(template_path, "r", encoding="utf-8") as f:
+        template_content = f.read()
+
+    # Load media info
+    with open(media_info_path, "r", encoding="utf-8") as f:
+        media_info = f.read()
+
+    # Load JSON config
+    json_map, exit_code = await load_config("BBCode_Images.json")
+    if exit_code != 0 or json_map is None:
+        raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+
+    # Additional information
+    fps_icon_url = json_map[f"{fps}"]
+    resolution_icon_url = json_map[f"{resolution}"]
+    codec_icon_url = json_map[f"{codec}"]
+    extension_icon_url = json_map[f"{extension.replace('.', '')}"]
+    cover_image = f"{new_filename_base_name}.webp"
+    preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"
+    thumbnails_image = f"{new_filename_base_name}_Thumbnails.webp"
+
+    # Create replacement dictionary
+    replacements = {
+        "{NEW_TITLE}": new_title,
+        "{SCENE_PRETTY_DATE}": scene_pretty_date,
+        "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
+        "{FORMATTED_NAMES}": formatted_names,
+        "{FPS}": fps_icon_url,
+        "{RESOLUTION}": resolution_icon_url,
+        "{IS_VERTICAL}": "yes" if is_vertical else "no",
+        "{CODEC}": codec_icon_url,
+        "{EXTENSION}": extension_icon_url,
+        "{MEDIA_INFO}": media_info,
+        "{COVER_IMAGE}": cover_image,
+        "{PREVIEW_SHEET}": preview_sheet_image,
+        "{STATIC_THUMBNAILS_SHEET}": thumbnails_image,
+    }
+    try:
+        # Replace placeholders
+        for placeholder, value in replacements.items():
+            template_content = template_content.replace(placeholder, value)
+
+        # Make sure the target directory exists
+        os.makedirs(directory, exist_ok=True)
+
+        # Save the modified file
+        output_filename = f"{new_filename_base_name}_HF.txt"
+        output_path = os.path.join(directory, output_filename)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(template_content)
+    except Exception as e:
+        logger.error(f"An error has occured during creating of template for file: {new_filename_base_name}.{extension}")
+        return False
+
+    return True

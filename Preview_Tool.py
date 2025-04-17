@@ -39,15 +39,15 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
         confirm_cut_points_required = config["CONFIRM_CUT_POINTS_REQUIRED"]
 
     if new_file_full_path in excluded_files:
-        logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored.")
-        return
+        logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
+        return True
 
     # Verify Segments and Grid values
     is_valid = await validate_preview_sheet_requirements(grid_width, num_of_segments, number_of_segments_gif, create_webp_preview_sheet, create_webm_preview_sheet,
                                                          create_gif_preview_sheet)
     if not is_valid:
         logger.error("Invalid configuration")
-        return
+        return False
 
     # Start processing
     logger.info(f"processing previews for file: {new_file_full_path}")
@@ -57,6 +57,9 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
                                   confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name)
     if not results:
         logger.error("Preview creation has failed, please check the log.")
+        return False
+    else:
+        return True
 
 
 async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: int, number_of_segments_gif: int, create_webp_sheet: bool, create_gif_sheet: bool,
@@ -219,13 +222,13 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         logger.error(f"Unexpected ffprobe output format: {ffprobe_output}")
                         return False
                 except (ValueError, IndexError) as e:
-                    logger.error(f"Could not determine codec for {video_path}")
+                    logger.error(f"Could not determine codec for {video_path}: error: {e}")
                     return False
             else:
                 logger.error(f"Could not determine codec for {video_path}")
                 return False
 
-        except Exception as e:
+        except Exception:
             logger.exception()
             return False
 
@@ -308,6 +311,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 logger.success(f"Preview WebP created successfully: {output_webp}")
             else:
                 logger.error(f"Failed to create WebP: {stderr}")
+                return False
         # Create Preview WebM
         if create_webm_preview:
             webm_command = (
@@ -321,6 +325,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 logger.success(f"Preview WebM created successfully: {output_webm}")
             else:
                 logger.error(f"Failed to create WebM: {stderr}")
+                return False
         # Create concat video file for gif if create_gif_preview is true
         if create_gif_preview:
             concat_output_file_gif = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile_gif.mp4")
@@ -343,6 +348,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 logger.success(f"Preview GIF created successfully: {output_gif}")
             else:
                 logger.error(f"Failed to create GIF: {stderr}")
+                return False
 
         # Sheet Creation Segment
         concat_list_sheet = await filter_and_save_timestamped(concat_list, timestamps_mode, is_sheet=True)
@@ -360,6 +366,9 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
         logger.success(f"Finished processing file: {video_path}")
         sleep(0.5)
+        return True
+    else:
+        logger.info("Nothing to create in preview tool")
         return True
 
 
@@ -458,7 +467,19 @@ async def generate_cut_points(
                 logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}")
 
         # Convert percentages to absolute seconds
-        cut_points_seconds = (duration * pct for pct in sorted_points)
+        cut_points_seconds = [duration * pct for pct in sorted_points]
+
+        # Check for scene changes at each cut point
+        scene_change_found = False
+        for i, ts in enumerate(cut_points_seconds, start=1):
+            scene_at_cut = await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration)
+            if scene_at_cut:
+                logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
+                scene_change_found = True
+                break
+
+        if scene_change_found:
+            continue
 
         temp_files_preview = await generate_video_segments(
             video_path,
@@ -519,14 +540,11 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
             if exit_code != 0 or not os.path.exists(temp_file):
                 logger.error(f"Failed to extract segment {index} at {start} seconds")
-                temp_files_webp.remove(temp_file)  # Remove failed segment from list
+                if temp_file in temp_files_webp:
+                    temp_files_webp.remove(temp_file)  # Remove failed segment from list
                 continue
             if timestamps_mode in [1, 2]:
-                scene_change_detected = await check_scene_changes(temp_file)
-                if scene_change_detected:
-                    # logger.debug(f"Scene change detected, segment {index} at {start} seconds")
-                    os.remove(temp_file)  # Remove invalid segment
-                    return None
+
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
                     return_file = await overlay_timestamp(temp_folder, temp_file)
@@ -540,50 +558,26 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
     return temp_files_webp  # Return list of processed segments
 
 
-async def check_scene_changes(video_path, scene_threshold=0.3):
+async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_duration):
     """
-    Checks if there are scene changes in a video file.
+    Check for a scene change around a specific timestamp in a video.
+    Looks at a short window to detect abrupt changes.
 
+    :param segment_cut_duration:
     :param video_path: Path to the video file.
-    :param scene_threshold: Scene score threshold to detect a scene change. Default is 0.3.
-    :return: True if a scene change is detected, False otherwise.
+    :param timestamp: Time in seconds to check for scene change.
+    :return: True if scene change detected, else False.
     """
+    scene_threshold = 0.3  # default value for scene detection.
     try:
-        # FFmpeg command to extract scene change data
-        command = [
-            'ffmpeg',
-            '-i', video_path,
-            '-filter:v',
-            f"select='gt(scene,{scene_threshold})',showinfo",  # Corrected filtergraph
-            '-f', 'null',  # Ensures no output file is created
-            ' - '
-        ]
-
-        # Run the ffmpeg command using the existing run_command function
-        # logger.debug(f"Running command: {' '.join(command)}")
-        stdout, stderr, exit_code = await run_command(command)
-
-        if exit_code != 0:
-            logger.error(f"FFmpeg command failed with exit code {exit_code}. Stderr: {stderr}")
-            return False
-
-        # Look for scene changes in the FFmpeg output (stderr should contain metadata)
-        scene_changes_detected = False
-        for line in stderr.splitlines():  # Using stderr to check for metadata
-            if 'pts_time' in line:
-                # If pts_time is found, a scene change is detected
-                scene_changes_detected = True
-                # logger.debug(f"Scene change detected for file {video_path}")
-                # logger.debug({line.strip()})
-                break  # Exit after finding the first scene change
-
-        if not scene_changes_detected:
-            # logger.debug("No scene change detected.")
-            pass
-        return scene_changes_detected
-
+        probe_command = (
+            f'ffmpeg -hide_banner -ss {max(timestamp - 0.5, 0)} -t {segment_cut_duration} -i "{video_path}" '
+            f'-vf "select=\'gt(scene,{scene_threshold})\',showinfo" -an -f null -'
+        )
+        stdout, stderr, exit_code = await run_command(probe_command)
+        return "scene_score" in stderr
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"Failed to check scene at timestamp {timestamp:.2f}s: {e}")
         return False
 
 
@@ -871,8 +865,9 @@ async def get_video_metadata(file_path, char_break_line):
         try:
             num, denom = map(int, fps.split("/"))
             fps = round(num / denom, 2)
-        except:
+        except Exception:
             fps = "N/A"
+
     except Exception as e:
         logger.error(f"Error extracting metadata: {e}")
         return [], file_dir, None

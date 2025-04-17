@@ -37,16 +37,16 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
         api_auth, api_scenes_url, api_sites_url = await load_api_credentials(mode=1)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
         if response_data is None:
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
         valid_entries = await filter_entries_by_date(response_data, scene_date)
 
         if not valid_entries:
             logger.error("No matching entries for the provided date.")
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
@@ -55,11 +55,12 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
         alt_image = selected_entry.get("background", {}).get("full")
+        scene_description = selected_entry.get('description')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
         site = selected_entry.get("site", {}).get("name")
@@ -90,15 +91,15 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
                 female_performers.append((user_input, ""))
 
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description
 
     except Exception as e:
         logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None
 
 
 async def send_request(api_url, api_auth, string_parse, max_retries, delay):

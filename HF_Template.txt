@@ -1,0 +1,38 @@
+[BG=https://images2.imgbox.com/88/eb/JAaZN8L1_o.jpg,100%][font=Microsoft Sans Serif][color=#FFFFFF][BR]
+[BG=#343434C0,80%,center][BG=#34343400,96%,center][center]
+
+[size=8]{NEW_TITLE}[/size]
+
+[img=700]{COVER_IMAGE}[/img]
+
+[img]https://images2.imgbox.com/ea/94/XbVfs1kC_o.png[/img]
+
+[img=100]{RESOLUTION}[/img] [img=100]{CODEC}[/img] [img=100]{EXTENSION}[/img] [img=100]{FPS}[/img]
+
+[table=nball,90%][tr][td=100%][size=4][b][u]Scene Description:[/u][/b][/size]
+
+[size=3]{SCENE_DESCRIPTION}[/size][BR][BR][/td][/tr]
+[BR][BR]
+[tr][td=100%][size=4][b][u]Released:[/u][/b][/size]
+
+[size=3]{SCENE_PRETTY_DATE}[/size][BR][BR][/td][/tr]
+[BR][BR]
+[tr][td=100%][size=4][b][u]Performers:[/u][/b][/size]
+
+[size=3]{FORMATTED_NAMES}[/size][/td][/tr]
+
+[/table]
+
+[size=5]Mediainfo:[/size]
+[size=2][table=85%,nball][tr][td][align=left][mediainfo]
+{MEDIA_INFO}
+[/mediainfo][/align][/td][/tr][/table][/size]
+[BR]
+[img]https://images2.imgbox.com/65/4a/oPea0iAO_o.png[/img]
+[BR]
+[img]{PREVIEW_SHEET}[/img]
+[BR]
+[size=4][spoiler=Thumbnails(Static)][img]{STATIC_THUMBNAILS_SHEET}[/img][/spoiler][/size]
+
+[BR][/center][/BG][/BG]
+[/COLOR][/FONT][/BG]
