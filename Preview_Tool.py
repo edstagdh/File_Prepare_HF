@@ -247,22 +247,18 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             f'ffprobe -v error -select_streams v:0 -show_entries format=duration '
             f'-of default=noprint_wrappers=1:nokey=1 -i "{video_path}"'
         )
-
         if not duration_output:
             logger.error(f"Failed to retrieve video duration: {video_path}")
             return False
-
         try:
             duration = float(duration_output)
         except ValueError:
             logger.error(f"Invalid duration format returned by ffprobe: {duration_output}")
             return False
-
         required_duration = 150
         if duration <= required_duration:
             logger.error(f"Video duration is too short. Minimum required duration is {required_duration} seconds.")
             return False
-
         # Determine if any preview sheet is required
         preview_sheet_required = any([
             create_webp_preview_sheet,
@@ -431,25 +427,24 @@ async def generate_cut_points(
         last_cut_point
 ):
     """Generate unique evenly spaced cut points with random variations."""
-
+    logger.debug("5.0")
     while True:
         start_point = round(random.uniform(0.03, 0.05), 2)
-        end_point = round(random.uniform(0.98, 0.99), 2) if last_cut_point != 0 else last_cut_point/duration
+        if last_cut_point == 0:
+            end_point = round(random.uniform(0.98, 0.99), 2)
+        else:
+            end_point = last_cut_point / duration
         cut_points = {start_point, end_point}
-
         num_cuts = num_of_segments - 1
         step = (end_point - start_point) / num_cuts
-
         for i in range(1, num_cuts):
             next_point = round(start_point + step * i + random.uniform(-0.02, 0.02), 2)
             if start_point < next_point < end_point and next_point not in blacklisted_cut_points:
                 cut_points.add(next_point)
-
         if len(cut_points) != num_of_segments:
+            logger.error(f'not enough cut points generated: {len(cut_points)}, cut points: {cut_points}')
             continue
-
         sorted_points = sorted(cut_points)
-
         if confirm_cut_points_required:
             logger.debug("Generated cut points with timestamp breakdown:")
             for i, pct in enumerate(sorted_points, start=1):

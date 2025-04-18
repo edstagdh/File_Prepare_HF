@@ -630,7 +630,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
     temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
 
     if temp_output is None:
-        logger.debug(f"Already HEVC, skipping re-encode: {file_path}")
+        logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
         return True
 
     if temp_output is False:
@@ -777,7 +777,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
         None: If already encoded in HEVC.
         False: If encoding failed.
     """
-    if await is_hevc_encoded(file_path):
+    if await is_video_hevc_or_av1(file_path):
         return None
 
     width, height, bit_rate = await get_video_resolution(file_path)
@@ -881,19 +881,32 @@ async def generate_temp_filename(directory, original_name):
     return os.path.join(directory, f"{name}_temp{ext}")
 
 
-async def is_hevc_encoded(file_path):
-    """Check if a video file is encoded with HEVC using ffprobe."""
-    command = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+async def is_video_hevc_or_av1(file_path: str) -> bool:
+    """
+    Check if the video is encoded with HEVC (H.265) or AV1.
+    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise.
+    """
+    if not os.path.isfile(file_path):
+        return False
+
+    command = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name",
+        "-of", "json",
+        file_path
+    ]
 
     try:
-        stdout, stderr, code = await run_command(command)
-        # logger.debug(stderr)
+        result = run_command(command)
+        data = json.loads(result)
 
-        # Compare stdout with "hevc" instead of stderr
-        return stdout.strip().lower() == "hevc"
+        codec = data.get("streams", [{}])[0].get("codec_name", "").lower()
+
+        return codec in {"hevc", "av1"}
 
     except Exception as e:
-        logger.error(f"Error checking codec for {file_path}: {e}")
+        logger.error(f"Failed to check codec for {file_path}: {e}")
         return False
 
 
