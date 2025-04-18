@@ -37,6 +37,7 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
         excluded_files = config["EXCLUDED_FILES"]
         custom_output_path = config["CUSTOM_OUTPUT_PATH"]
         confirm_cut_points_required = config["CONFIRM_CUT_POINTS_REQUIRED"]
+        last_cut_point = config["LAST_CUT_POINT"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -53,8 +54,8 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
     logger.info(f"processing previews for file: {new_file_full_path}")
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
-                                  custom_output_path,
-                                  confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name)
+                                  custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
+                                  new_filename_base_name, last_cut_point)
     if not results:
         logger.error("Preview creation has failed, please check the log.")
         return False
@@ -107,8 +108,8 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
-                        confirm_cut_points_required,
-                        create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name):
+                        confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
+                        last_cut_point):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -271,7 +272,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points)
+                                                       print_cut_points, last_cut_point)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -426,13 +427,14 @@ async def generate_cut_points(
         preview_sheet_required,
         video_path,
         filename_without_ext,
-        print_cut_points
+        print_cut_points,
+        last_cut_point
 ):
     """Generate unique evenly spaced cut points with random variations."""
 
     while True:
         start_point = round(random.uniform(0.03, 0.05), 2)
-        end_point = round(random.uniform(0.98, 0.99), 2)
+        end_point = round(random.uniform(0.98, 0.99), 2) if last_cut_point != 0 else last_cut_point/duration
         cut_points = {start_point, end_point}
 
         num_cuts = num_of_segments - 1
