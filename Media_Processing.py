@@ -623,11 +623,11 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale):
     file_path = os.path.join(directory, new_filename)
     logger.info(f"Processing file: {file_path}")
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
 
     if temp_output is None:
         logger.debug(f"Already HEVC, skipping re-encode: {file_path}")
@@ -769,7 +769,7 @@ async def get_video_resolution(file_path):
         return None, None, None
 
 
-async def re_encode_to_hevc(file_path, is_vertical):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
     """Re-encode the given file to HEVC and show progress.
 
     Returns:
@@ -800,8 +800,8 @@ async def re_encode_to_hevc(file_path, is_vertical):
         "-map_metadata", "0"
     ]
 
-    # Add scale filter if resolution is higher than 1080p
-    if width and height:
+    # Add scale filter if resolution is higher than 1080p and downscaling is enabled
+    if re_encode_downscale and width and height:
         if not is_vertical and (width > 1920 or height > 1080):
             ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
         elif is_vertical and height > 1080:

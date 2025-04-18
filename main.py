@@ -39,6 +39,7 @@ async def process_files():
         posters_limit = config["posters_limit"]
         generate_hf_template = config["generate_hf_template"]
         template_file_name = config["template_name"]
+        re_encode_downscale = config["re_encode_downscale"]
 
     if generate_face_portrait_pic:
         from mtcnn import MTCNN
@@ -214,7 +215,7 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_filename, directory, keep_original_file, is_vertical]),
+                (re_encode_hevc, re_encode_video, [new_filename, directory, keep_original_file, is_vertical, re_encode_downscale]),
                 (download_cover_image, image_download_and_conversion, [image_url, tpdb_image_url, filename_base_name, new_filename_base_name, file_path]),
                 (generate_scorp_thumbnails, generate_scorp_thumbnails_and_conversion, [new_filename_base_name, directory, filename_base_name, scorp_exe_path]),
                 (generate_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path]),
