@@ -154,7 +154,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     """Validates filename against expected format."""
     base = os.path.splitext(filename)[0]
     return bool(re.fullmatch(
-        r'([A-Za-z]+)\.(\d{2})\.(\d{2})\.(\d{2})\.([A-Za-z]+(?:\.[A-Za-z]+)*)',
+        r'([A-Za-z0-9]+)\.(\d{2})\.(\d{2})\.(\d{2})\.([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)',
         base
     ))
 
