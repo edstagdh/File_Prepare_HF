@@ -154,7 +154,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     """Validates filename against expected format."""
     base = os.path.splitext(filename)[0]
     return bool(re.fullmatch(
-        r'([A-Za-z0-9]+)\.(\d{2})\.(\d{2})\.(\d{2})\.([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)',
+        r'([A-Za-z0-9\-!]+)\.(\d{2})\.(\d{2})\.(\d{2})\.([A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)',
         base
     ))
 
@@ -283,11 +283,8 @@ async def rename_file(file_path, new_filename):
     try:
         # Get the directory path where the file is located
         directory = os.path.dirname(file_path)
-        logger.debug(directory)
-        logger.debug(file_path)
         # Create the full new file path
         new_file_path = os.path.join(directory, new_filename)
-        logger.debug(new_file_path)
         if file_path != new_file_path:
             # Rename the file
             os.rename(file_path, new_file_path)

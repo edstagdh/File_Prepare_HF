@@ -68,7 +68,7 @@ async def process_files():
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
-    logger.debug(f"Finish pre processing in directory: {directory}")
+    # logger.debug(f"Finish pre processing in directory: {directory}")
 
     # Start Processing files
     logger.info("-" * 100)

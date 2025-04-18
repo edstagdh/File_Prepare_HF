@@ -229,7 +229,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 logger.error(f"Could not determine codec for {video_path}")
                 return False
 
-        except Exception:
+        except Exception as e:
             logger.exception()
             return False
 
@@ -427,7 +427,6 @@ async def generate_cut_points(
         last_cut_point
 ):
     """Generate unique evenly spaced cut points with random variations."""
-    logger.debug("5.0")
     while True:
         start_point = round(random.uniform(0.03, 0.05), 2)
         if last_cut_point == 0:
@@ -647,11 +646,11 @@ async def trim_concat_list_file(original_file: str, target_line_count) -> str:
         final_lines = lines
 
     # Sort lines by the number in 'cutpoint-<n>'
-    def extract_cutpoint_number(line):
+    def extract_cut_point_number(line):
         match = re.search(r'cutpoint-(\d+)', line)
         return int(match.group(1)) if match else float('inf')
 
-    final_lines.sort(key=extract_cutpoint_number)
+    final_lines.sort(key=extract_cut_point_number)
 
     # Write the new sorted file
     with open(new_file, "w") as dst:
@@ -862,7 +861,7 @@ async def get_video_metadata(file_path, char_break_line):
         try:
             num, denom = map(int, fps.split("/"))
             fps = round(num / denom, 2)
-        except Exception:
+        except Exception as e:
             fps = "N/A"
 
     except Exception as e:
@@ -1010,7 +1009,7 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
 
 async def create_video_from_image(image_path, output_path, fps, duration=1):
     """
-    Create a video from an image at the given FPS and duration.
+    Create a video from an image at the given FPS and duration
 
     :param image_path: Path to the input image.
     :param output_path: Path to the output video file.

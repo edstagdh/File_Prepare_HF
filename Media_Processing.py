@@ -634,7 +634,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return True
 
     if temp_output is False:
-        logger.error(f"Skipping deletion, re-encoding failed for {file_path}")
+        logger.error(f"Skipping deletion, processing failed for {file_path}")
         return False
 
     try:
@@ -777,8 +777,11 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
         None: If already encoded in HEVC.
         False: If encoding failed.
     """
-    if await is_video_hevc_or_av1(file_path):
+    encode_results = await is_video_hevc_or_av1(file_path)
+    if encode_results:  # Already encoded with HEVC/AV1
         return None
+    if encode_results is False:  # Not encoded with HEVC/AV1
+        return True
 
     width, height, bit_rate = await get_video_resolution(file_path)
 
@@ -884,7 +887,7 @@ async def generate_temp_filename(directory, original_name):
 async def is_video_hevc_or_av1(file_path: str) -> bool:
     """
     Check if the video is encoded with HEVC (H.265) or AV1.
-    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise.
+    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise, None if failed.
     """
     if not os.path.isfile(file_path):
         return False
@@ -898,16 +901,23 @@ async def is_video_hevc_or_av1(file_path: str) -> bool:
     ]
 
     try:
-        result = run_command(command)
-        data = json.loads(result)
+        stdout, stderr, returncode = await run_command(command)
 
+        if returncode != 0:
+            logger.error(f"ffprobe failed for {file_path}:\n{stderr}")
+            return False
+
+        data = json.loads(stdout)
         codec = data.get("streams", [{}])[0].get("codec_name", "").lower()
-
-        return codec in {"hevc", "av1"}
+        if codec in {"hevc", "av1"}:
+            codec_results = True
+            return codec_results
+        else:
+            return False
 
     except Exception as e:
         logger.error(f"Failed to check codec for {file_path}: {e}")
-        return False
+        return None
 
 
 async def get_video_codec(file_path):
