@@ -791,7 +791,6 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     ffmpeg_cmd = [
         "ffmpeg",
-        "-hwaccel", "cuda",
         "-i", file_path,
         "-map", "0:v",
         "-map", "0:a",
