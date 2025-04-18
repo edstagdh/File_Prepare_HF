@@ -360,24 +360,22 @@ async def generate_template_video(
         extension: str,
         directory: str,
         new_filename_base_name: str,
+        template_file_full_path: str
 ) -> bool:
-    # Path to the script's directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    template_path = os.path.join(script_dir, "HF_Template.txt")
-    media_info_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
+    media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
-    if not os.path.isfile(template_path):
-        raise FileNotFoundError(f"Template file not found: {template_path}")
+    if not os.path.isfile(template_file_full_path):
+        raise FileNotFoundError(f"Template file not found: {template_file_full_path}")
 
-    if not os.path.isfile(media_info_path):
-        raise FileNotFoundError(f"Media info file not found: {media_info_path}")
+    if not os.path.isfile(media_info_file_path):
+        raise FileNotFoundError(f"Media info file not found: {media_info_file_path}")
 
     # Load the template content
-    with open(template_path, "r", encoding="utf-8") as f:
+    with open(template_file_full_path, "r", encoding="utf-8") as f:
         template_content = f.read()
 
     # Load media info
-    with open(media_info_path, "r", encoding="utf-8") as f:
+    with open(media_info_file_path, "r", encoding="utf-8") as f:
         media_info = f.read()
 
     # Load JSON config

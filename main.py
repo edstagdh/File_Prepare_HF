@@ -8,7 +8,7 @@ from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files,
     generate_mediainfo_file, generate_template_video
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, image_download_and_conversion, generate_scorp_thumbnails_and_conversion, \
-    generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, is_hevc_encoded, get_video_codec
+    generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
 from Preview_Tool import create_preview_tool
 
 
@@ -38,11 +38,23 @@ async def process_files():
         keep_original_file = config["keep_original_file"]
         posters_limit = config["posters_limit"]
         generate_hf_template = config["generate_hf_template"]
+        template_file_name = config["template_name"]
 
     if generate_face_portrait_pic:
         from mtcnn import MTCNN
     else:
         MTCNN = None
+    template_file_full_path = None
+    if generate_hf_template:
+        if template_file_name != "":
+            template_file_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_file_name)
+            if not os.path.exists(template_file_full_path):
+                logger.error(f"Invalid template file path: {template_file_full_path}")
+                exit(35)
+        else:
+            logger.error(f"Invalid template file name: {template_file_name}")
+            exit(34)
+
     # Verify working path
     if not os.path.isdir(directory):
         logger.error("Please enter a valid directory path.")
@@ -210,7 +222,8 @@ async def process_files():
                 (generate_face_portrait_pic, generate_performer_profile_picture,
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
                 (generate_hf_template, generate_template_video,
-                 [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name]),
+                 [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
+                  template_file_full_path]),
             ]
 
             # Run each enabled optional step
