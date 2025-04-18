@@ -47,9 +47,6 @@ dist/
 *.cfg
 Config.json
 
-# Template Files
-HF_Template.txt
-
 # Resources Files
 Resources.json
 

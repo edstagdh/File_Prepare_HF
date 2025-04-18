@@ -4,16 +4,16 @@ import re
 from datetime import datetime
 from loguru import logger
 from pathlib import Path
-from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, generate_mediainfo_file
+from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
+    generate_mediainfo_file, generate_template_video
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, image_download_and_conversion, generate_scorp_thumbnails_and_conversion, \
-    generate_performer_profile_picture, re_encode_video, update_metadata
+    generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
 from Preview_Tool import create_preview_tool
 
 
 async def process_files():
     # Load Config file
-    global manual_mode
     config, exit_code = await load_config("Config.json")
     if not config:
         exit(exit_code)
@@ -37,6 +37,24 @@ async def process_files():
         re_encode_hevc = config["re_encode_hevc"]
         keep_original_file = config["keep_original_file"]
         posters_limit = config["posters_limit"]
+        generate_hf_template = config["generate_hf_template"]
+        template_file_name = config["template_name"]
+        re_encode_downscale = config["re_encode_downscale"]
+
+    if generate_face_portrait_pic:
+        from mtcnn import MTCNN
+    else:
+        MTCNN = None
+    template_file_full_path = None
+    if generate_hf_template:
+        if template_file_name != "":
+            template_file_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_file_name)
+            if not os.path.exists(template_file_full_path):
+                logger.error(f"Invalid template file path: {template_file_full_path}")
+                exit(35)
+        else:
+            logger.error(f"Invalid template file name: {template_file_name}")
+            exit(34)
 
     # Verify working path
     if not os.path.isdir(directory):
@@ -44,28 +62,33 @@ async def process_files():
         exit(27)
 
     # Start Pre Processing files
-    logger.info("-" * 50)
+    logger.info("-" * 100)
     logger.info(f"Start pre processing in directory: {directory}")
     pre_process_results, exit_code = await pre_process_files(directory)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
+    # logger.debug(f"Finish pre processing in directory: {directory}")
 
     # Start Processing files
-    logger.info("-" * 50)
+    logger.info("-" * 100)
     logger.info(f"Start processing in directory: {directory}")
 
     total_files, processed_files = 0, 0
-    failed_files, skipped_files, successful_files = [], [], []
+    failed_files, successful_files = [], []
 
-    # First pass to count total .mp4 files
-    for _, _, files in os.walk(directory):
-        total_files += len([f for f in files if f.endswith(".mp4")])
+    # First pass: Count only .mp4 files in the given directory (no sub_folders)
+    total_files = len([
+        f for f in os.listdir(directory)
+        if os.path.isfile(os.path.join(directory, f)) and f.lower().endswith(".mp4")
+    ])
     logger.info(f"Total amount of files: {total_files}")
 
-    # Second pass to start working on files
-
-    mp4_files = Path(directory).rglob("*.mp4")
+    # Second pass: Get the list of .mp4 files in the same directory (not sub_folders)
+    mp4_files = [
+        f for f in Path(directory).iterdir()
+        if f.is_file() and f.suffix.lower() == ".mp4"
+    ]
     for file in mp4_files:
         try:
             filename = str(file.name)  # Get the full filename (with extension)
@@ -115,8 +138,9 @@ async def process_files():
 
             scene_api_date = f"{year_name}-{month}-{day}"
 
-            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio = await get_data_from_api(clean_tpdb_check_filename, scene_api_date,
-                                                                                                                                manual_mode)
+            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description = await get_data_from_api(clean_tpdb_check_filename,
+                                                                                                                                                   scene_api_date,
+                                                                                                                                                   manual_mode)
             month_name = datetime.strptime(month, "%m").strftime("%B")
             scene_pretty_date = f"{year_name}-{month_name}-{day}"
             tpdb_scenes_url += slug
@@ -132,7 +156,7 @@ async def process_files():
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
             logger.info(f"End file: {filename}")
-            failed_files.append(filename)
+            failed_files.append(str(file))
             continue  # Skip to the next file
 
         formatted_filename_performers_names = await format_performers(performers, 2)  # This includes sanitization of performer names
@@ -175,29 +199,58 @@ async def process_files():
             existing_description = await get_existing_description(new_file_full_path)
             description = f"TPDB URL: {tpdb_scenes_url} | Scene URL: {scene_url}"
             if existing_title == new_title and existing_description == description:
-                logger.info(f"File: {file.name} - Title and Description already exist and are identical")
+                logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
             else:
                 # logger.info(f"File: {file.name} - Title and Description already exist and are identical")
                 results_metadata = await update_metadata(new_file_full_path, new_title, description, re_encode_hevc)
                 if not results_metadata:
                     logger.error(f"Failed to modify file: {new_filename}")
                     failed_files.append(new_file_full_path)
-            new_filename_base_name, extension = os.path.splitext(new_filename)
-            if re_encode_hevc:
-                await re_encode_video(new_filename, directory, keep_original_file)
-            if download_cover_image:
-                await image_download_and_conversion(image_url, tpdb_image_url, filename_base_name, new_filename_base_name, file_path)
-            if generate_scorp_thumbnails:
-                await generate_scorp_thumbnails_and_conversion(new_filename_base_name, directory, filename_base_name, scorp_exe_path)
-            if generate_mediainfo:
-                await generate_mediainfo_file(new_file_full_path, mediaarea_mediainfo_path)
-            if generate_preview:
-                await create_preview_tool(new_file_full_path, directory, new_filename_base_name)
-            if generate_face_portrait_pic:
-                await generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit)
+                    continue  # Skip to the next file
 
+            new_filename_base_name, extension = os.path.splitext(new_filename)
+            fps = await get_video_fps(new_file_full_path)
+            resolution, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
+            codec = await get_video_codec(new_file_full_path)
+
+            # Define all optional steps and their corresponding conditions and functions
+            optional_steps = [
+                (re_encode_hevc, re_encode_video, [new_filename, directory, keep_original_file, is_vertical, re_encode_downscale]),
+                (download_cover_image, image_download_and_conversion, [image_url, tpdb_image_url, filename_base_name, new_filename_base_name, file_path]),
+                (generate_scorp_thumbnails, generate_scorp_thumbnails_and_conversion, [new_filename_base_name, directory, filename_base_name, scorp_exe_path]),
+                (generate_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path]),
+                (generate_preview, create_preview_tool, [new_file_full_path, directory, new_filename_base_name]),
+                (generate_face_portrait_pic, generate_performer_profile_picture,
+                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
+                (generate_hf_template, generate_template_video,
+                 [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
+                  template_file_full_path]),
+            ]
+
+            # Run each enabled optional step
+            for flag, func, args in optional_steps:
+                if flag:
+                    result = await func(*args)
+                    if not result:
+                        logger.info(f"End file: {filename}")
+                        if new_file_full_path not in failed_files:
+                            failed_files.append(new_file_full_path)
+                        continue  # Skip to the next file
+            logger.info(f"End file: {filename}")
+            successful_files.append(new_file_full_path)
         except Exception as e:
-            logger.exception()
+            logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
+            logger.info(f"End file: {filename}")
+            failed_files.append(str(file))
+            continue  # Skip to the next file
+
+    # Finished processing
+    logger.info("-" * 100)
+    logger.info(f"Finish processing in directory: {directory}")
+    for success in successful_files:
+        logger.info(f"Successful file: {success}")
+    for failed in failed_files:
+        logger.warning(f"Failed file: {failed}")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@
   "31": "Invalid day format",
   "32": "Invalid data returned from API",
   "33": "Neither version nor date are acceptable",
+  "34": "Invalid Template file name",
+  "35": "Invalid Template file path",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"
