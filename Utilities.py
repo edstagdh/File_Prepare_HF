@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime
 from loguru import logger
 
@@ -424,3 +425,15 @@ async def generate_template_video(
         return False
 
     return True
+
+
+async def parse_version(version_str: str) -> tuple:
+    return tuple(map(int, version_str.strip().split('.')))
+
+
+async def is_version_between(min_version_str: str, max_version_str: str) -> bool:
+    current = sys.version_info[:3]
+    min_version = await parse_version(min_version_str)
+    max_version = await parse_version(max_version_str)
+    return min_version <= current < max_version
+

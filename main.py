@@ -1,11 +1,12 @@
 import os
 import asyncio
 import re
+import sys
 from datetime import datetime
 from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
-    generate_mediainfo_file, generate_template_video
+    generate_mediainfo_file, generate_template_video, is_version_between
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, image_download_and_conversion, generate_scorp_thumbnails_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
@@ -40,6 +41,15 @@ async def process_files():
         generate_hf_template = config["generate_hf_template"]
         template_file_name = config["template_name"]
         re_encode_downscale = config["re_encode_downscale"]
+        python_min_version_supported = config["python_min_version_supported"]
+        python_max_version_supported = config["python_max_version_supported"]
+
+    if await is_version_between(python_min_version_supported, python_max_version_supported):
+        # logger.debug(f"✅ Python {sys.version.split()[0]} is within range {python_min_version_supported} to {python_max_version_supported}.")
+        pass
+    else:
+        logger.error(f"❌ Python {sys.version.split()[0]} is NOT in range {python_min_version_supported} to {python_max_version_supported}.")
+        exit(36)
 
     if generate_face_portrait_pic:
         from mtcnn import MTCNN
