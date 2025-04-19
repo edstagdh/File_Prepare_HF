@@ -19,5 +19,8 @@
   "target_size_height": 230,
   "zoom_factor": 2.5,
   "blur_kernel_size": 3,
-  "posters_limit": 3
+  "posters_limit": 3,
+  "python_min_version_supported": "3.9",
+  "python_max_version_supported": "3.12",
+  "Code_Version": "2.13"
 }
