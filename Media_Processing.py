@@ -517,7 +517,7 @@ async def overlay_text(
 
 async def detect_faces(image_path, MTCNN):  # Adjust the threshold here
 
-    threshold = 0.95
+    threshold = 0.93
 
     detector = MTCNN()
     # Load the image

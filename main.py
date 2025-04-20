@@ -13,6 +13,14 @@ from Media_Processing import get_existing_title, get_existing_description, image
 from Preview_Tool import create_preview_tool
 
 
+async def is_supported_major_minor(min_major_minor, max_major_minor) -> bool:
+    current_major, current_minor = sys.version_info[:2]
+    min_major, min_minor = min_major_minor
+    max_major, max_minor = max_major_minor
+
+    return (min_major, min_minor) <= (current_major, current_minor) <= (max_major, max_minor)
+
+
 async def process_files():
     # Load Config file
     config, exit_code = await load_config("Config.json")
@@ -41,14 +49,15 @@ async def process_files():
         generate_hf_template = config["generate_hf_template"]
         template_file_name = config["template_name"]
         re_encode_downscale = config["re_encode_downscale"]
-        python_min_version_supported = config["python_min_version_supported"]
-        python_max_version_supported = config["python_max_version_supported"]
+        python_min_version_supported = tuple(config["python_min_version_supported"])
+        python_max_version_supported = tuple(config["python_max_version_supported"])
+        code_version = config["Code_Version"]
+        bad_words = config["bad_words"]
 
-    if await is_version_between(python_min_version_supported, python_max_version_supported):
-        # logger.debug(f"✅ Python {sys.version.split()[0]} is within range {python_min_version_supported} to {python_max_version_supported}.")
-        pass
+    if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
+        logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
     else:
-        logger.error(f"❌ Python {sys.version.split()[0]} is NOT in range {python_min_version_supported} to {python_max_version_supported}.")
+        logger.error(f"❌ Python {sys.version.split()[0]} is NOT within supported range {python_min_version_supported} to {python_max_version_supported}.")
         exit(36)
 
     if generate_face_portrait_pic:
@@ -62,6 +71,9 @@ async def process_files():
             if not os.path.exists(template_file_full_path):
                 logger.error(f"Invalid template file path: {template_file_full_path}")
                 exit(35)
+        elif not generate_mediainfo:
+            logger.error("Conflict in configration, in order to generate HFtemplate file, generating media info file is a must")
+            exit(37)
         else:
             logger.error(f"Invalid template file name: {template_file_name}")
             exit(34)
@@ -74,7 +86,7 @@ async def process_files():
     # Start Pre Processing files
     logger.info("-" * 100)
     logger.info(f"Start pre processing in directory: {directory}")
-    pre_process_results, exit_code = await pre_process_files(directory)
+    pre_process_results, exit_code = await pre_process_files(directory, bad_words)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
@@ -148,12 +160,22 @@ async def process_files():
 
             scene_api_date = f"{year_name}-{month}-{day}"
 
-            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description = await get_data_from_api(clean_tpdb_check_filename,
-                                                                                                                                                   scene_api_date,
-                                                                                                                                                   manual_mode)
+            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date = await get_data_from_api(
+                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url)
+            if all(value is None for value in (new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description)):
+                # All values are None
+                failed_files.append(filename)
+                continue
+            if scene_date != scene_api_date:
+                year_name, month, day = scene_date.split("-")
+                year = year_name[-2:]
+
+            if scene_description is None:
+                scene_description = "Scene description not found"
+
             month_name = datetime.strptime(month, "%m").strftime("%B")
             scene_pretty_date = f"{year_name}-{month_name}-{day}"
-            tpdb_scenes_url += slug
+            tpdb_scene_url = tpdb_scenes_url + slug
             error_prefix = f"File: {filename} - Failed to get metadata via API"
 
             if not new_title or new_title == "Multiple results":
@@ -183,7 +205,7 @@ async def process_files():
             suffix = ""
 
         # Construct new filename
-        new_filename = f"{formatted_site}.{parts[1]}.{month}.{day}.{formatted_filename_performers_names}"
+        new_filename = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
         if suffix:
             new_filename += f".{suffix}"
         new_filename += extension
@@ -207,9 +229,10 @@ async def process_files():
             # Check existing metadata
             existing_title = await get_existing_title(new_file_full_path)
             existing_description = await get_existing_description(new_file_full_path)
-            description = f"TPDB URL: {tpdb_scenes_url} | Scene URL: {scene_url}"
+            description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
             if existing_title == new_title and existing_description == description:
-                logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                pass
             else:
                 # logger.info(f"File: {file.name} - Title and Description already exist and are identical")
                 results_metadata = await update_metadata(new_file_full_path, new_title, description, re_encode_hevc)
@@ -234,7 +257,7 @@ async def process_files():
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
                 (generate_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
-                  template_file_full_path]),
+                  template_file_full_path, code_version]),
             ]
 
             # Run each enabled optional step

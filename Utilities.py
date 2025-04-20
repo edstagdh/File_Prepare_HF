@@ -116,15 +116,26 @@ async def load_config(config_name):
         return None, 99  # Unknown exception
 
 
-async def clean_filename(filename: str) -> str:
+async def replace_episode_tag(filename: str) -> str:
+    """
+    Replace .E##. with .00.00.00.Episode.##. in the filename.
+    Supports episode numbers from 1 to 9999.
+    """
+    return re.sub(r'\.E(\d{1,4})\.', r'.00.00.00.Episode.\1.', filename)
+
+
+async def clean_filename(filename: str, bad_words: list) -> str:
     """Removes unwanted characters and standardizes casing rules."""
     base_name, extension = os.path.splitext(filename)
 
-    # Remove prefix if present
+    # Remove unwanted parts in filename
     base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
+    # base_name = await replace_episode_tag(base_name)
     base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+    for word in bad_words:
+        base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
 
-    # Remove unwanted characters
+        # Remove unwanted characters
     base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
 
     # Capitalize segments after the first
@@ -160,7 +171,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory):
+async def pre_process_files(directory, bad_words):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -170,7 +181,7 @@ async def pre_process_files(directory):
                 logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
                 return False, 12
 
-            new_filename = await clean_filename(filename)
+            new_filename = await clean_filename(filename, bad_words)
             old_path = os.path.join(directory, filename)
             new_path = os.path.join(directory, new_filename)
 
@@ -358,7 +369,8 @@ async def generate_template_video(
         extension: str,
         directory: str,
         new_filename_base_name: str,
-        template_file_full_path: str
+        template_file_full_path: str,
+        code_version: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -405,6 +417,7 @@ async def generate_template_video(
         "{COVER_IMAGE}": cover_image,
         "{PREVIEW_SHEET}": preview_sheet_image,
         "{STATIC_THUMBNAILS_SHEET}": thumbnails_image,
+        "{CODE_VERSION}": code_version
     }
     try:
         # Replace placeholders

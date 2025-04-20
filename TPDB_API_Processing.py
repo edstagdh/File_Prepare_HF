@@ -30,23 +30,23 @@ async def load_api_credentials(mode):
         return None, None, None
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url):
     max_retries = 3
     delay = 5
     try:
         api_auth, api_scenes_url, api_sites_url = await load_api_credentials(mode=1)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
         if response_data is None:
-            return None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date)
+            return None, None, None, None, None, None, None, None, None, None
+        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url)
 
         if not valid_entries:
-            logger.error("No matching entries for the provided date.")
-            return None, None, None, None, None, None, None, None, None
+            logger.error(f"No matching entries for the provided date for string: {string_parse}")
+            return None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
@@ -55,12 +55,13 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
         alt_image = selected_entry.get("background", {}).get("full")
         scene_description = selected_entry.get('description')
+        scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
         site = selected_entry.get("site", {}).get("name")
@@ -91,15 +92,15 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
                 female_performers.append((user_input, ""))
 
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
 
     except Exception as e:
         logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None
 
 
 async def send_request(api_url, api_auth, string_parse, max_retries, delay):
@@ -262,16 +263,16 @@ async def get_user_input():
             return None  # Return None in case of unexpected errors
 
 
-async def filter_entries_by_date(response_data, scene_date):
+async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
     try:
         valid_entries = []
-        # logger.debug(response_data)
-        # logger.debug(scene_date)
-        scene_date = datetime.strptime(scene_date, '%Y-%m-%d')  # Assuming scene_date is a string in 'YYYY-MM-DD' format
+        unmatched_entries = []
+        scene_date = datetime.strptime(scene_date, '%Y-%m-%d')
         for item in response_data['data']:
+            slug = item.get('slug', '').lower()
+            full_scene_url = f"{tpdb_scenes_url}{slug}"
             title = item.get('title', '').lower()
             item_date = datetime.strptime(item.get('date', ''), '%Y-%m-%d')  # Assuming item date is also 'YYYY-MM-DD'
-
             # Check if title contains 'interview'
             if "interview" in title:
                 sleep(0.5)
@@ -285,7 +286,6 @@ async def filter_entries_by_date(response_data, scene_date):
             # Exact date match
             if item_date == scene_date:
                 valid_entries.append(item)
-
             # Date range check (within ±1 to ±4 days)
             elif abs((item_date - scene_date).days) in range(1, 5):
                 sleep(0.5)
@@ -296,12 +296,27 @@ async def filter_entries_by_date(response_data, scene_date):
                     logger.warning(f"Scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date and was added.")
                 else:
                     logger.info(f"Scene '{item.get('title')}' was not included due to date difference.")
+            else:
+                unmatched_entries.append((item.get('title'), full_scene_url, item))
+        # If still no valid entries, show unmatched ones for manual selection
+        if not valid_entries and unmatched_entries:
+            logger.warning("No entries matched the exact or close date range, but the following scenes were found with some confidence to be matched:")
+            for idx, (title, url, _) in enumerate(unmatched_entries, 1):
+                logger.info(f"{idx}. {title} — {url}")
 
-        if valid_entries:
-            return valid_entries
-        else:
-            logger.error("No matching entries for the provided date.")
-            return None
+            sleep(0.5)
+            user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
+            if user_input.isdigit():
+                selection_index = int(user_input) - 1
+                if 0 <= selection_index < len(unmatched_entries):
+                    valid_entries.append(unmatched_entries[selection_index][2])
+                    logger.info(f"Manually selected entry: {unmatched_entries[selection_index][0]}")
+                else:
+                    logger.warning("Invalid selection index. No entry added.")
+            else:
+                logger.info("No entry selected manually.")
+
+        return valid_entries if valid_entries else None
 
     except Exception as e:
         logger.error(f"Error filtering entries by date: {str(e)}")

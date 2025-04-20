@@ -173,7 +173,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
     create_gif_preview_sheet = updated_create_flags['gif_sheet']
     create_webm_preview_sheet = updated_create_flags['webm_sheet']
 
-    logger.debug(updated_create_flags)
+    # logger.debug(f"Preview flags: {updated_create_flags}")
 
     if any([create_webp_preview, create_gif_preview, create_webp_preview_sheet, create_gif_preview_sheet, create_webm_preview, create_webm_preview_sheet]):
         # Verify video file information
@@ -240,7 +240,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
         # Determine if video is vertical
         is_vertical = width < height
-        logger.debug(f"Processing file: {video_path}, Resolution: {width}x{height}, Vertical: {is_vertical}")
+        # logger.debug(f"Processing file: {video_path}, Resolution: {width}x{height}, Vertical: {is_vertical}")
 
         # Get video duration
         duration_output, stderr, exit_code = await run_command(
@@ -427,17 +427,27 @@ async def generate_cut_points(
         last_cut_point
 ):
     """Generate unique evenly spaced cut points with random variations."""
+    calc_failed_counter = 0
     while True:
-        start_point = round(random.uniform(0.03, 0.05), 2)
+        if calc_failed_counter % 50 == 0 and calc_failed_counter > 0:
+            if segment_cut_duration <= 0.1:
+                logger.error("Segment duration too short to reduce")
+                break
+            else:
+                segment_cut_duration = round(segment_cut_duration - 0.1, 2)
+                logger.debug(f"cut point generation has failed {calc_failed_counter} times, reducing segment cut duration by 0.1 to accommodate, updated value:"
+                             f" {segment_cut_duration}")
+
+        start_point = round(random.uniform(0.02, 0.08), 3)
         if last_cut_point == 0:
-            end_point = round(random.uniform(0.98, 0.99), 2)
+            end_point = round(random.uniform(0.975, 0.99), 3)
         else:
             end_point = last_cut_point / duration
         cut_points = {start_point, end_point}
         num_cuts = num_of_segments - 1
         step = (end_point - start_point) / num_cuts
         for i in range(1, num_cuts):
-            next_point = round(start_point + step * i + random.uniform(-0.02, 0.02), 2)
+            next_point = round(start_point + step * i + random.uniform(-0.02, 0.02), 3)
             if start_point < next_point < end_point and next_point not in blacklisted_cut_points:
                 cut_points.add(next_point)
         if len(cut_points) != num_of_segments:
@@ -460,21 +470,22 @@ async def generate_cut_points(
             for i, pct in enumerate(sorted_points, start=1):
                 time_in_seconds = pct * duration
                 formatted_time = await format_duration(time_in_seconds)
-                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}")
+                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}({time_in_seconds})")
 
         # Convert percentages to absolute seconds
-        cut_points_seconds = [duration * pct for pct in sorted_points]
+        cut_points_seconds = [round(duration * pct) for pct in sorted_points]
 
         # Check for scene changes at each cut point
         scene_change_found = False
         for i, ts in enumerate(cut_points_seconds, start=1):
             scene_at_cut = await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration)
             if scene_at_cut:
-                logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
+                # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
                 scene_change_found = True
                 break
 
         if scene_change_found:
+            calc_failed_counter += 1
             continue
 
         temp_files_preview = await generate_video_segments(
@@ -499,6 +510,8 @@ async def generate_cut_points(
             continue
 
         return temp_files_preview
+    if not temp_files_preview:
+        logger.error("Failed to generate cut points")
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
@@ -557,23 +570,46 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_duration):
     """
     Check for a scene change around a specific timestamp in a video.
-    Looks at a short window to detect abrupt changes.
+    Looks at a short window to detect abrupt changes, including frames that aren't keyframes.
 
-    :param segment_cut_duration:
+    :param segment_cut_duration: Duration of the segment to check for scene changes.
     :param video_path: Path to the video file.
     :param timestamp: Time in seconds to check for scene change.
     :return: True if scene change detected, else False.
     """
-    scene_threshold = 0.3  # default value for scene detection.
+    scene_threshold = 0.2
     try:
+        # Run FFmpeg command to get the frame information
         probe_command = (
-            f'ffmpeg -hide_banner -ss {max(timestamp - 0.5, 0)} -t {segment_cut_duration} -i "{video_path}" '
+            f'ffmpeg -hide_banner -ss {max(timestamp - 0.1, 0)} -t {segment_cut_duration + 0.1} -i "{video_path}" '
             f'-vf "select=\'gt(scene,{scene_threshold})\',showinfo" -an -f null -'
         )
+
+        # logger.debug(f"Running command: {probe_command}")
         stdout, stderr, exit_code = await run_command(probe_command)
-        return "scene_score" in stderr
+
+        # Check for errors in stderr
+        if "Error" in stderr:
+            logger.error(f"Error in ffmpeg execution: {stderr}")
+            return False
+
+        # Log stdout and stderr for debugging
+        # logger.debug(f"stderr: {stderr}")
+
+        # Check for scene change in the output
+        scene_change_detected = False
+        for line in stderr.splitlines():
+            if "pts_time" in line:  # Look for the frame's timestamp
+                pts_time = float(line.split('pts_time:')[1].split()[0])  # Extract pts_time
+                change_time = timestamp + pts_time
+                scene_change_detected = True
+                # logger.debug(f"Scene change detected at exact time: {change_time:.2f}s, Regenerating...")
+                break
+
+        return scene_change_detected
+
     except Exception as e:
-        logger.error(f"Failed to check scene at timestamp {timestamp:.2f}s: {e}")
+        logger.exception(f"Failed to check scene at timestamp {timestamp:.2f}s: {e}")
         return False
 
 
@@ -828,8 +864,8 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             else:
                 results += f"GIF preview saved: {preview_sheet_gif}\n"
 
-        logger.info("Thumbnail sheet generation completed successfully.")
-        logger.info(results)
+        # logger.info("Thumbnail sheet generation completed successfully.")
+        # logger.info(results)
 
     except Exception as e:
         logger.exception(f"Exception occurred in generate_and_run_ffmpeg_commands: {str(e)}")
