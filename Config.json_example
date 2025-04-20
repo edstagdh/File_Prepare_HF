@@ -21,7 +21,7 @@
   "blur_kernel_size": 3,
   "posters_limit": 3,
   "python_min_version_supported": [3, 9],
-  "python_max_version_supported": [3, 12],
+  "python_max_version_supported": [3, 10],
   "Code_Version": "V2.13",
   "bad_words": [".Hardcore"]
 }

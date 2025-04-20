@@ -139,6 +139,13 @@ async def process_files():
             # Assign the flags based on the results
             vr2normal, upscaled, bts_video = file_flags["vr2normal"], file_flags["upscaled"], file_flags["bts"]
 
+            # Check for Part in file base name
+            match = re.search(r"\.part\.\d+", filename_base_name, re.IGNORECASE)
+            if match:
+                part_number = match.group(0)
+            else:
+                part_number = ""
+
             # Split filename into parts
             parts = filename_base_name.split('.')
 
@@ -205,7 +212,7 @@ async def process_files():
             suffix = ""
 
         # Construct new filename
-        new_filename = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
+        new_filename = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{part_number}"
         if suffix:
             new_filename += f".{suffix}"
         new_filename += extension

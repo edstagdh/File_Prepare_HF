@@ -36,6 +36,7 @@
 
 0. **Prerequisites**:
 
+   - Python version 3.10(any sub versions should work)
    - TPDB credentials(API Key).
    - MP4 extension.
    - Valid HF template file.
@@ -44,6 +45,8 @@
    Note - this still might not be enough for a match in TPDB.
    ```
    STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
+   or
+   STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.PART.NUMBER.EXTENSION
    or
    STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
    ```
