@@ -23,5 +23,5 @@
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 12],
   "Code_Version": "V2.13",
-  "bad_words": [".Hardcore", ".part.1", ".part.2", ".part.3", ".part.4", ".part.5", ".part.6", ".part.7"]
+  "bad_words": [".Hardcore"]
 }
