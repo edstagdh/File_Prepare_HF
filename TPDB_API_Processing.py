@@ -1,7 +1,9 @@
 import json
+import re
 import requests
-from loguru import logger
+from num2words import num2words
 import time
+from loguru import logger
 from time import sleep
 from datetime import datetime
 from typing import Optional
@@ -30,7 +32,7 @@ async def load_api_credentials(mode):
         return None, None, None
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match):
     max_retries = 3
     delay = 5
     try:
@@ -40,7 +42,12 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             return None, None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        if response_data is None:
+        if response_data is None or not response_data.get('data') and part_match:
+            string_parse_fallback = await convert_number_suffix_to_word(string_parse)
+            if string_parse_fallback != string_parse:
+                response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
+
+        if response_data is None or not response_data.get('data'):
             return None, None, None, None, None, None, None, None, None, None
         valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url)
 
@@ -244,12 +251,12 @@ async def get_user_input():
     If 'no', returns None.
     Continues prompting until a valid response is given.
     """
+    temp_performers = []
     while True:
         try:
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
-
             if response == "yes" or response == "y":
-                temp_performers = input("Enter Performers Manually: ").strip()
+                temp_performers.append(input("Enter Performers Manually: "))
                 if temp_performers:
                     female_performers = temp_performers
                     return female_performers
@@ -421,3 +428,21 @@ async def extract_performer_posters(performer_data: dict, posters_limit: int) ->
     except Exception:
         logger.exception("Error extracting poster URLs")
         return None
+
+
+async def convert_number_suffix_to_word(s: str) -> str:
+    """
+    Converts a numeric suffix in a string like '.part.1' to a word form like '.part.one'.
+
+    Args:
+        s (str): Input string with a numeric suffix.
+
+    Returns:
+        str: Modified string with the number converted to words.
+    """
+    match = re.search(r"(.*\.part\.)(\d+)$", s, re.IGNORECASE)
+    if match:
+        prefix, number = match.groups()
+        number_word = num2words(int(number))
+        return f"{prefix}{number_word}"
+    return s

@@ -36,7 +36,7 @@
 
 0. **Prerequisites**:
 
-   - Python version 3.10(any sub versions should work)
+   - Python version 3.10(any sub versions should work) for maximum compatibility.
    - TPDB credentials(API Key).
    - MP4 extension.
    - Valid HF template file.
@@ -50,12 +50,20 @@
    or
    STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
    ```
-
+<br>
 1. **Configure Settings**:
 
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
    - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials.
-
+   - If you intend to you Scrop VTM(Video Thumbnails Maker), Configure the settings as you like in the VTM with the following settings being a prerequisite:
+     - Set output format file to ".jpg" file
+     - add suffix "_thumbnails"
+     - "Remove video extension" from output file name, example output format:
+     ```"Studio.YY.MM.DD.FName.LName_thumbnails.jpg"```
+     
+   If you would like a template for VTM, you can find it here: Resources/edstagdh.vtm
+   <br>This does not replace configuring the required settings for output file name/format.  
+<br>
 2. **Run the Main Script**:
 
    ```bash

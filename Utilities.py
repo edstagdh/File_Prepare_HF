@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from loguru import logger
 
-CLEAN_CHARS = "!@#$%^&*()_+=' "
+CLEAN_CHARS = "!@#$%^&*()_+=’' "
 
 
 async def run_command(command):
@@ -297,7 +297,7 @@ async def rename_file(file_path, new_filename):
         directory = os.path.dirname(file_path)
         # Create the full new file path
         new_file_path = os.path.join(directory, new_filename)
-        if file_path != new_file_path:
+        if file_path.lower() != new_file_path.lower():
             # Rename the file
             os.rename(file_path, new_file_path)
             logger.info(f"Renamed file: {file_path} -> {new_file_path}")

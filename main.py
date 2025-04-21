@@ -140,9 +140,9 @@ async def process_files():
             vr2normal, upscaled, bts_video = file_flags["vr2normal"], file_flags["upscaled"], file_flags["bts"]
 
             # Check for Part in file base name
-            match = re.search(r"\.part\.\d+", filename_base_name, re.IGNORECASE)
-            if match:
-                part_number = match.group(0)
+            part_match = re.search(r"\.part\.\d+", filename_base_name, re.IGNORECASE)
+            if part_match:
+                part_number = part_match.group(0)
             else:
                 part_number = ""
 
@@ -168,7 +168,7 @@ async def process_files():
             scene_api_date = f"{year_name}-{month}-{day}"
 
             new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date = await get_data_from_api(
-                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url)
+                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url, part_match)
             if all(value is None for value in (new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description)):
                 # All values are None
                 failed_files.append(filename)
@@ -276,6 +276,7 @@ async def process_files():
                         if new_file_full_path not in failed_files:
                             failed_files.append(new_file_full_path)
                         continue  # Skip to the next file
+            processed_files += 1
             logger.info(f"End file: {filename}")
             successful_files.append(new_file_full_path)
         except Exception as e:
