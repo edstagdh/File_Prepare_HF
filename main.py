@@ -6,19 +6,11 @@ from datetime import datetime
 from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
-    generate_mediainfo_file, generate_template_video, is_version_between
+    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, image_download_and_conversion, generate_scorp_thumbnails_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
 from Preview_Tool import create_preview_tool
-
-
-async def is_supported_major_minor(min_major_minor, max_major_minor) -> bool:
-    current_major, current_minor = sys.version_info[:2]
-    min_major, min_minor = min_major_minor
-    max_major, max_minor = max_major_minor
-
-    return (min_major, min_minor) <= (current_major, current_minor) <= (max_major, max_minor)
 
 
 async def process_files():
@@ -86,7 +78,7 @@ async def process_files():
     # Start Pre Processing files
     logger.info("-" * 100)
     logger.info(f"Start pre processing in directory: {directory}")
-    pre_process_results, exit_code = await pre_process_files(directory, bad_words)
+    pre_process_results, exit_code = await pre_process_files(directory, bad_words, mode=1)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
@@ -167,8 +159,8 @@ async def process_files():
 
             scene_api_date = f"{year_name}-{month}-{day}"
 
-            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date = await get_data_from_api(
-                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url, part_match)
+            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template)
             if all(value is None for value in (new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description)):
                 # All values are None
                 failed_files.append(filename)
@@ -213,9 +205,6 @@ async def process_files():
 
         # Construct new filename
         new_filename = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{part_number}"
-        if suffix:
-            new_filename += f".{suffix}"
-        new_filename += extension
 
         # Format performer names
         formatted_names = await format_performers(performers, 1)
@@ -226,6 +215,14 @@ async def process_files():
         if suffix:
             new_title_parts.append(suffix)
         new_title = " - ".join(new_title_parts)
+
+        # Verify OS file name length limit:
+        if len(new_filename) > 200:
+            safe_title = await clean_filename(new_title, bad_words, mode=2)
+            new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{part_number}"
+        if suffix:
+            new_filename += f".{suffix}"
+        new_filename += extension
 
         # Rename existing file to new filename if needed
         new_file_full_path = os.path.join(directory, new_filename)
@@ -264,7 +261,7 @@ async def process_files():
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
                 (generate_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
-                  template_file_full_path, code_version]),
+                  template_file_full_path, code_version, scene_tags]),
             ]
 
             # Run each enabled optional step

@@ -124,27 +124,33 @@ async def replace_episode_tag(filename: str) -> str:
     return re.sub(r'\.E(\d{1,4})\.', r'.00.00.00.Episode.\1.', filename)
 
 
-async def clean_filename(filename: str, bad_words: list) -> str:
+async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
     """Removes unwanted characters and standardizes casing rules."""
-    base_name, extension = os.path.splitext(filename)
 
-    # Remove unwanted parts in filename
-    base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
-    # base_name = await replace_episode_tag(base_name)
-    base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
-    for word in bad_words:
-        base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
-
+    if mode == 1:
+        base_name, extension = os.path.splitext(input_string)
+        # Remove unwanted parts in filename
+        base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
+        # base_name = await replace_episode_tag(base_name)
+        base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+        for word in bad_words:
+            base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
         # Remove unwanted characters
-    base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
+        base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
 
-    # Capitalize segments after the first
-    parts = base_name.split('.')
-    for i in range(1, len(parts)):
-        if parts[i].lower() not in ["and", "vr2normal", "bts"]:
-            parts[i] = parts[i].capitalize()
+        # Capitalize segments after the first
+        parts = base_name.split('.')
+        for i in range(1, len(parts)):
+            if parts[i].lower() not in ["and", "vr2normal", "bts"]:
+                parts[i] = parts[i].capitalize()
+        return '.'.join(parts) + extension
 
-    return '.'.join(parts) + extension
+    elif mode == 2:
+        # Remove unwanted characters
+        clean_title = input_string.translate(str.maketrans("", "", CLEAN_CHARS))
+        return clean_title
+    else:
+        return ""
 
 
 async def sanitize_site_filename_part(input_str):
@@ -157,8 +163,9 @@ async def sanitize_site_filename_part(input_str):
     Returns:
         str: The sanitized string.
     """
-    translation_table = str.maketrans("", "", "!@#$%^&*()_+=' ")
-    sanitized = input_str.translate(translation_table)
+    translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
+    sanitized = input_str.replace(":", "-")
+    sanitized = sanitized.translate(translation_table)
     return sanitized.replace(".", " ")
 
 
@@ -171,7 +178,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory, bad_words):
+async def pre_process_files(directory, bad_words, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -181,7 +188,7 @@ async def pre_process_files(directory, bad_words):
                 logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
                 return False, 12
 
-            new_filename = await clean_filename(filename, bad_words)
+            new_filename = await clean_filename(filename, bad_words, mode)
             old_path = os.path.join(directory, filename)
             new_path = os.path.join(directory, new_filename)
 
@@ -370,7 +377,8 @@ async def generate_template_video(
         directory: str,
         new_filename_base_name: str,
         template_file_full_path: str,
-        code_version: str
+        code_version: str,
+        scene_tags: list
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -402,6 +410,33 @@ async def generate_template_video(
     preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"
     thumbnails_image = f"{new_filename_base_name}_Thumbnails.webp"
 
+    # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
+    name_blocks = formatted_names.replace(", ", "\n").splitlines()
+
+    # Step 2: Process each name block
+    processed_blocks = []
+    for block in name_blocks:
+        names = block.strip().split()
+        if len(names) > 1:
+            joined = ".".join(names)
+            processed_blocks.append(joined)
+        else:
+            processed_blocks.append(block.strip())
+
+    processed_string = " ".join(processed_blocks)
+    processed_string += " " + " ".join(scene_tags)
+    # Build output filename and path
+    tags_filename = f"{new_filename_base_name}_HF_tags.txt"
+    tags_path = os.path.join(directory, tags_filename)
+
+    # Write the string to the file
+    try:
+        with open(tags_path, "w", encoding="utf-8") as file:
+            file.write(processed_string)
+        # logger.debug(f"Tags saved to: {tags_path}")
+    except Exception as e:
+        logger.error(f"Failed to save tags: {e}")
+
     # Create replacement dictionary
     replacements = {
         "{NEW_TITLE}": new_title,
@@ -428,11 +463,12 @@ async def generate_template_video(
         os.makedirs(directory, exist_ok=True)
 
         # Save the modified file
-        output_filename = f"{new_filename_base_name}_HF.txt"
+        output_filename = f"{new_filename_base_name}_HF_template.txt"
         output_path = os.path.join(directory, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(template_content)
+            # logger.debug(f"Template saved to: {tags_path}")
     except Exception as e:
         logger.error(f"An error has occured during creating of template for file: {new_filename_base_name}.{extension}")
         return False
@@ -444,9 +480,9 @@ async def parse_version(version_str: str) -> tuple:
     return tuple(map(int, version_str.strip().split('.')))
 
 
-async def is_version_between(min_version_str: str, max_version_str: str) -> bool:
-    current = sys.version_info[:3]
-    min_version = await parse_version(min_version_str)
-    max_version = await parse_version(max_version_str)
-    return min_version <= current < max_version
+async def is_supported_major_minor(min_major_minor, max_major_minor) -> bool:
+    current_major, current_minor = sys.version_info[:2]
+    min_major, min_minor = min_major_minor
+    max_major, max_minor = max_major_minor
 
+    return (min_major, min_minor) <= (current_major, current_minor) <= (max_major, max_minor)

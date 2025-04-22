@@ -625,12 +625,12 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
 
 async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale):
     file_path = os.path.join(directory, new_filename)
-    logger.info(f"Processing file: {file_path}")
+    # logger.debug(f"Processing file: {file_path}")
 
     temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
 
     if temp_output is None:
-        logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
+        # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
         return True
 
     if temp_output is False:
@@ -735,10 +735,8 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
                         est_total_time = duration / speed
                         remaining = max(0, int(est_total_time) - int(elapsed))
                         eta_human = format_eta(remaining)
-
                         predicted_size_kib = (current_size_kib / encoded_time) * duration
                         predicted_size = format_size(predicted_size_kib)
-
                         estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
 
                         logger.info(

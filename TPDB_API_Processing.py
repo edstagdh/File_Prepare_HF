@@ -32,14 +32,14 @@ async def load_api_credentials(mode):
         return None, None, None
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template):
     max_retries = 3
     delay = 5
     try:
         api_auth, api_scenes_url, api_sites_url = await load_api_credentials(mode=1)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
         if response_data is None or not response_data.get('data') and part_match:
@@ -48,12 +48,12 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
                 response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
         valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url)
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {string_parse}")
-            return None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
@@ -62,7 +62,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
@@ -71,6 +71,10 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
+        if generate_hf_template:
+            scene_tags = await extract_scene_tags(selected_entry)
+        else:
+            scene_tags = None
         site = selected_entry.get("site", {}).get("name")
         if "onlyfans" in site.lower() and "FansDB" in site.lower():
             site = site.replace("FansDB: ", "")
@@ -99,15 +103,15 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
                 female_performers.append((user_input, ""))
 
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
 
     except Exception as e:
         logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None
 
 
 async def send_request(api_url, api_auth, string_parse, max_retries, delay):
@@ -427,6 +431,41 @@ async def extract_performer_posters(performer_data: dict, posters_limit: int) ->
 
     except Exception:
         logger.exception("Error extracting poster URLs")
+        return None
+
+
+async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
+    try:
+        scene_tags = []
+        if not scene_data:
+            return None
+
+        scene_data_tags = scene_data.get("tags", [])
+        for tag in scene_data_tags:
+            name = tag.get("name", "")
+
+            # Remove trailing space
+            if name.endswith(" "):
+                name = name[:-1]
+
+            # Remove anything inside brackets and the brackets themselves
+            name = re.sub(r"\(.*?\)", "", name)
+
+            # Replace remaining spaces with dots
+            name = name.replace(" ", ".")
+
+            # Remove all special characters except dots
+            name = re.sub(r"[^a-zA-Z0-9.]", "", name)
+
+            # Convert to lowercase
+            name = name.lower()
+
+            scene_tags.append(name)
+
+        return scene_tags
+
+    except Exception:
+        logger.exception("Error extracting scene tags")
         return None
 
 
