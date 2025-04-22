@@ -186,7 +186,7 @@ async def process_files():
                 raise ValueError(f"Unable to find valid performers for {filename}")
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
-            logger.info(f"End file: {filename}")
+            logger.warning(f"End file: {filename}")
             failed_files.append(str(file))
             continue  # Skip to the next file
 
@@ -263,22 +263,25 @@ async def process_files():
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
                   template_file_full_path, code_version, scene_tags]),
             ]
-
+            failed = False
             # Run each enabled optional step
             for flag, func, args in optional_steps:
                 if flag:
                     result = await func(*args)
                     if not result:
-                        logger.info(f"End file: {filename}")
+                        logger.warning(f"End file: {filename}")
                         if new_file_full_path not in failed_files:
                             failed_files.append(new_file_full_path)
-                        continue  # Skip to the next file
+                        failed = True
+                        break  # Exit inner loop
+            if failed:
+                continue  # Skip to the next file
             processed_files += 1
             logger.info(f"End file: {filename}")
             successful_files.append(new_file_full_path)
         except Exception as e:
             logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
-            logger.info(f"End file: {filename}")
+            logger.warning(f"End file: {filename}")
             failed_files.append(str(file))
             continue  # Skip to the next file
 

@@ -425,6 +425,10 @@ async def generate_template_video(
 
     processed_string = " ".join(processed_blocks)
     processed_string += " " + " ".join(scene_tags)
+    processed_string += f" {fps}fps"
+    processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p
+    processed_string += f" {codec}"
+    processed_string += f" {extension.replace('.', '')}"
     # Build output filename and path
     tags_filename = f"{new_filename_base_name}_HF_tags.txt"
     tags_path = os.path.join(directory, tags_filename)

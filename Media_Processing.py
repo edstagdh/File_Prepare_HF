@@ -740,13 +740,13 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
                         estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
 
                         logger.info(
-                            f"Progress: Encoded {encoded_time:.2f}s / {duration}s "
+                            f"Encoded {encoded_time:.2f}s / {duration}s "
                             f"({(encoded_time / duration) * 100:.1f}%), "
                             f"Speed: {speed:.2f}x, "
                             f"Elapsed: {elapsed_human}, "
                             f"ETA: {eta_human}, "
-                            f"Predicted Final Size: {predicted_size}, "
-                            f"Estimated Bitrate: {estimated_bitrate}"
+                            f"Estimated Size: {predicted_size}, "
+                            f"Estimated Bit rate: {estimated_bitrate}"
                         )
                     else:
                         logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
@@ -757,7 +757,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     process.wait()
     if process.returncode != 0 or not os.path.exists(temp_output):
-        logger.error(f"Re-encoding failed for {file_path}")
+        logger.error(f"Re-encoding failed for {file_path}, return code: {process.returncode}")
         return False
 
     return temp_output
@@ -885,7 +885,7 @@ def format_bitrate(size_kib, elapsed_time):
     if elapsed_time <= 0:
         return "N/A"
     bitrate_kbps = (size_kib * 8) / elapsed_time
-    return f"{bitrate_kbps:.1f} kbps"
+    return f"{bitrate_kbps / 1000:.2f} Mbps"
 
 
 async def get_video_resolution(file_path):
