@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from loguru import logger
 
-CLEAN_CHARS = "!@#$%^&*()_+=’' "
+CLEAN_CHARS = "!@#$%^&*()_+=’' :"
 
 
 async def run_command(command):
@@ -378,7 +378,8 @@ async def generate_template_video(
         new_filename_base_name: str,
         template_file_full_path: str,
         code_version: str,
-        scene_tags: list
+        scene_tags: list,
+        studio_tag: list
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -424,6 +425,10 @@ async def generate_template_video(
             processed_blocks.append(block.strip())
 
     processed_string = " ".join(processed_blocks)
+
+    for tag in studio_tag:
+        cleaned_tag = re.sub(CLEAN_CHARS, ".", tag)
+        processed_string += " " + cleaned_tag
     processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
     processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p

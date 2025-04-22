@@ -210,7 +210,12 @@ async def process_files():
         formatted_names = await format_performers(performers, 1)
 
         # Construct new title
-        studio_info = f"{tpdb_site}({site_studio})" if tpdb_site != site_studio else tpdb_site
+        if tpdb_site != site_studio:
+            studio_info = f"{tpdb_site}({site_studio})"
+            studio_tag = [tpdb_site, site_studio]
+        else:
+            studio_info = tpdb_site
+            studio_tag = [tpdb_site]
         new_title_parts = [studio_info, scene_pretty_date, new_title, formatted_names]
         if suffix:
             new_title_parts.append(suffix)
@@ -261,7 +266,7 @@ async def process_files():
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
                 (generate_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
-                  template_file_full_path, code_version, scene_tags]),
+                  template_file_full_path, code_version, scene_tags, studio_tag]),
             ]
             failed = False
             # Run each enabled optional step
