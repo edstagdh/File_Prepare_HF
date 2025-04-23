@@ -192,7 +192,6 @@ async def process_files():
 
         formatted_filename_performers_names = await format_performers(performers, 2)  # This includes sanitization of performer names
         formatted_site = await sanitize_site_filename_part(tpdb_site)
-
         # Determine the suffix based on video type
         if vr2normal:
             suffix = "VR2Normal"

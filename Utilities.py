@@ -164,9 +164,9 @@ async def sanitize_site_filename_part(input_str):
         str: The sanitized string.
     """
     translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
-    sanitized = input_str.replace(":", "-")
+    sanitized = input_str.replace(":", "-").replace(".", " ")
     sanitized = sanitized.translate(translation_table)
-    return sanitized.replace(".", " ")
+    return sanitized
 
 
 async def is_valid_filename_format(filename: str) -> bool:

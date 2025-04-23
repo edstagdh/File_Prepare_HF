@@ -1,14 +1,26 @@
 # File Prepare HF
 
 **File Prepare HF** is a Python-based tool designed to process and prepare media files for uploading to HF. It offers functionalities for media processing, preview generation, and interaction with ThePornDB (TPDB) API to enrich metadata.
+<br><br>
+This process requires matching scene via TPDB, it is not a standalone script.
 
 ## Features
 
-- **Media Processing**: Handles various media files, extracting and preparing them for upload.
-- **Preview Generation**: Creates previews of media files based on configurable settings.
-- **TPDB API Integration**: Fetches and processes metadata from ThePornDB API to enhance media information.
+- **Media Processing**: Includes re-encoding of videos and creation of cover image and thumbnails, all set via flags in Config.json
+- **Preview Generation**: Creates previews of videos based on configurable settings.
+- **TPDB API Integration**: Fetches and processes metadata from ThePornDB API.
 - **Configurable Settings**: Utilizes JSON configuration files to customize processing parameters.
-- **Utility Functions**: Includes a set of utility functions to support media processing tasks.
+- **Utility Functions**: Includes a set of utility functions to support media processing and general tasks.
+- **Template Generation**: Includes option to generate upload BBCode for each video based on existing template file, including tags/mediainfo.
+
+
+## 🛣️ Roadmap
+
+- [x] Add tags generation for scene upload process.
+- [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
+- [ ] Support for Static thumbnails generation without using Scorp VTM software.
+- [ ] Support other types of databases, e.g. StashDB.
+
 
 ## Installation
 

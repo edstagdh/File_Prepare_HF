@@ -51,7 +51,7 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
         return False
 
     # Start processing
-    logger.debug(f"processing previews for file: {new_file_full_path}")
+    # logger.debug(f"processing previews for file: {new_file_full_path}")
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
