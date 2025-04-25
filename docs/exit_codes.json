@@ -20,6 +20,9 @@
   "33": "Neither version nor date are acceptable",
   "34": "Invalid Template file name",
   "35": "Invalid Template file path",
+  "36": "Unsupported Python Version",
+  "37": "Conflict in configration, in order to generate HFtemplate file, generating media info file is a must",
+  "38": "Unable to find a match via TPDB API",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"

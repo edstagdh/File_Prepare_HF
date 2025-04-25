@@ -1,52 +1,37 @@
 import json
+import re
 import requests
-from loguru import logger
+from num2words import num2words
 import time
+from loguru import logger
 from time import sleep
 from datetime import datetime
 from typing import Optional
+from Utilities import load_credentials
 
 
-async def load_api_credentials(mode):
-    # mode = 1, return scene data, mode = 2, return performer data
-    try:
-        with open('creds.secret', 'r') as secret_file:
-            secrets = json.load(secret_file)
-            if mode == 1:
-                return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
-            elif mode == 2:
-                return secrets["api_auth"], secrets["api_performer_url"], None
-            else:
-                return None, None, None
-
-    except FileNotFoundError:
-        logger.error("creds.secret file not found.")
-        return None, None, None
-    except KeyError as e:
-        logger.error(f"Key {e} is missing in the secret.json file.")
-        return None, None, None
-    except json.JSONDecodeError:
-        logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
-        return None, None, None
-
-
-async def get_data_from_api(string_parse, scene_date, manual_mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template):
     max_retries = 3
     delay = 5
     try:
-        api_auth, api_scenes_url, api_sites_url = await load_api_credentials(mode=1)
+        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=1)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        if response_data is None:
-            return None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date)
+        if response_data is None or not response_data.get('data') and part_match:
+            string_parse_fallback = await convert_number_suffix_to_word(string_parse)
+            if string_parse_fallback != string_parse:
+                response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
+
+        if response_data is None or not response_data.get('data'):
+            return None, None, None, None, None, None, None, None, None, None, None
+        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url)
 
         if not valid_entries:
-            logger.error("No matching entries for the provided date.")
-            return None, None, None, None, None, None, None, None, None
+            logger.error(f"No matching entries for the provided date for string: {string_parse}")
+            return None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
@@ -55,20 +40,25 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
         alt_image = selected_entry.get("background", {}).get("full")
         scene_description = selected_entry.get('description')
+        scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
+        if generate_hf_template:
+            scene_tags = await extract_scene_tags(selected_entry)
+        else:
+            scene_tags = None
         site = selected_entry.get("site", {}).get("name")
-        if "onlyfans" in site.lower() and "FansDB" in site.lower():
+        if "onlyfans" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (onlyfans)", "")
             site = "OnlyFans-" + site
-        if "manyvids" in site.lower() and "FansDB" in site.lower():
+        if "manyvids" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (manyvids)", "")
             site = "ManyVids-" + site
@@ -89,17 +79,16 @@ async def get_data_from_api(string_parse, scene_date, manual_mode):
                 if user_input.lower() == 'exit':
                     break
                 female_performers.append((user_input, ""))
-
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
 
     except Exception as e:
         logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None
 
 
 async def send_request(api_url, api_auth, string_parse, max_retries, delay):
@@ -243,12 +232,12 @@ async def get_user_input():
     If 'no', returns None.
     Continues prompting until a valid response is given.
     """
+    temp_performers = []
     while True:
         try:
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
-
             if response == "yes" or response == "y":
-                temp_performers = input("Enter Performers Manually: ").strip()
+                temp_performers.append(input("Enter Performers Manually: "))
                 if temp_performers:
                     female_performers = temp_performers
                     return female_performers
@@ -262,16 +251,16 @@ async def get_user_input():
             return None  # Return None in case of unexpected errors
 
 
-async def filter_entries_by_date(response_data, scene_date):
+async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
     try:
         valid_entries = []
-        # logger.debug(response_data)
-        # logger.debug(scene_date)
-        scene_date = datetime.strptime(scene_date, '%Y-%m-%d')  # Assuming scene_date is a string in 'YYYY-MM-DD' format
+        unmatched_entries = []
+        scene_date = datetime.strptime(scene_date, '%Y-%m-%d')
         for item in response_data['data']:
+            slug = item.get('slug', '').lower()
+            full_scene_url = f"{tpdb_scenes_url}{slug}"
             title = item.get('title', '').lower()
             item_date = datetime.strptime(item.get('date', ''), '%Y-%m-%d')  # Assuming item date is also 'YYYY-MM-DD'
-
             # Check if title contains 'interview'
             if "interview" in title:
                 sleep(0.5)
@@ -285,7 +274,6 @@ async def filter_entries_by_date(response_data, scene_date):
             # Exact date match
             if item_date == scene_date:
                 valid_entries.append(item)
-
             # Date range check (within ±1 to ±4 days)
             elif abs((item_date - scene_date).days) in range(1, 5):
                 sleep(0.5)
@@ -296,12 +284,27 @@ async def filter_entries_by_date(response_data, scene_date):
                     logger.warning(f"Scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date and was added.")
                 else:
                     logger.info(f"Scene '{item.get('title')}' was not included due to date difference.")
+            else:
+                unmatched_entries.append((item.get('title'), full_scene_url, item))
+        # If still no valid entries, show unmatched ones for manual selection
+        if not valid_entries and unmatched_entries:
+            logger.warning("No entries matched the exact or close date range, but the following scenes were found with some confidence to be matched:")
+            for idx, (title, url, _) in enumerate(unmatched_entries, 1):
+                logger.info(f"{idx}. {title} — {url}")
 
-        if valid_entries:
-            return valid_entries
-        else:
-            logger.error("No matching entries for the provided date.")
-            return None
+            sleep(0.5)
+            user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
+            if user_input.isdigit():
+                selection_index = int(user_input) - 1
+                if 0 <= selection_index < len(unmatched_entries):
+                    valid_entries.append(unmatched_entries[selection_index][2])
+                    logger.info(f"Manually selected entry: {unmatched_entries[selection_index][0]}")
+                else:
+                    logger.warning("Invalid selection index. No entry added.")
+            else:
+                logger.info("No entry selected manually.")
+
+        return valid_entries if valid_entries else None
 
     except Exception as e:
         logger.error(f"Error filtering entries by date: {str(e)}")
@@ -357,7 +360,7 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
     delay = 5
 
     try:
-        api_auth, api_performers_url, _ = await load_api_credentials(mode=2)
+        api_auth, api_performers_url, _ = await load_credentials(mode=2)
         if not api_performers_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return None
@@ -406,3 +409,52 @@ async def extract_performer_posters(performer_data: dict, posters_limit: int) ->
     except Exception:
         logger.exception("Error extracting poster URLs")
         return None
+
+
+async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
+    try:
+        scene_tags = []
+        if not scene_data:
+            return None
+
+        scene_data_tags = scene_data.get("tags", [])
+        for tag in scene_data_tags:
+            name = tag.get("name", "")
+
+            # Remove anything inside brackets and the brackets themselves
+            name = re.sub(r"\(.*?\)", "", name)
+            # Remove trailing space
+            if name.endswith(" "):
+                name = name[:-1]
+            # Replace remaining spaces with dots
+            name = name.replace(" ", ".")
+            # Remove all special characters except dots
+            name = re.sub(r"[^a-zA-Z0-9.]", "", name)
+            # Convert to lowercase
+            name = name.lower()
+
+            scene_tags.append(name)
+
+        return scene_tags
+
+    except Exception:
+        logger.exception("Error extracting scene tags")
+        return None
+
+
+async def convert_number_suffix_to_word(s: str) -> str:
+    """
+    Converts a numeric suffix in a string like '.part.1' to a word form like '.part.one'.
+
+    Args:
+        s (str): Input string with a numeric suffix.
+
+    Returns:
+        str: Modified string with the number converted to words.
+    """
+    match = re.search(r"(.*\.part\.)(\d+)$", s, re.IGNORECASE)
+    if match:
+        prefix, number = match.groups()
+        number_word = num2words(int(number))
+        return f"{prefix}{number_word}"
+    return s

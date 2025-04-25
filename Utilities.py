@@ -2,10 +2,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime
 from loguru import logger
 
-CLEAN_CHARS = "!@#$%^&*()_+=' "
+CLEAN_CHARS = "!@#$%^&*()_+=’' :"
 
 
 async def run_command(command):
@@ -115,24 +116,41 @@ async def load_config(config_name):
         return None, 99  # Unknown exception
 
 
-async def clean_filename(filename: str) -> str:
+async def replace_episode_tag(filename: str) -> str:
+    """
+    Replace .E##. with .00.00.00.Episode.##. in the filename.
+    Supports episode numbers from 1 to 9999.
+    """
+    return re.sub(r'\.E(\d{1,4})\.', r'.00.00.00.Episode.\1.', filename)
+
+
+async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
     """Removes unwanted characters and standardizes casing rules."""
-    base_name, extension = os.path.splitext(filename)
 
-    # Remove prefix if present
-    base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
-    base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+    if mode == 1:
+        base_name, extension = os.path.splitext(input_string)
+        # Remove unwanted parts in filename
+        base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
+        # base_name = await replace_episode_tag(base_name)
+        base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+        for word in bad_words:
+            base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
+        # Remove unwanted characters
+        base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
 
-    # Remove unwanted characters
-    base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
+        # Capitalize segments after the first
+        parts = base_name.split('.')
+        for i in range(1, len(parts)):
+            if parts[i].lower() not in ["and", "vr2normal", "bts"]:
+                parts[i] = parts[i].capitalize()
+        return '.'.join(parts) + extension
 
-    # Capitalize segments after the first
-    parts = base_name.split('.')
-    for i in range(1, len(parts)):
-        if parts[i].lower() not in ["and", "vr2normal", "bts"]:
-            parts[i] = parts[i].capitalize()
-
-    return '.'.join(parts) + extension
+    elif mode == 2:
+        # Remove unwanted characters
+        clean_title = input_string.translate(str.maketrans("", "", CLEAN_CHARS))
+        return clean_title
+    else:
+        return ""
 
 
 async def sanitize_site_filename_part(input_str):
@@ -145,9 +163,10 @@ async def sanitize_site_filename_part(input_str):
     Returns:
         str: The sanitized string.
     """
-    translation_table = str.maketrans("", "", "!@#$%^&*()_+=' ")
-    sanitized = input_str.translate(translation_table)
-    return sanitized.replace(".", " ")
+    translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
+    sanitized = input_str.replace(":", "-").replace(".", " ")
+    sanitized = sanitized.translate(translation_table)
+    return sanitized
 
 
 async def is_valid_filename_format(filename: str) -> bool:
@@ -159,7 +178,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory):
+async def pre_process_files(directory, bad_words, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -169,7 +188,7 @@ async def pre_process_files(directory):
                 logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
                 return False, 12
 
-            new_filename = await clean_filename(filename)
+            new_filename = await clean_filename(filename, bad_words, mode)
             old_path = os.path.join(directory, filename)
             new_path = os.path.join(directory, new_filename)
 
@@ -285,7 +304,7 @@ async def rename_file(file_path, new_filename):
         directory = os.path.dirname(file_path)
         # Create the full new file path
         new_file_path = os.path.join(directory, new_filename)
-        if file_path != new_file_path:
+        if file_path.lower() != new_file_path.lower():
             # Rename the file
             os.rename(file_path, new_file_path)
             logger.info(f"Renamed file: {file_path} -> {new_file_path}")
@@ -357,9 +376,14 @@ async def generate_template_video(
         extension: str,
         directory: str,
         new_filename_base_name: str,
-        template_file_full_path: str
+        template_file_full_path: str,
+        code_version: str,
+        scene_tags: list,
+        studio_tag: list
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
+
+    pattern = f"[{re.escape(CLEAN_CHARS)}]"
 
     if not os.path.isfile(template_file_full_path):
         raise FileNotFoundError(f"Template file not found: {template_file_full_path}")
@@ -389,6 +413,43 @@ async def generate_template_video(
     preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"
     thumbnails_image = f"{new_filename_base_name}_Thumbnails.webp"
 
+    # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
+    name_blocks = formatted_names.replace(", ", "\n").splitlines()
+
+    # Step 2: Process each name block
+    processed_blocks = []
+    for block in name_blocks:
+        names = block.strip().split()
+        if len(names) > 1:
+            joined = ".".join(names)
+            processed_blocks.append(joined)
+        else:
+            processed_blocks.append(block.strip())
+
+    processed_string = " ".join(processed_blocks)
+    for tag in studio_tag:
+        cleaned_tag = re.sub(pattern, ".", tag)
+        processed_string += " " + cleaned_tag
+        if cleaned_tag != tag.replace(" ", ""):
+            processed_string += " " + tag.replace(" ", "")
+
+    processed_string += " " + " ".join(scene_tags)
+    processed_string += f" {fps}fps"
+    processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p
+    processed_string += f" {codec}"
+    processed_string += f" {extension.replace('.', '')}"
+    # Build output filename and path
+    tags_filename = f"{new_filename_base_name}_HF_tags.txt"
+    tags_path = os.path.join(directory, tags_filename)
+
+    # Write the string to the file
+    try:
+        with open(tags_path, "w", encoding="utf-8") as file:
+            file.write(processed_string)
+        # logger.debug(f"Tags saved to: {tags_path}")
+    except Exception as e:
+        logger.error(f"Failed to save tags: {e}")
+
     # Create replacement dictionary
     replacements = {
         "{NEW_TITLE}": new_title,
@@ -404,6 +465,7 @@ async def generate_template_video(
         "{COVER_IMAGE}": cover_image,
         "{PREVIEW_SHEET}": preview_sheet_image,
         "{STATIC_THUMBNAILS_SHEET}": thumbnails_image,
+        "{CODE_VERSION}": code_version
     }
     try:
         # Replace placeholders
@@ -414,13 +476,51 @@ async def generate_template_video(
         os.makedirs(directory, exist_ok=True)
 
         # Save the modified file
-        output_filename = f"{new_filename_base_name}_HF.txt"
+        output_filename = f"{new_filename_base_name}_HF_template.txt"
         output_path = os.path.join(directory, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(template_content)
+            # logger.debug(f"Template saved to: {tags_path}")
     except Exception as e:
         logger.error(f"An error has occured during creating of template for file: {new_filename_base_name}.{extension}")
         return False
 
     return True
+
+
+async def parse_version(version_str: str) -> tuple:
+    return tuple(map(int, version_str.strip().split('.')))
+
+
+async def is_supported_major_minor(min_major_minor, max_major_minor) -> bool:
+    current_major, current_minor = sys.version_info[:2]
+    min_major, min_minor = min_major_minor
+    max_major, max_minor = max_major_minor
+
+    return (min_major, min_minor) <= (current_major, current_minor) <= (max_major, max_minor)
+
+
+async def load_credentials(mode):
+    # mode = 1, return scene data, mode = 2, return performer data, mode = 3, return ibb api key
+    try:
+        with open('creds.secret', 'r') as secret_file:
+            secrets = json.load(secret_file)
+            if mode == 1:
+                return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
+            elif mode == 2:
+                return secrets["api_auth"], secrets["api_performer_url"], None
+            elif mode == 3:
+                return secrets["imgbox_u"], secrets["imgbox_u"], None
+            else:
+                return None, None, None
+
+    except FileNotFoundError:
+        logger.error("creds.secret file not found.")
+        return None, None, None
+    except KeyError as e:
+        logger.error(f"Key {e} is missing in the secret.json file.")
+        return None, None, None
+    except json.JSONDecodeError:
+        logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
+        return None, None, None

@@ -1,14 +1,28 @@
 # File Prepare HF
 
 **File Prepare HF** is a Python-based tool designed to process and prepare media files for uploading to HF. It offers functionalities for media processing, preview generation, and interaction with ThePornDB (TPDB) API to enrich metadata.
+<br><br>
+This process requires matching scene via TPDB, it is not a standalone script.
 
 ## Features
 
-- **Media Processing**: Handles various media files, extracting and preparing them for upload.
-- **Preview Generation**: Creates previews of media files based on configurable settings.
-- **TPDB API Integration**: Fetches and processes metadata from ThePornDB API to enhance media information.
+- **Media Processing**: Includes re-encoding of videos and creation of cover image and thumbnails, all set via flags in Config.json
+- **Preview Generation**: Creates previews of videos based on configurable settings.
+- **TPDB API Integration**: Fetches and processes metadata from ThePornDB API.
 - **Configurable Settings**: Utilizes JSON configuration files to customize processing parameters.
-- **Utility Functions**: Includes a set of utility functions to support media processing tasks.
+- **Utility Functions**: Includes a set of utility functions to support media processing and general tasks.
+- **Template Generation**: Includes option to generate upload BBCode for each video based on existing template file, including tags/mediainfo.
+
+
+## 🛣️ Roadmap
+
+- [x] Add tags generation for scene upload process.
+- [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
+- [ ] Support for Static thumbnails generation without using Scorp VTM software.
+- [ ] Support other types of databases, e.g. StashDB.
+- [ ] Add an option to use jpg format images.
+- [ ] Add an option to upload to imgbox(static jpg format images only), this requires restructure.
+
 
 ## Installation
 
@@ -36,6 +50,7 @@
 
 0. **Prerequisites**:
 
+   - Python version 3.10(any sub versions should work) for maximum compatibility.
    - TPDB credentials(API Key).
    - MP4 extension.
    - Valid HF template file.
@@ -45,14 +60,24 @@
    ```
    STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
    or
+   STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.PART.NUMBER.EXTENSION
+   or
    STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
    ```
-
+<br>
 1. **Configure Settings**:
 
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
    - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials.
-
+   - If you intend to you Scrop VTM(Video Thumbnails Maker), Configure the settings as you like in the VTM with the following settings being a prerequisite:
+     - Set output format file to ".jpg" file
+     - add suffix "_thumbnails"
+     - "Remove video extension" from output file name, example output format:
+     ```"Studio.YY.MM.DD.FName.LName_thumbnails.jpg"```
+     
+   If you would like a template for VTM, you can find it here: Resources/edstagdh.vtm
+   <br>This does not replace configuring the required settings for output file name/format.  
+<br>
 2. **Run the Main Script**:
 
    ```bash

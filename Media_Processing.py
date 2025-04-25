@@ -517,7 +517,7 @@ async def overlay_text(
 
 async def detect_faces(image_path, MTCNN):  # Adjust the threshold here
 
-    threshold = 0.95
+    threshold = 0.93
 
     detector = MTCNN()
     # Load the image
@@ -625,33 +625,178 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
 
 async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale):
     file_path = os.path.join(directory, new_filename)
-    logger.info(f"Processing file: {file_path}")
+    # logger.debug(f"Processing file: {file_path}")
 
     temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
 
     if temp_output is None:
-        logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
+        # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
         return True
 
     if temp_output is False:
-        logger.error(f"Skipping deletion, processing failed for {file_path}")
+        logger.error(f"processing failed for {file_path}")
         return False
 
     try:
-        if keep_original_file:
-            old_file_path = os.path.join(directory, f"{os.path.splitext(new_filename)[0]}_old{os.path.splitext(new_filename)[1]}")
-            os.rename(file_path, old_file_path)
-            logger.info(f"Original file renamed to: {old_file_path}")
-        else:
-            os.remove(file_path)
+        if isinstance(temp_output, str):
+            if keep_original_file:
+                old_file_path = os.path.join(directory, f"{os.path.splitext(new_filename)[0]}_old{os.path.splitext(new_filename)[1]}")
+                os.rename(file_path, old_file_path)
+                logger.info(f"Original file renamed to: {old_file_path}")
+            else:
+                os.remove(file_path)
 
-        final_output = os.path.join(directory, new_filename)
-        shutil.move(temp_output, final_output)
-        logger.info(f"Replaced original file with HEVC version: {final_output}")
-        return True
+            final_output = os.path.join(directory, new_filename)
+            shutil.move(temp_output, final_output)
+            logger.info(f"Replaced original file with HEVC version: {final_output}")
+            return True
+        else:
+            raise "Invalid type returned from encode function"
     except Exception as e:
         logger.error(f"Failed to replace {file_path}: {e}")
         return False
+
+
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
+    """Re-encode the given file to HEVC and show progress.
+
+    Returns:
+        str: Path to the converted file if successful.
+        None: If already encoded in HEVC.
+        False: If encoding failed.
+    """
+    encode_results = await is_video_hevc_or_av1(file_path)
+    if encode_results:  # Already encoded with HEVC/AV1
+        return None
+    if encode_results is None:  # Could not determine encoding (fail)
+        return False
+
+    width, height, bit_rate = await get_video_resolution(file_path)
+
+    directory, filename = os.path.split(file_path)
+    temp_output = await generate_temp_filename(directory, filename)
+    duration = await get_video_duration(file_path)
+
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-i", file_path,
+        "-map", "0:v",
+        "-map", "0:a",
+        "-c:v", "libx265",
+        "-vtag", "hvc1",
+        "-x265-params", "crf=22",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-map_metadata", "0"
+    ]
+
+    # Add scale filter if resolution is higher than 1080p and downscaling is enabled
+    if re_encode_downscale and width and height:
+        if not is_vertical and (width > 1920 or height > 1080):
+            ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
+        elif is_vertical and height > 1080:
+            ffmpeg_cmd += ["-vf", "scale=-2:1080"]
+
+    # Enforce bitrate limits for high-bitrate non-vertical videos
+    if not is_vertical and bit_rate and bit_rate > 20_000_000:
+        ffmpeg_cmd += [
+            "-minrate", "2M",
+            "-maxrate", "10M",
+            "-bufsize", "5M"
+        ]
+
+    ffmpeg_cmd.append(temp_output)
+
+    start_time = time.time()
+    last_update_time = 0
+
+    process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+
+    time_pattern = re.compile(r"time=(\d+:\d+:\d+\.\d+)")
+    size_pattern = re.compile(r"size=\s*(\d+)KiB")
+    speed_pattern = re.compile(r"speed=([\d\.x]+)")
+
+    for line in process.stderr:
+        now = time.time()
+        if now - last_update_time >= 3:
+            time_match = time_pattern.search(line)
+            size_match = size_pattern.search(line)
+            speed_match = speed_pattern.search(line)
+
+            if time_match and size_match:
+                encoded_time = parse_ffmpeg_time(time_match.group(1))
+                current_size_kib = int(size_match.group(1))
+                elapsed = now - start_time
+                elapsed_human = format_eta(elapsed)
+                speed = float(speed_match.group(1).replace('x', '')) if speed_match else 1.0
+
+                if encoded_time > 0:  # Only proceed if encoded_time is greater than zero
+                    if duration > 0 and speed > 0:
+                        est_total_time = duration / speed
+                        remaining = max(0, int(est_total_time) - int(elapsed))
+                        eta_human = format_eta(remaining)
+                        predicted_size_kib = (current_size_kib / encoded_time) * duration
+                        predicted_size = format_size(predicted_size_kib)
+                        estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
+
+                        logger.info(
+                            f"Encoded {encoded_time:.2f}s / {duration}s "
+                            f"({(encoded_time / duration) * 100:.1f}%), "
+                            f"Speed: {speed:.2f}x, "
+                            f"Elapsed: {elapsed_human}, "
+                            f"ETA: {eta_human}, "
+                            f"Estimated Size: {predicted_size}, "
+                            f"Estimated Bit rate: {estimated_bitrate}"
+                        )
+                    else:
+                        logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
+                else:
+                    logger.warning("Encoded time is zero, skipping bitrate prediction.")
+
+                last_update_time = now
+
+    process.wait()
+    if process.returncode != 0 or not os.path.exists(temp_output):
+        logger.error(f"Re-encoding failed for {file_path}, return code: {process.returncode}")
+        return False
+
+    return temp_output
+
+
+async def is_video_hevc_or_av1(file_path: str) -> bool:
+    """
+    Check if the video is encoded with HEVC (H.265) or AV1.
+    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise, None if failed.
+    """
+    if not os.path.isfile(file_path):
+        return False
+
+    command = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name",
+        "-of", "json",
+        file_path
+    ]
+
+    try:
+        stdout, stderr, returncode = await run_command(command)
+
+        if returncode != 0:
+            logger.error(f"ffprobe failed for {file_path}:\n{stderr}")
+            return False
+
+        data = json.loads(stdout)
+        codec = data.get("streams", [{}])[0].get("codec_name", "").lower()
+        if codec in {"hevc", "av1"}:
+            codec_results = True
+            return codec_results
+        else:
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to check codec for {file_path}: {e}")
+        return None
 
 
 async def get_video_duration(filepath):
@@ -740,7 +885,7 @@ def format_bitrate(size_kib, elapsed_time):
     if elapsed_time <= 0:
         return "N/A"
     bitrate_kbps = (size_kib * 8) / elapsed_time
-    return f"{bitrate_kbps:.1f} kbps"
+    return f"{bitrate_kbps / 1000:.2f} Mbps"
 
 
 async def get_video_resolution(file_path):
@@ -769,154 +914,10 @@ async def get_video_resolution(file_path):
         return None, None, None
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
-    """Re-encode the given file to HEVC and show progress.
-
-    Returns:
-        str: Path to the converted file if successful.
-        None: If already encoded in HEVC.
-        False: If encoding failed.
-    """
-    encode_results = await is_video_hevc_or_av1(file_path)
-    if encode_results:  # Already encoded with HEVC/AV1
-        return None
-    if encode_results is False:  # Not encoded with HEVC/AV1
-        return True
-
-    width, height, bit_rate = await get_video_resolution(file_path)
-
-    directory, filename = os.path.split(file_path)
-    temp_output = await generate_temp_filename(directory, filename)
-    duration = await get_video_duration(file_path)
-
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-i", file_path,
-        "-map", "0:v",
-        "-map", "0:a",
-        "-c:v", "libx265",
-        "-vtag", "hvc1",
-        "-x265-params", "crf=22",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-map_metadata", "0"
-    ]
-
-    # Add scale filter if resolution is higher than 1080p and downscaling is enabled
-    if re_encode_downscale and width and height:
-        if not is_vertical and (width > 1920 or height > 1080):
-            ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
-        elif is_vertical and height > 1080:
-            ffmpeg_cmd += ["-vf", "scale=-2:1080"]
-
-    # Enforce bitrate limits for high-bitrate non-vertical videos
-    if not is_vertical and bit_rate and bit_rate > 20_000_000:
-        ffmpeg_cmd += [
-            "-minrate", "2M",
-            "-maxrate", "10M",
-            "-bufsize", "5M"
-        ]
-
-    ffmpeg_cmd.append(temp_output)
-
-    start_time = time.time()
-    last_update_time = 0
-
-    process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-    time_pattern = re.compile(r"time=(\d+:\d+:\d+\.\d+)")
-    size_pattern = re.compile(r"size=\s*(\d+)KiB")
-    speed_pattern = re.compile(r"speed=([\d\.x]+)")
-
-    for line in process.stderr:
-        now = time.time()
-        if now - last_update_time >= 3:
-            time_match = time_pattern.search(line)
-            size_match = size_pattern.search(line)
-            speed_match = speed_pattern.search(line)
-
-            if time_match and size_match:
-                encoded_time = parse_ffmpeg_time(time_match.group(1))
-                current_size_kib = int(size_match.group(1))
-                elapsed = now - start_time
-                elapsed_human = format_eta(elapsed)
-                speed = float(speed_match.group(1).replace('x', '')) if speed_match else 1.0
-
-                if encoded_time > 0:  # Only proceed if encoded_time is greater than zero
-                    if duration > 0 and speed > 0:
-                        est_total_time = duration / speed
-                        remaining = max(0, int(est_total_time) - int(elapsed))
-                        eta_human = format_eta(remaining)
-
-                        predicted_size_kib = (current_size_kib / encoded_time) * duration
-                        predicted_size = format_size(predicted_size_kib)
-
-                        estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
-
-                        logger.info(
-                            f"Progress: Encoded {encoded_time:.2f}s / {duration}s "
-                            f"({(encoded_time / duration) * 100:.1f}%), "
-                            f"Speed: {speed:.2f}x, "
-                            f"Elapsed: {elapsed_human}, "
-                            f"ETA: {eta_human}, "
-                            f"Predicted Final Size: {predicted_size}, "
-                            f"Estimated Bitrate: {estimated_bitrate}"
-                        )
-                    else:
-                        logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
-                else:
-                    logger.warning("Encoded time is zero, skipping bitrate prediction.")
-
-                last_update_time = now
-
-    process.wait()
-    if process.returncode != 0 or not os.path.exists(temp_output):
-        logger.error(f"Re-encoding failed for {file_path}")
-        return False
-
-    return temp_output
-
-
 async def generate_temp_filename(directory, original_name):
     """Generate a temporary filename for re-encoded file."""
     name, ext = os.path.splitext(original_name)
     return os.path.join(directory, f"{name}_temp{ext}")
-
-
-async def is_video_hevc_or_av1(file_path: str) -> bool:
-    """
-    Check if the video is encoded with HEVC (H.265) or AV1.
-    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise, None if failed.
-    """
-    if not os.path.isfile(file_path):
-        return False
-
-    command = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name",
-        "-of", "json",
-        file_path
-    ]
-
-    try:
-        stdout, stderr, returncode = await run_command(command)
-
-        if returncode != 0:
-            logger.error(f"ffprobe failed for {file_path}:\n{stderr}")
-            return False
-
-        data = json.loads(stdout)
-        codec = data.get("streams", [{}])[0].get("codec_name", "").lower()
-        if codec in {"hevc", "av1"}:
-            codec_results = True
-            return codec_results
-        else:
-            return False
-
-    except Exception as e:
-        logger.error(f"Failed to check codec for {file_path}: {e}")
-        return None
 
 
 async def get_video_codec(file_path):

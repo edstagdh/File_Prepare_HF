@@ -10,7 +10,7 @@
   "keep_original_file": true,
   "manual_mode": false,
   "tpdb_scenes_url": "https://theporndb.net/scenes/",
-  "tpdb_performer_url": "https://theporndb.net/scenes/",
+  "tpdb_performer_url": "https://theporndb.net/performers/",
   "generate_face_portrait_pic": true,
   "generate_preview" : true,
   "generate_hf_template" : false,
@@ -19,5 +19,10 @@
   "target_size_height": 230,
   "zoom_factor": 2.5,
   "blur_kernel_size": 3,
-  "posters_limit": 3
+  "posters_limit": 3,
+  "python_min_version_supported": [3, 9],
+  "python_max_version_supported": [3, 10],
+  "Code_Version": "V3.1",
+  "bad_words": [".Hardcore"],
+  "image_output_format": ".jpg"
 }

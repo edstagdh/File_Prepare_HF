@@ -1,11 +1,12 @@
 import os
 import asyncio
 import re
+import sys
 from datetime import datetime
 from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
-    generate_mediainfo_file, generate_template_video
+    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, image_download_and_conversion, generate_scorp_thumbnails_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
@@ -40,6 +41,16 @@ async def process_files():
         generate_hf_template = config["generate_hf_template"]
         template_file_name = config["template_name"]
         re_encode_downscale = config["re_encode_downscale"]
+        python_min_version_supported = tuple(config["python_min_version_supported"])
+        python_max_version_supported = tuple(config["python_max_version_supported"])
+        code_version = config["Code_Version"]
+        bad_words = config["bad_words"]
+
+    if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
+        logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
+    else:
+        logger.error(f"❌ Python {sys.version.split()[0]} is NOT within supported range {python_min_version_supported} to {python_max_version_supported}.")
+        exit(36)
 
     if generate_face_portrait_pic:
         from mtcnn import MTCNN
@@ -52,6 +63,9 @@ async def process_files():
             if not os.path.exists(template_file_full_path):
                 logger.error(f"Invalid template file path: {template_file_full_path}")
                 exit(35)
+        elif not generate_mediainfo:
+            logger.error("Conflict in configration, in order to generate HFtemplate file, generating media info file is a must")
+            exit(37)
         else:
             logger.error(f"Invalid template file name: {template_file_name}")
             exit(34)
@@ -64,7 +78,7 @@ async def process_files():
     # Start Pre Processing files
     logger.info("-" * 100)
     logger.info(f"Start pre processing in directory: {directory}")
-    pre_process_results, exit_code = await pre_process_files(directory)
+    pre_process_results, exit_code = await pre_process_files(directory, bad_words, mode=1)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
@@ -117,6 +131,13 @@ async def process_files():
             # Assign the flags based on the results
             vr2normal, upscaled, bts_video = file_flags["vr2normal"], file_flags["upscaled"], file_flags["bts"]
 
+            # Check for Part in file base name
+            part_match = re.search(r"\.part\.\d+", filename_base_name, re.IGNORECASE)
+            if part_match:
+                part_number = part_match.group(0)
+            else:
+                part_number = ""
+
             # Split filename into parts
             parts = filename_base_name.split('.')
 
@@ -128,9 +149,13 @@ async def process_files():
                 is_valid, exit_code = await validate_date(year, month, day)
                 if not is_valid:
                     logger.error(f"Invalid date in filename: {filename_base_name}, moving to next file")
+                    logger.warning(f"End file: {filename}")
+                    failed_files.append(filename)
                     continue  # Skip to the next file
             else:
                 logger.error(f"Invalid filename format: {filename_base_name}, moving to next file")
+                logger.warning(f"End file: {filename}")
+                failed_files.append(filename)
                 continue  # Skip to the next file
 
             year_name = "20" + year  # Convert to 4 digit for scene identification purposes
@@ -138,12 +163,24 @@ async def process_files():
 
             scene_api_date = f"{year_name}-{month}-{day}"
 
-            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description = await get_data_from_api(clean_tpdb_check_filename,
-                                                                                                                                                   scene_api_date,
-                                                                                                                                                   manual_mode)
+            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template)
+            if all(value is None for value in (new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description)):
+                # All values are None
+                logger.error(f"Failed to find a match via TPDB for file: {filename}")
+                logger.warning(f"End file: {filename}")
+                failed_files.append(filename)
+                continue  # Skip to the next file
+            if scene_date != scene_api_date:
+                year_name, month, day = scene_date.split("-")
+                year = year_name[-2:]
+
+            if scene_description is None:
+                scene_description = "Scene description not found"
+
             month_name = datetime.strptime(month, "%m").strftime("%B")
             scene_pretty_date = f"{year_name}-{month_name}-{day}"
-            tpdb_scenes_url += slug
+            tpdb_scene_url = tpdb_scenes_url + slug
             error_prefix = f"File: {filename} - Failed to get metadata via API"
 
             if not new_title or new_title == "Multiple results":
@@ -155,13 +192,12 @@ async def process_files():
                 raise ValueError(f"Unable to find valid performers for {filename}")
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
-            logger.info(f"End file: {filename}")
-            failed_files.append(str(file))
+            logger.warning(f"End file: {filename}")
+            failed_files.append(filename)
             continue  # Skip to the next file
 
         formatted_filename_performers_names = await format_performers(performers, 2)  # This includes sanitization of performer names
         formatted_site = await sanitize_site_filename_part(tpdb_site)
-
         # Determine the suffix based on video type
         if vr2normal:
             suffix = "VR2Normal"
@@ -173,20 +209,30 @@ async def process_files():
             suffix = ""
 
         # Construct new filename
-        new_filename = f"{formatted_site}.{parts[1]}.{month}.{day}.{formatted_filename_performers_names}"
-        if suffix:
-            new_filename += f".{suffix}"
-        new_filename += extension
+        new_filename = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{part_number}"
 
         # Format performer names
         formatted_names = await format_performers(performers, 1)
 
         # Construct new title
-        studio_info = f"{tpdb_site}({site_studio})" if tpdb_site != site_studio else tpdb_site
+        if tpdb_site != site_studio:
+            studio_info = f"{tpdb_site}({site_studio})"
+            studio_tag = [tpdb_site, site_studio]
+        else:
+            studio_info = tpdb_site
+            studio_tag = [tpdb_site]
         new_title_parts = [studio_info, scene_pretty_date, new_title, formatted_names]
         if suffix:
             new_title_parts.append(suffix)
         new_title = " - ".join(new_title_parts)
+
+        # Verify OS file name length limit:
+        if len(new_filename) > 200:
+            safe_title = await clean_filename(new_title, bad_words, mode=2)
+            new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{part_number}"
+        if suffix:
+            new_filename += f".{suffix}"
+        new_filename += extension
 
         # Rename existing file to new filename if needed
         new_file_full_path = os.path.join(directory, new_filename)
@@ -197,14 +243,16 @@ async def process_files():
             # Check existing metadata
             existing_title = await get_existing_title(new_file_full_path)
             existing_description = await get_existing_description(new_file_full_path)
-            description = f"TPDB URL: {tpdb_scenes_url} | Scene URL: {scene_url}"
+            description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
             if existing_title == new_title and existing_description == description:
-                logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                pass
             else:
                 # logger.info(f"File: {file.name} - Title and Description already exist and are identical")
                 results_metadata = await update_metadata(new_file_full_path, new_title, description, re_encode_hevc)
                 if not results_metadata:
                     logger.error(f"Failed to modify file: {new_filename}")
+                    logger.warning(f"End file: {filename}")
                     failed_files.append(new_file_full_path)
                     continue  # Skip to the next file
 
@@ -224,24 +272,28 @@ async def process_files():
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
                 (generate_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, directory, new_filename_base_name,
-                  template_file_full_path]),
+                  template_file_full_path, code_version, scene_tags, studio_tag]),
             ]
-
+            failed = False
             # Run each enabled optional step
             for flag, func, args in optional_steps:
                 if flag:
                     result = await func(*args)
                     if not result:
-                        logger.info(f"End file: {filename}")
-                        if new_file_full_path not in failed_files:
-                            failed_files.append(new_file_full_path)
-                        continue  # Skip to the next file
-            logger.info(f"End file: {filename}")
+                        failed = True
+                        break  # Exit inner loop
+            if failed:
+                logger.error(f"Processing failed for file: {new_file_full_path}")
+                logger.warning(f"End file: {new_file_full_path}")
+                failed_files.append(new_file_full_path)
+                continue  # Skip to the next file
+            processed_files += 1
+            logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:
-            logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
-            logger.info(f"End file: {filename}")
-            failed_files.append(str(file))
+            logger.error(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
+            logger.warning(f"End file: {new_file_full_path}")
+            failed_files.append(filename)
             continue  # Skip to the next file
 
     # Finished processing
