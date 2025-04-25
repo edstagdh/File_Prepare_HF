@@ -383,6 +383,8 @@ async def generate_template_video(
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
+    pattern = f"[{re.escape(CLEAN_CHARS)}]"
+
     if not os.path.isfile(template_file_full_path):
         raise FileNotFoundError(f"Template file not found: {template_file_full_path}")
 
@@ -425,10 +427,12 @@ async def generate_template_video(
             processed_blocks.append(block.strip())
 
     processed_string = " ".join(processed_blocks)
-
     for tag in studio_tag:
-        cleaned_tag = re.sub(CLEAN_CHARS, ".", tag)
+        cleaned_tag = re.sub(pattern, ".", tag)
         processed_string += " " + cleaned_tag
+        if cleaned_tag != tag.replace(" ", ""):
+            processed_string += " " + tag.replace(" ", "")
+
     processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
     processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p
@@ -495,3 +499,28 @@ async def is_supported_major_minor(min_major_minor, max_major_minor) -> bool:
     max_major, max_minor = max_major_minor
 
     return (min_major, min_minor) <= (current_major, current_minor) <= (max_major, max_minor)
+
+
+async def load_credentials(mode):
+    # mode = 1, return scene data, mode = 2, return performer data, mode = 3, return ibb api key
+    try:
+        with open('creds.secret', 'r') as secret_file:
+            secrets = json.load(secret_file)
+            if mode == 1:
+                return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
+            elif mode == 2:
+                return secrets["api_auth"], secrets["api_performer_url"], None
+            elif mode == 3:
+                return secrets["imgbox_u"], secrets["imgbox_u"], None
+            else:
+                return None, None, None
+
+    except FileNotFoundError:
+        logger.error("creds.secret file not found.")
+        return None, None, None
+    except KeyError as e:
+        logger.error(f"Key {e} is missing in the secret.json file.")
+        return None, None, None
+    except json.JSONDecodeError:
+        logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
+        return None, None, None

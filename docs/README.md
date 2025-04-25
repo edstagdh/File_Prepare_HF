@@ -20,6 +20,8 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
 - [ ] Support for Static thumbnails generation without using Scorp VTM software.
 - [ ] Support other types of databases, e.g. StashDB.
+- [ ] Add an option to use jpg format images.
+- [ ] Add an option to upload to imgbox(static jpg format images only), this requires restructure.
 
 
 ## Installation

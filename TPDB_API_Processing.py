@@ -7,36 +7,14 @@ from loguru import logger
 from time import sleep
 from datetime import datetime
 from typing import Optional
-
-
-async def load_api_credentials(mode):
-    # mode = 1, return scene data, mode = 2, return performer data
-    try:
-        with open('creds.secret', 'r') as secret_file:
-            secrets = json.load(secret_file)
-            if mode == 1:
-                return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
-            elif mode == 2:
-                return secrets["api_auth"], secrets["api_performer_url"], None
-            else:
-                return None, None, None
-
-    except FileNotFoundError:
-        logger.error("creds.secret file not found.")
-        return None, None, None
-    except KeyError as e:
-        logger.error(f"Key {e} is missing in the secret.json file.")
-        return None, None, None
-    except json.JSONDecodeError:
-        logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
-        return None, None, None
+from Utilities import load_credentials
 
 
 async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template):
     max_retries = 3
     delay = 5
     try:
-        api_auth, api_scenes_url, api_sites_url = await load_api_credentials(mode=1)
+        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=1)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None
@@ -383,7 +361,7 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
     delay = 5
 
     try:
-        api_auth, api_performers_url, _ = await load_api_credentials(mode=2)
+        api_auth, api_performers_url, _ = await load_credentials(mode=2)
         if not api_performers_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return None
@@ -444,19 +422,15 @@ async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
         for tag in scene_data_tags:
             name = tag.get("name", "")
 
+            # Remove anything inside brackets and the brackets themselves
+            name = re.sub(r"\(.*?\)", "", name)
             # Remove trailing space
             if name.endswith(" "):
                 name = name[:-1]
-
-            # Remove anything inside brackets and the brackets themselves
-            name = re.sub(r"\(.*?\)", "", name)
-
             # Replace remaining spaces with dots
             name = name.replace(" ", ".")
-
             # Remove all special characters except dots
             name = re.sub(r"[^a-zA-Z0-9.]", "", name)
-
             # Convert to lowercase
             name = name.lower()
 

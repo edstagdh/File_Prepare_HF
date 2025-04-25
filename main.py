@@ -149,9 +149,13 @@ async def process_files():
                 is_valid, exit_code = await validate_date(year, month, day)
                 if not is_valid:
                     logger.error(f"Invalid date in filename: {filename_base_name}, moving to next file")
+                    logger.warning(f"End file: {filename}")
+                    failed_files.append(filename)
                     continue  # Skip to the next file
             else:
                 logger.error(f"Invalid filename format: {filename_base_name}, moving to next file")
+                logger.warning(f"End file: {filename}")
+                failed_files.append(filename)
                 continue  # Skip to the next file
 
             year_name = "20" + year  # Convert to 4 digit for scene identification purposes
@@ -163,8 +167,10 @@ async def process_files():
                 clean_tpdb_check_filename, scene_api_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template)
             if all(value is None for value in (new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description)):
                 # All values are None
+                logger.error(f"Failed to find a match via TPDB for file: {filename}")
+                logger.warning(f"End file: {filename}")
                 failed_files.append(filename)
-                continue
+                continue  # Skip to the next file
             if scene_date != scene_api_date:
                 year_name, month, day = scene_date.split("-")
                 year = year_name[-2:]
@@ -187,7 +193,7 @@ async def process_files():
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
             logger.warning(f"End file: {filename}")
-            failed_files.append(str(file))
+            failed_files.append(filename)
             continue  # Skip to the next file
 
         formatted_filename_performers_names = await format_performers(performers, 2)  # This includes sanitization of performer names
@@ -246,6 +252,7 @@ async def process_files():
                 results_metadata = await update_metadata(new_file_full_path, new_title, description, re_encode_hevc)
                 if not results_metadata:
                     logger.error(f"Failed to modify file: {new_filename}")
+                    logger.warning(f"End file: {filename}")
                     failed_files.append(new_file_full_path)
                     continue  # Skip to the next file
 
@@ -273,20 +280,20 @@ async def process_files():
                 if flag:
                     result = await func(*args)
                     if not result:
-                        logger.warning(f"End file: {filename}")
-                        if new_file_full_path not in failed_files:
-                            failed_files.append(new_file_full_path)
                         failed = True
                         break  # Exit inner loop
             if failed:
+                logger.error(f"Processing failed for file: {new_file_full_path}")
+                logger.warning(f"End file: {new_file_full_path}")
+                failed_files.append(new_file_full_path)
                 continue  # Skip to the next file
             processed_files += 1
-            logger.info(f"End file: {filename}")
+            logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:
-            logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
-            logger.warning(f"End file: {filename}")
-            failed_files.append(str(file))
+            logger.error(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
+            logger.warning(f"End file: {new_file_full_path}")
+            failed_files.append(filename)
             continue  # Skip to the next file
 
     # Finished processing
