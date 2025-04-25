@@ -54,11 +54,11 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         else:
             scene_tags = None
         site = selected_entry.get("site", {}).get("name")
-        if "onlyfans" in site.lower() and "FansDB" in site.lower():
+        if "onlyfans" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (onlyfans)", "")
             site = "OnlyFans-" + site
-        if "manyvids" in site.lower() and "FansDB" in site.lower():
+        if "manyvids" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (manyvids)", "")
             site = "ManyVids-" + site
@@ -79,7 +79,6 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
                 if user_input.lower() == 'exit':
                     break
                 female_performers.append((user_input, ""))
-
         if not female_performers:
             return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
         elif "Unknown" in female_performers:
