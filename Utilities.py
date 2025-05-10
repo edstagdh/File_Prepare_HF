@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from loguru import logger
 
-CLEAN_CHARS = "!@#$%^&*()_+=’' :"
+CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
 
 
 async def run_command(command):
@@ -147,7 +147,10 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
 
     elif mode == 2:
         # Remove unwanted characters
-        clean_title = input_string.translate(str.maketrans("", "", CLEAN_CHARS))
+        clean_title = input_string.replace(", ", ".")
+        clean_title = clean_title.replace(" ", ".")
+        clean_title = clean_title.translate(str.maketrans("", "", CLEAN_CHARS))
+        clean_title = clean_title.replace("..", ".")
         return clean_title
     else:
         return ""
@@ -260,7 +263,7 @@ async def format_performers(performers, mode):
     Returns:
         str: Formatted performer string.
     """
-    if not performers:
+    if not performers or performers is None:
         return ""
 
     unique_performers = sorted(set(p[0] for p in performers))
@@ -324,11 +327,11 @@ async def rename_file(file_path, new_filename):
         return False
 
 
-async def generate_mediainfo_file(filename, mediainfo_path):
+async def generate_mediainfo_file(filename, mediainfo_path, file_path):
     try:
 
         # Split the full path into directory, filename, and extension
-        file_path, file_name = os.path.split(filename)
+        _, file_name = os.path.split(filename)
         file_base_name, file_extension = os.path.splitext(file_name)
 
         # Define the output text file name
@@ -379,7 +382,10 @@ async def generate_template_video(
         template_file_full_path: str,
         code_version: str,
         scene_tags: list,
-        studio_tag: list
+        studio_tags: list,
+        image_output_format: str,
+        fill_imgbox_urls: bool,
+        imgbox_file_path: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -409,29 +415,56 @@ async def generate_template_video(
     resolution_icon_url = json_map[f"{resolution}"]
     codec_icon_url = json_map[f"{codec}"]
     extension_icon_url = json_map[f"{extension.replace('.', '')}"]
-    cover_image = f"{new_filename_base_name}.webp"
-    preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"
-    thumbnails_image = f"{new_filename_base_name}_Thumbnails.webp"
 
-    # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
-    name_blocks = formatted_names.replace(", ", "\n").splitlines()
+    # Default image paths
+    cover_image = f"{new_filename_base_name}.{image_output_format}"
+    preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"  # Hardcoded due to HF supported file hosting requirements(Either WEBP or GIF)
+    thumbnails_image = f"{new_filename_base_name}_thumbnails.{image_output_format}"
 
-    # Step 2: Process each name block
-    processed_blocks = []
-    for block in name_blocks:
-        names = block.strip().split()
-        if len(names) > 1:
-            joined = ".".join(names)
-            processed_blocks.append(joined)
-        else:
-            processed_blocks.append(block.strip())
+    # Optionally fill URLs from imgbox
+    if fill_imgbox_urls and os.path.isfile(imgbox_file_path):
+        try:
+            with open(imgbox_file_path, "r", encoding="utf-8") as f:
+                imgbox_data = json.load(f)
+
+            thumbs_key = f"{new_filename_base_name} - thumbnails"
+            cover_key = f"{new_filename_base_name} - cover"
+
+            if thumbs_key in imgbox_data and isinstance(imgbox_data[thumbs_key], list):
+                thumbs_entry = imgbox_data[thumbs_key][0]
+                if "image_url" in thumbs_entry:
+                    thumbnails_image = thumbs_entry["image_url"]
+
+            if cover_key in imgbox_data and isinstance(imgbox_data[cover_key], list):
+                cover_entry = imgbox_data[cover_key][0]
+                if "image_url" in cover_entry:
+                    cover_image = cover_entry["image_url"]
+
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+            raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
+
+    if formatted_names:
+        # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
+        name_blocks = formatted_names.replace(", ", "\n").splitlines()
+        # Step 2: Process each name block
+        processed_blocks = []
+        for block in name_blocks:
+            names = block.strip().split()
+            if len(names) > 1:
+                joined = ".".join(names)
+                processed_blocks.append(joined)
+            else:
+                processed_blocks.append(block.strip())
+    else:
+        processed_blocks = ""
 
     processed_string = " ".join(processed_blocks)
-    for tag in studio_tag:
-        cleaned_tag = re.sub(pattern, ".", tag)
+    for tag in studio_tags:
+        cleaned_tag = tag.replace("'", "")
+        cleaned_tag = re.sub(pattern, ".", cleaned_tag)
         processed_string += " " + cleaned_tag
-        if cleaned_tag != tag.replace(" ", ""):
-            processed_string += " " + tag.replace(" ", "")
+        if cleaned_tag != tag.replace(" ", "") and (cleaned_tag.replace(" ", "")) not in processed_string:
+            processed_string += " " + cleaned_tag.replace(" ", "").lower()
 
     processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"

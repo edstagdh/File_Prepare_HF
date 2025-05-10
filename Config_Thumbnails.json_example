@@ -1,0 +1,8 @@
+{
+  "num_thumbs": 16,
+  "thumb_width": 470,
+  "columns": 4,
+  "padding": 2,
+  "output_file_name_suffix": "thumbnails",
+  "add_file_info": true
+}

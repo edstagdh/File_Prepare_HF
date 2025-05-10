@@ -264,12 +264,12 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
             # Check if title contains 'interview'
             if "interview" in title:
                 sleep(0.5)
-                user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to ignore it? (y/n): ").strip().lower()
+                user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude/ignore it? (y/n): ").strip().lower()
                 if user_input in ["y", "yes"]:
-                    logger.info(f"Including scene: {item.get('title')}")
-                else:
                     logger.info(f"Ignoring scene: {item.get('title')}")
                     continue
+                else:
+                    logger.info(f"Including scene: {item.get('title')}")
 
             # Exact date match
             if item_date == scene_date:
@@ -338,9 +338,11 @@ async def extract_female_performers(selected_entry):
         if female_performers:
             return female_performers
         else:
-            female_performers.append(await get_user_input())
-            if not female_performers:
-                return ["Unknown"]
+            user_entries = await get_user_input()
+            if user_entries:
+                female_performers.extend(user_entries)
+            if not female_performers or len(female_performers) < 1:
+                return None
             else:
                 return female_performers
     except Exception as e:
@@ -371,7 +373,7 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
                 raw_data = await send_request(api_performers_url, api_auth, performer_id, max_retries, delay)
 
                 if raw_data:
-                    logger.success(f"Received raw data for performer: {performer_name}")
+                    # logger.debug(f"Received raw data for performer: {performer_name}")
 
                     # Process and return poster URLs
                     processed_data = await extract_performer_posters(raw_data, posters_limit)

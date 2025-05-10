@@ -11,9 +11,9 @@ from loguru import logger
 from Utilities import load_config, run_command
 
 
-async def create_preview_tool(new_file_full_path, directory, new_filename_base_name):
+async def process_video_preview(new_file_full_path, directory, new_filename_base_name):
     # Load Preview Config
-    config, exit_code = await load_config("Preview_Config.json")
+    config, exit_code = await load_config("Config_Video_Preview.json")
     if not config:
         exit(exit_code)
     else:
@@ -614,36 +614,56 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
 
 
 async def overlay_timestamp(temp_folder, video_path):
-    """Extracts timestamp from filename and overlays it on the video."""
-    match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
-    if not match:
-        logger.error(f"Could not extract timestamp from {video_path}")
-        return None
+    """Extracts timestamp from filename and overlays it on the video with shadow and spacing (using default font)."""
+    try:
+        match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
+        if not match:
+            logger.error(f"Could not extract timestamp from {video_path}")
+            return None
 
-    timestamp = match.group(1).replace(".", r"\:")  # Escape colons for FFmpeg
-    output_path = f"timestamped_{os.path.basename(video_path)}"
-    full_video_path = os.path.join(temp_folder, video_path)
-    full_output_path = os.path.join(temp_folder, output_path)
+        timestamp = match.group(1).replace(".", r"\:")  # Escape colons for FFmpeg
+        output_path = f"timestamped_{os.path.basename(video_path)}"
+        full_video_path = os.path.join(temp_folder, video_path)
+        full_output_path = os.path.join(temp_folder, output_path)
 
-    # Correct font path syntax for FFmpeg
-    font_file = r"C\\:/Windows/Fonts/arial.ttf"  # Use the correct syntax for font path
+        # Create drawtext filters: 8 black shadows + white main text using default system font (no need to define font explicitly)
+        drawtext_filters = []
+        shadow_offsets = [(-2, -2), (-2, 0), (-2, 2),
+                          (0, -2), (0, 2),
+                          (2, -2), (2, 0), (2, 2)]
 
-    # FFmpeg command with correct font file path
-    ffmpeg_cmd = (
-        f"ffmpeg -i \"{full_video_path}\" "
-        f"-vf \"drawtext=text='{timestamp}':fontfile={font_file}:fontcolor=white:fontsize=20:"
-        f"x=(w-text_w)-10:y=10:box=1:boxcolor=black@0.4:boxborderw=5|2 \" "
-        f"-c:v libx264 -crf 23 -preset slow -c:a copy \"{full_output_path}\" -y"
-    )
+        for dx, dy in shadow_offsets:
+            drawtext_filters.append(
+                f"drawtext=text='{timestamp}':font=Arial:fontcolor=black@1.0:fontsize=32:"
+                f"x=(w-text_w)-10+{dx}:y=10+{dy}:"
+                f"alpha=1"
+            )
 
-    stdout, stderr, exit_code = await run_command(ffmpeg_cmd)
+        drawtext_filters.append(
+            f"drawtext=text='{timestamp}':font=Arial:fontcolor=white:fontsize=32:"
+            f"x=(w-text_w)-10:y=10:"
+            f"borderw=0:"
+            f"alpha=1:"
+        )
 
-    if exit_code == 0 and os.path.exists(full_output_path):
-        # logger.debug(f"Timestamp overlay added: {full_output_path}")
-        return full_output_path  # Return the final path
-    else:
-        # Log the error message from stderr if FFmpeg fails
-        logger.error(f"Failed to overlay timestamp on {video_path}, Exit Code: {exit_code}, Error: {stderr}")
+        vf_filters = ",".join(drawtext_filters)
+
+        ffmpeg_cmd = (
+            f"ffmpeg -i \"{full_video_path}\" "
+            f"-vf \"{vf_filters}\" "
+            f"-c:v libx264 -preset fast -c:a copy \"{full_output_path}\" -y"
+        )
+
+        stdout, stderr, exit_code = await run_command(ffmpeg_cmd)
+
+        if exit_code == 0 and os.path.exists(full_output_path):
+            return full_output_path
+        else:
+            logger.error(f"Failed to overlay timestamp on {video_path}, Exit Code: {exit_code}, Error: {stderr}")
+            return None
+
+    except Exception as e:
+        logger.exception(f"Exception occurred while overlaying timestamp on {video_path}: {e}")
         return None
 
 
@@ -999,7 +1019,7 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
     line_height = 30
     height = len(metadata_table) * line_height + 20
 
-    img = Image.new("RGB", (width, height), color=(128, 128, 128))
+    img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:

@@ -23,6 +23,7 @@
   "36": "Unsupported Python Version",
   "37": "Conflict in configration, in order to generate HFtemplate file, generating media info file is a must",
   "38": "Unable to find a match via TPDB API",
+  "39": "invalid image output format",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"

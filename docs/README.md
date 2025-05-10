@@ -18,10 +18,10 @@ This process requires matching scene via TPDB, it is not a standalone script.
 
 - [x] Add tags generation for scene upload process.
 - [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
-- [ ] Support for Static thumbnails generation without using Scorp VTM software.
+- [x] Support for Static thumbnails generation without using Scorp VTM software.
 - [ ] Support other types of databases, e.g. StashDB.
-- [ ] Add an option to use jpg format images.
-- [ ] Add an option to upload to imgbox(static jpg format images only), this requires restructure.
+- [x] Add an option to use jpg format images.
+- [x] Add an option to upload to imgbox(supported static format images only), this requires restructure.
 
 
 ## Installation
@@ -68,16 +68,10 @@ This process requires matching scene via TPDB, it is not a standalone script.
 1. **Configure Settings**:
 
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
+   - Rename `Config_Thumbnails.json_example` to `Config_Thumbnails.json` and adjust the settings as needed.
+   - Rename `Config_Video_Preview.json_example` to `Config_Video_Preview.json` and adjust the settings as needed.
    - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials.
-   - If you intend to you Scrop VTM(Video Thumbnails Maker), Configure the settings as you like in the VTM with the following settings being a prerequisite:
-     - Set output format file to ".jpg" file
-     - add suffix "_thumbnails"
-     - "Remove video extension" from output file name, example output format:
-     ```"Studio.YY.MM.DD.FName.LName_thumbnails.jpg"```
-     
-   If you would like a template for VTM, you can find it here: Resources/edstagdh.vtm
-   <br>This does not replace configuring the required settings for output file name/format.  
-<br>
+
 2. **Run the Main Script**:
 
    ```bash
@@ -89,24 +83,33 @@ This process requires matching scene via TPDB, it is not a standalone script.
 ## Configuration
 
 - **`Config.json`**: Contains settings for media processing, such as input/output directories, preview options, and other parameters.
+- **`Config_Thumbnails.json`**: Contains settings thumbnails processing
+- **`Config_Video_Preview.json`**: Contains settings preview processing
 - **`creds.secret`**: Stores sensitive information like TPDB API keys. Ensure this file is kept secure and is not shared publicly.
 
 ## File Structure
 
 ```
 File_Prepare_HF/
-├── BBCode_Images.json          # Icons mapping for images URLs
-├── Config.json_example         # Example configuration file
-├── creds.secret_example        # Example credentials file
-├── HF_Template.txt             # Example template file with placeholders for HF uploading
-├── Media_Processing.py         # Handles media file processing
-├── Preview_Tool.py             # Generates media previews
-├── TPDB_API_Processing.py      # Interacts with TPDB API
-├── Utilities.py                # Utility functions for processing
-├── main.py                     # Entry point of the application
-├── Requirements.txt            # Python dependencies
-├── docs/                       # Documentation files
-└── .gitignore                  # Specifies files to ignore in Git
+├── gitignore                                  # Specifies files to ignore in Git
+├── BBCode_Images.json                          # Icons mapping for images URLs
+├── Config.json_example                         # Example configuration file
+├── Config_Thumbnails.json_example              # Example Thumbnails configuration file
+├── Config_Video_Preview.json_example           # Example Preview configuration file
+├── creds.secret_example                        # Example credentials file
+├── Generate_Thumbnails.py.py                   # Thumbnails generation code
+├── Generate_Video_Preview.py                   # Preview generation code
+├── HF_Template.txt                             # Example template file with placeholders for HF uploading
+├── LICENSE                                     # License file
+├── main.py                                     # Main Application code for processing files
+├── Media_Processing.py                         # Handles media file processing
+├── Requirements.txt                            # Python dependencies requirements file
+├── TPDB_API_Processing.py                      # TPDB API code
+├── Upload_IMGBOX.py                            # IMGBOX code integration
+├── Utilities.py                                # Utility functions for processing
+└── docs/                                       # Documentation files
+    ├── exit_codes.json                         # Common exit codes for the application
+    ├── README.md                               # README file
 ```
 
 ## License

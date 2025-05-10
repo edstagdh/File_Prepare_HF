@@ -46,6 +46,8 @@ dist/
 # User Configs
 *.cfg
 Config.json
+Config_Thumbnails.json
+Config_Video_Preview.json
 
 # Resources Files
 Resources.json
