@@ -251,7 +251,7 @@ async def convert_image_format(input_file_path: str, output_file_path: str, outp
         return False, None
 
 
-async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN):
+async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, image_output_format):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
@@ -293,7 +293,8 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             text_color = (255, 255, 255)  # Text color (black)
             position_percentage = 0.8
             for file in downloaded_files:
-                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN)
+                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN,
+                                        image_output_format)
 
         except Exception:
             logger.exception(f"Error processing performer {performer_name}, ID: {performer_id}")
@@ -354,7 +355,7 @@ async def download_poster_images(poster_urls: list[str], faces_dir: str, perform
         return False
 
 
-async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN):
+async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN, image_output_format):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
@@ -379,7 +380,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             continue
 
         # Save the face image with a long vertical elliptical shape
-        output_file = f"{base_filename}-face-{i + 1}.webp"
+        output_file = f"{base_filename}-face-{i + 1}.{image_output_format}"
         full_output_file_path = os.path.join(output_path, output_file)
         await save_face_image_with_rounded_corners(face, mask, full_output_file_path, target_size)
 

@@ -19,7 +19,8 @@
 [BR][BR]
 [tr][td=100%][size=4][b][u]Performers:[/u][/b][/size]
 
-[size=3]{FORMATTED_NAMES}[/size][/td][/tr]
+[size=3]{FORMATTED_NAMES}[/size]
+[/td][/tr]
 
 [/table]
 

@@ -329,16 +329,16 @@ async def process_files():
             codec = await get_video_codec(new_file_full_path)
 
             # Disable uploading to imgbox
-            if image_output_format not in ["png", "jpg"]:
+            if image_output_format not in ["png", "jpg"] and (upload_thumbnails_imgbox or upload_cover_imgbox):
                 upload_cover_imgbox = False
-                upload_thumbnails_imgbox
+                upload_thumbnails_imgbox = False
                 logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
             thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
-            thumbnails_file_path = os.path.join(directory, thumbnails_file_name)
+            thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
-            cover_file_path = os.path.join(directory, cover_file_name)
-            imgbox_file_path = os.path.join(directory, f"{new_filename_base_name}_imgbox.txt")
-            logger.debug(imgbox_file_path)
+            cover_file_path = os.path.join(output_directory, cover_file_name)
+            imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt")
+
             if upload_cover_imgbox or upload_thumbnails_imgbox:
                 fill_imgbox_urls = True
                 # Check if the imgbox file exists and delete it
@@ -366,7 +366,7 @@ async def process_files():
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
-                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN]),
+                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, image_output_format]),
                 (create_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
                   template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_imgbox_urls, imgbox_file_path]),

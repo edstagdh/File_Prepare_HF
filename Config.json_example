@@ -21,7 +21,7 @@
   "posters_limit": 3,
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
-  "Code_Version": "V5",
+  "Code_Version": "V5.1",
   "bad_words": [".Hardcore"],
   "use_title": false,
   "create_sub_folder": false,
