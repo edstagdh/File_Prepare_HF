@@ -385,7 +385,8 @@ async def generate_template_video(
         studio_tags: list,
         image_output_format: str,
         fill_imgbox_urls: bool,
-        imgbox_file_path: str
+        imgbox_file_path: str,
+        suffix: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -468,9 +469,18 @@ async def generate_template_video(
 
     processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
-    processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p
+    if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} FHD"
+    elif resolution == "2160p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} UHD 4K"
+    elif resolution == "720p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} HD"
+    else:
+        processed_string += f" {resolution}"
     processed_string += f" {codec}"
     processed_string += f" {extension.replace('.', '')}"
+    if suffix != "":
+        processed_string += f" {suffix}"
     # Build output filename and path
     tags_filename = f"{new_filename_base_name}_HF_tags.txt"
     tags_path = os.path.join(directory, tags_filename)

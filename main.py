@@ -369,7 +369,7 @@ async def process_files():
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, image_output_format]),
                 (create_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
-                  template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_imgbox_urls, imgbox_file_path]),
+                  template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_imgbox_urls, imgbox_file_path, suffix]),
             ]
             failed = False
             # Run each enabled optional step
