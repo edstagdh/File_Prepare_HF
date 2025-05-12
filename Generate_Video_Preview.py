@@ -38,6 +38,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         custom_output_path = config["CUSTOM_OUTPUT_PATH"]
         confirm_cut_points_required = config["CONFIRM_CUT_POINTS_REQUIRED"]
         last_cut_point = config["LAST_CUT_POINT"]
+        font_full_name = config["FONT_NAME_FULL"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -55,7 +56,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point)
+                                  new_filename_base_name, last_cut_point, font_full_name)
     if not results:
         logger.error("Preview creation has failed, please check the log.")
         return False
@@ -109,7 +110,7 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point):
+                        last_cut_point, font_full_name):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -268,7 +269,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point)
+                                                       print_cut_points, last_cut_point, font_full_name)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -424,7 +425,8 @@ async def generate_cut_points(
         video_path,
         filename_without_ext,
         print_cut_points,
-        last_cut_point
+        last_cut_point,
+        font_full_name
 ):
     """Generate unique evenly spaced cut points with random variations."""
     calc_failed_counter = 0
@@ -498,7 +500,8 @@ async def generate_cut_points(
             is_vertical,
             black_bars,
             timestamps_mode,
-            preview_sheet_required
+            preview_sheet_required,
+            font_full_name
         )
 
         if not temp_files_preview:
@@ -515,7 +518,7 @@ async def generate_cut_points(
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
-                                  preview_sheet_required):
+                                  preview_sheet_required, font_full_name):
     """Generates video segments from a given video and overlays timestamps on them."""
     temp_files_webp = []
 
@@ -556,7 +559,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_full_name)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -613,8 +616,8 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path):
-    """Extracts timestamp from filename and overlays it on the video with shadow and spacing (using default font)."""
+async def overlay_timestamp(temp_folder, video_path, font_full_name):
+    """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
     try:
         match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
         if not match:
@@ -626,7 +629,14 @@ async def overlay_timestamp(temp_folder, video_path):
         full_video_path = os.path.join(temp_folder, video_path)
         full_output_path = os.path.join(temp_folder, output_path)
 
-        # Create drawtext filters: 8 black shadows + white main text using default system font (no need to define font explicitly)
+        font_path = f"assets/{font_full_name}"
+
+        if not os.path.exists(font_path):
+            logger.error(f"Font file not found at expected path: {font_path}")
+            return None
+
+        font_expr = f"fontfile='{font_path}'"
+
         drawtext_filters = []
         shadow_offsets = [(-2, -2), (-2, 0), (-2, 2),
                           (0, -2), (0, 2),
@@ -634,16 +644,15 @@ async def overlay_timestamp(temp_folder, video_path):
 
         for dx, dy in shadow_offsets:
             drawtext_filters.append(
-                f"drawtext=text='{timestamp}':font=Arial:fontcolor=black@1.0:fontsize=32:"
+                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize=32:"
                 f"x=(w-text_w)-10+{dx}:y=10+{dy}:"
                 f"alpha=1"
             )
 
         drawtext_filters.append(
-            f"drawtext=text='{timestamp}':font=Arial:fontcolor=white:fontsize=32:"
+            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize=32:"
             f"x=(w-text_w)-10:y=10:"
-            f"borderw=0:"
-            f"alpha=1:"
+            f"borderw=0:alpha=1"
         )
 
         vf_filters = ",".join(drawtext_filters)
@@ -964,7 +973,7 @@ async def get_video_metadata(file_path, char_break_line):
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_md5.update(chunk)
-        md5_hash = hash_md5.hexdigest()
+        md5_hash = hash_md5.hexdigest().upper()
     except Exception as e:
         logger.error(f"Error computing MD5 hash: {e}")
         md5_hash = "N/A"

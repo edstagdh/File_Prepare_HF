@@ -4,5 +4,6 @@
   "columns": 4,
   "padding": 2,
   "output_file_name_suffix": "thumbnails",
-  "add_file_info": true
+  "add_file_info": true,
+  "font_full_name": "Gotham_Medium.otf"
 }

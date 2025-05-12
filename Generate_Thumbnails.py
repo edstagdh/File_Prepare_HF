@@ -87,16 +87,18 @@ async def extract_frame_at_timestamps(video_path, timestamps, output_dir):
         raise
 
 
-async def add_timestamp_to_frame(image, timestamp):
+async def add_timestamp_to_frame(image, timestamp, font_full_name):
     """
     Adds a timestamp to the top-right corner of an image.
 
     Args:
-        image (PIL.Image.Image): The image to which the timestamp will be added.
-        timestamp (float): The timestamp to display on the image.
+        :param image: The image to which the timestamp will be added.
+        :param timestamp: The timestamp to display on the image.
+        :param font_full_name:
 
     Returns:
         PIL.Image.Image: The image with the added timestamp.
+
     """
     try:
         # Convert timestamp to HH:MM:SS format
@@ -109,7 +111,8 @@ async def add_timestamp_to_frame(image, timestamp):
 
         # Load a system font with a larger size (200% of the default size)
         try:
-            font = ImageFont.truetype("arial.ttf", size=32)  # Adjust size here
+            font_path = f"assets/{font_full_name}"
+            font = ImageFont.truetype(font_path, size=32)  # Adjust size here
         except IOError:
             font = ImageFont.load_default()  # Fallback if font is not available
 
@@ -152,7 +155,7 @@ async def add_timestamp_to_frame(image, timestamp):
         raise
 
 
-async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps, info_image_path):
+async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps, info_image_path, font_full_name):
     """
     Generates a contact sheet from the extracted frames and saves it as an image.
 
@@ -184,7 +187,7 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
             img = img.resize(new_size)
 
             # Add timestamp to the top-right corner of each frame
-            img = await add_timestamp_to_frame(img, timestamps[i])
+            img = await add_timestamp_to_frame(img, timestamps[i], font_full_name)
 
             thumbs.append(img)
 
@@ -556,6 +559,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             padding = config["padding"]
             output_file_name_suffix = config["output_file_name_suffix"]
             add_file_info = config["add_file_info"]
+            font_full_name = config["font_full_name"]
 
         # Check if the output file already exists
         if await output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format):
@@ -589,7 +593,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
                 info_image_path = None
 
             await extract_frame_at_timestamps(input_video_full_path, timestamps, temp_dir)
-            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path)
+            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_full_name)
 
         return True
 
