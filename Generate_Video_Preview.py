@@ -8,12 +8,12 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
-from Utilities import load_config, run_command
+from Utilities import load_json_file, run_command
 
 
 async def process_video_preview(new_file_full_path, directory, new_filename_base_name):
     # Load Preview Config
-    config, exit_code = await load_config("Config_Video_Preview.json")
+    config, exit_code = await load_json_file("Config_Video_Preview.json")
     if not config:
         exit(exit_code)
     else:

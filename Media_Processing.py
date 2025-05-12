@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path
 from loguru import logger
 from mutagen.mp4 import MP4
-from Utilities import run_command
+from Utilities import run_command, load_json_file
 from TPDB_API_Processing import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
 
@@ -273,6 +273,11 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         logger.exception(f"Failed to create directory in: {directory}")
         return False
 
+    # Load JSON config
+    performers_images, exit_code = await load_json_file("BBCode_Images.json")
+    if exit_code != 0 or performers_images is None:
+        raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+
     for data in performers:
         try:
             if len(data) < 2:
@@ -280,6 +285,10 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
                 continue
             performer_name = data[0]
             performer_id = data[1]
+
+            if performer_name in performers_images:
+                logger.debug(f"Performer {performer_name} already has mapped image in json file")
+                continue
             logger.debug(f"Processing performer {performer_name}, ID: {performer_id}")
             performer_posters, performer_slug = await get_performer_profile_picture(performer_name, performer_id, posters_limit)
             # performer_url = tpdb_performer_url + performer_slug if performer_slug else ""

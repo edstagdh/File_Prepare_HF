@@ -55,3 +55,6 @@ Resources.json
 # User Secret Files
 *.secret
 Secret.json
+
+# Performers json
+Performers_Images.json

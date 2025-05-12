@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from loguru import logger
 from pathlib import Path
-from Utilities import verify_ffmpeg_and_ffprobe, load_config, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
+from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
     generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, cover_image_download_and_conversion, \
@@ -18,7 +18,7 @@ from Upload_IMGBOX import upload_single_image
 
 async def process_files():
     # Load Config file
-    config, exit_code = await load_config("Config.json")
+    config, exit_code = await load_json_file("Config.json")
     if not config:
         exit(exit_code)
     else:
@@ -55,6 +55,7 @@ async def process_files():
         upload_cover_imgbox = config["upload_cover_imgbox"]
         upload_thumbnails_imgbox = config["upload_thumbnails_imgbox"]
         image_output_format = config["image_output_format"].lower()
+        performer_image_output_format = config["performer_image_output_format"].lower()
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -366,7 +367,7 @@ async def process_files():
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
-                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, image_output_format]),
+                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format]),
                 (create_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
                   template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_imgbox_urls, imgbox_file_path, suffix]),

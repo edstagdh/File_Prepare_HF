@@ -97,22 +97,22 @@ async def verify_ffmpeg_and_ffprobe():
         return False, ffmpeg_code if not ffmpeg_ok else ffprobe_code
 
 
-async def load_config(config_name):
+async def load_json_file(file_name):
     try:
-        with open(config_name, 'r') as config_file:
+        with open(file_name, 'r') as config_file:
             json_data = json.load(config_file)
             return json_data, 0  # Success
     except FileNotFoundError:
-        logger.error(f"{config_name} file not found.")
+        logger.error(f"{file_name} file not found.")
         return None, 20  # JSON file load error
     except KeyError as e:
-        logger.error(f"Key {e} is missing in the {config_name} file.")
+        logger.error(f"Key {e} is missing in the {file_name} file.")
         return None, 21  # Missing keys in JSON
     except json.JSONDecodeError:
-        logger.error(f"Error parsing {config_name}. Ensure the JSON is formatted correctly.")
+        logger.error(f"Error parsing {file_name}. Ensure the JSON is formatted correctly.")
         return None, 20  # JSON file load error
     except Exception:
-        logger.exception(f"An unexpected error occurred while loading {config_name}.")
+        logger.exception(f"An unexpected error occurred while loading {file_name}.")
         return None, 99  # Unknown exception
 
 
@@ -407,7 +407,7 @@ async def generate_template_video(
         media_info = f.read()
 
     # Load JSON config
-    json_map, exit_code = await load_config("BBCode_Images.json")
+    json_map, exit_code = await load_json_file("BBCode_Images.json")
     if exit_code != 0 or json_map is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -444,22 +444,41 @@ async def generate_template_video(
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
 
+    # Load JSON config
+    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    if exit_code != 0 or performers_images is None:
+        raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+
     if formatted_names:
-        # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
+        # Step 1: Replace ", " with a separator for easy splitting
         name_blocks = formatted_names.replace(", ", "\n").splitlines()
-        # Step 2: Process each name block
+
         processed_blocks = []
+        mapped_names = []
+
         for block in name_blocks:
-            names = block.strip().split()
+            full_name = block.strip()
+
+            # Step 2a: Prepare dot-joined name (e.g., "John Doe" -> "John.Doe")
+            names = full_name.split()
             if len(names) > 1:
                 joined = ".".join(names)
                 processed_blocks.append(joined)
             else:
-                processed_blocks.append(block.strip())
+                processed_blocks.append(full_name)
+
+            # Step 2b: Map full name to image URL or fallback to name
+            if full_name in performers_images:
+                mapped_names.append(f"[img]{performers_images[full_name]}[/img]")
+            else:
+                mapped_names.append(f"[img]{full_name}[/img]")
     else:
         processed_blocks = ""
+        mapped_names = []
 
     processed_string = " ".join(processed_blocks)
+    mapped_names = " ".join(mapped_names)
+
     for tag in studio_tags:
         cleaned_tag = tag.replace("'", "")
         cleaned_tag = re.sub(pattern, ".", cleaned_tag)
@@ -498,7 +517,7 @@ async def generate_template_video(
         "{NEW_TITLE}": new_title,
         "{SCENE_PRETTY_DATE}": scene_pretty_date,
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
-        "{FORMATTED_NAMES}": formatted_names,
+        "{FORMATTED_NAMES}": mapped_names,
         "{FPS}": fps_icon_url,
         "{RESOLUTION}": resolution_icon_url,
         "{IS_VERTICAL}": "yes" if is_vertical else "no",
@@ -513,7 +532,8 @@ async def generate_template_video(
     try:
         # Replace placeholders
         for placeholder, value in replacements.items():
-            template_content = template_content.replace(placeholder, value)
+            if placeholder in template_content:
+                template_content = template_content.replace(placeholder, value)
 
         # Make sure the target directory exists
         os.makedirs(directory, exist_ok=True)
