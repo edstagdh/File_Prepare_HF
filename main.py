@@ -31,7 +31,6 @@ async def process_files():
         create_hf_template = config["create_hf_template"]
 
         # Addition Configuraiton:
-        mediaarea_mediainfo_path = config["mediaarea_mediainfo_path"]
         directory = config["working_path"]
         manual_mode = config["manual_mode"]
         tpdb_performer_url = config["tpdb_performer_url"]
@@ -334,6 +333,10 @@ async def process_files():
                 upload_cover_imgbox = False
                 upload_thumbnails_imgbox = False
                 logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
+            if not create_cover_image:
+                upload_cover_imgbox = False
+            if not create_thumbnails:
+                upload_thumbnails_imgbox = False
             thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
             thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
@@ -364,7 +367,7 @@ async def process_files():
 
                 (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name]),
 
-                (create_mediainfo, generate_mediainfo_file, [new_file_full_path, mediaarea_mediainfo_path, output_directory]),
+                (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format]),
