@@ -9,7 +9,6 @@ import subprocess
 import textwrap
 import time
 from io import BytesIO
-from pathlib import Path
 from loguru import logger
 from mutagen.mp4 import MP4
 from Utilities import run_command, load_json_file
@@ -184,7 +183,7 @@ async def cover_image_download_and_conversion(image_url: str,
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
         with open(temp_image_path, 'wb') as f:
             f.write(response.content)
-        logger.info(f"Image saved to {temp_image_path}")
+        # logger.debug(f"Image saved to {temp_image_path}")
         final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
         # Check if the image format matches the desired format
         if not temp_image_path.lower().endswith(f".{image_output_format}"):
@@ -194,7 +193,7 @@ async def cover_image_download_and_conversion(image_url: str,
             logger.info(f"Image converted to {image_output_format} and saved to {final_image_path}")
         else:
             os.rename(temp_image_path, final_image_path)
-            logger.info(f"Image saved as {final_image_path}")
+            logger.success(f"Image saved as {final_image_path}")
 
         return True
     except Exception:
@@ -252,10 +251,11 @@ async def convert_image_format(input_file_path: str, output_file_path: str, outp
 
 
 async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN,
-                                             performer_image_output_format):
+                                             performer_image_output_format, font_full_name):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
+        :param font_full_name:
         :param performer_image_output_format:
         :param MTCNN:
         :param posters_limit:
@@ -277,7 +277,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         return False
 
     # Load JSON config
-    performers_images, exit_code = await load_json_file("BBCode_Images.json")
+    performers_images, exit_code = await load_json_file("Performers_Images.json")
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -306,7 +306,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             position_percentage = 0.8
             for file in downloaded_files:
                 await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN,
-                                        performer_image_output_format)
+                                        performer_image_output_format, font_full_name)
 
         except Exception:
             logger.exception(f"Error processing performer {performer_name}, ID: {performer_id}")
@@ -368,7 +368,7 @@ async def download_poster_images(poster_urls: list[str], faces_dir: str, perform
 
 
 async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN,
-                            performer_image_output_format):
+                            performer_image_output_format, font_full_name):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
@@ -402,6 +402,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             output_file=full_output_file_path,
             text=text,
             font_size=font_size,
+            font_full_name=font_full_name,
             text_color=text_color,  # White text
             glow_color=(0, 0, 0),  # Black glow
             glow_thickness=3,  # Thickness of the glow
@@ -409,7 +410,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             bold_thickness=0,  # Adjust thickness as needed
             max_chars_per_line=13,
             position_percentage=position_percentage,
-            line_spacing=15  # Increased spacing for better readability
+            line_spacing=15,  # Increased spacing for better readability
         )
 
         logger.success(f"Finished processing {image_path} - {output_file}")
@@ -420,6 +421,7 @@ async def overlay_text(
         output_file,
         text,
         font_size,
+        font_full_name,
         text_color=(255, 255, 255),  # White text
         glow_color=(0, 0, 0),  # Black glow
         glow_thickness=3,  # Thickness of the glow
@@ -442,12 +444,11 @@ async def overlay_text(
     # Draw on the overlay
     draw = ImageDraw.Draw(overlay)
 
-    # Try loading a common system font with specified size
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
-    except OSError:
-        font = ImageFont.load_default()
-        logger.warning("Falling back to default font. Font size may not match expected size.")
+        font_path = f"assets/{font_full_name}"
+        font = ImageFont.truetype(font_path, size=18)  # Adjust size here
+    except IOError:
+        font = ImageFont.load_default()  # Fallback if font is not available
 
     # Wrap text into multiple lines
     wrapped_text = textwrap.fill(text, width=max_chars_per_line)

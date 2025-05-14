@@ -10,3 +10,4 @@ num2words~=0.5.14
 pyimgbox~=1.0.7
 beautifulsoup4
 pymediainfo~=7.0.1
+selenium~=4.31.0

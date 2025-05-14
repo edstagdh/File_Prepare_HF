@@ -5,7 +5,7 @@ import json
 import asyncio
 
 
-async def upload_single_image(filepath, new_filename_base_name, mode):
+async def imgbox_upload_single_image(filepath, new_filename_base_name, mode):
     try:
         # logger.debug(f"Starting anonymous upload for: {filepath}")
         gallery = pyimgbox.Gallery()
@@ -68,7 +68,6 @@ async def upload_single_image(filepath, new_filename_base_name, mode):
         return False
 
 
-
-# # Example usage
+# Example usage
 # if __name__ == "__main__":
 #     asyncio.run(upload_single_image(r"path\file_name.extension", "file_base_name"))

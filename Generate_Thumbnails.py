@@ -109,7 +109,6 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         # Draw the timestamp in the top right corner
         draw = ImageDraw.Draw(image)
 
-        # Load a system font with a larger size (200% of the default size)
         try:
             font_path = f"assets/{font_full_name}"
             font = ImageFont.truetype(font_path, size=32)  # Adjust size here
@@ -224,7 +223,7 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
             contact_sheet.paste(thumb, (x, y))
 
         contact_sheet.save(output_path)
-        logger.info(f"Contact sheet saved to {output_path}")
+        logger.success(f"Contact sheet saved to {output_path}")
 
     except Exception as e:
         logger.exception(f"Error generating contact sheet from {image_dir}.")

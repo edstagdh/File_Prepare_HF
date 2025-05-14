@@ -13,7 +13,8 @@ from Media_Processing import get_existing_title, get_existing_description, cover
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails import process_thumbnails
-from Upload_IMGBOX import upload_single_image
+from Upload_IMGBOX import imgbox_upload_single_image
+from Upload_IMGBB import imgbb_upload_single_image
 
 
 async def process_files():
@@ -53,8 +54,13 @@ async def process_files():
         create_sub_folder = config["create_sub_folder"]
         upload_cover_imgbox = config["upload_cover_imgbox"]
         upload_thumbnails_imgbox = config["upload_thumbnails_imgbox"]
+        upload_cover_imgbb = config["upload_cover_imgbb"]
+        upload_thumbnails_imgbb = config["upload_thumbnails_imgbb"]
         image_output_format = config["image_output_format"].lower()
         performer_image_output_format = config["performer_image_output_format"].lower()
+        font_full_name = config["font_full_name"]
+        imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
+        upload_previews_imgbb = config["upload_previews_imgbb"]
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -329,27 +335,36 @@ async def process_files():
             codec = await get_video_codec(new_file_full_path)
 
             # Disable uploading to imgbox
-            if image_output_format not in ["png", "jpg"] and (upload_thumbnails_imgbox or upload_cover_imgbox):
-                upload_cover_imgbox = False
-                upload_thumbnails_imgbox = False
-                logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
+            if upload_thumbnails_imgbox or upload_cover_imgbox:
+                if image_output_format not in ["png", "jpg"]:
+                    upload_cover_imgbox = False
+                    upload_thumbnails_imgbox = False
+                    logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
             if not create_cover_image:
                 upload_cover_imgbox = False
+                upload_cover_imgbb = False
             if not create_thumbnails:
                 upload_thumbnails_imgbox = False
-            thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
-            thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
+                upload_thumbnails_imgbb = False
+
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
-            imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt")
+            thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
+            thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
 
-            if upload_cover_imgbox or upload_thumbnails_imgbox:
-                fill_imgbox_urls = True
+            imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt") if upload_cover_imgbox or upload_thumbnails_imgbox else ""
+            imgbb_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbb.txt") if upload_cover_imgbb or upload_thumbnails_imgbb else ""
+
+            if upload_cover_imgbox or upload_thumbnails_imgbox or upload_cover_imgbb or upload_thumbnails_imgbb:
+                fill_img_urls = True
                 # Check if the imgbox file exists and delete it
                 if os.path.exists(imgbox_file_path):
                     os.remove(imgbox_file_path)
+                # Check if the imgbb file exists and delete it
+                if os.path.exists(imgbb_file_path):
+                    os.remove(imgbb_file_path)
             else:
-                fill_imgbox_urls = False
+                fill_img_urls = False
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
@@ -358,22 +373,22 @@ async def process_files():
 
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory,
                                                                            image_output_format]),
-
-                (upload_cover_imgbox, upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
+                (upload_cover_imgbox, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
+                (upload_cover_imgbb, imgbb_upload_single_image, [cover_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "cover"]),
 
                 (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format]),
+                (upload_thumbnails_imgbox, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
+                (upload_thumbnails_imgbb, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
 
-                (upload_thumbnails_imgbox, upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
-
-                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name]),
+                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode]),
 
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
-                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format]),
+                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_hf_template, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
-                  template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_imgbox_urls, imgbox_file_path, suffix]),
+                  template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, suffix]),
             ]
             failed = False
             # Run each enabled optional step
@@ -397,18 +412,21 @@ async def process_files():
                     if os.path.exists(new_file_full_path):
                         # Move the file
                         shutil.move(new_file_full_path, output_directory)
-                        logger.info(f"File moved successfully from {new_file_full_path} to {output_directory}")
+                        logger.success(f"File moved successfully from {new_file_full_path} to {output_directory}")
                         new_file_full_path = os.path.join(output_directory, new_full_filename)
                     else:
                         logger.error(f"Source file {new_file_full_path} does not exist.")
                 except Exception as e:
                     logger.error(f"Error moving file: {e}")
+                    logger.warning(f"End file: {new_file_full_path}")
+                    failed_files.append(file_full_name)
+                    continue  # Skip to the next file
 
             processed_files += 1
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:
-            logger.error(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
+            logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
             logger.warning(f"End file: {new_file_full_path}")
             failed_files.append(file_full_name)
             continue  # Skip to the next file

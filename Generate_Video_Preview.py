@@ -9,9 +9,10 @@ from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
 from Utilities import load_json_file, run_command
+from Upload_IMGBB import imgbb_upload_single_image
 
 
-async def process_video_preview(new_file_full_path, directory, new_filename_base_name):
+async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode):
     # Load Preview Config
     config, exit_code = await load_json_file("Config_Video_Preview.json")
     if not config:
@@ -56,7 +57,8 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point, font_full_name)
+                                  new_filename_base_name, last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode)
+
     if not results:
         logger.error("Preview creation has failed, please check the log.")
         return False
@@ -110,7 +112,7 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point, font_full_name):
+                        last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -307,6 +309,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and os.path.exists(output_webp):
                 logger.success(f"Preview WebP created successfully: {output_webp}")
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(output_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview WebP")
+                    if upload_result:
+                        logger.success(f"Preview WebP uploaded successfully: {output_webp}")
+                    else:
+                        logger.warning(f"upload failed for file: {output_webp}")
             else:
                 logger.error(f"Failed to create WebP: {stderr}")
                 return False
@@ -344,6 +352,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and os.path.exists(output_gif):
                 logger.success(f"Preview GIF created successfully: {output_gif}")
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(output_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview GIF")
+                    if upload_result:
+                        logger.success(f"Preview GIF uploaded successfully: {output_gif}")
+                    else:
+                        logger.warning(f"Upload failed for file: {output_gif}")
             else:
                 logger.error(f"Failed to create GIF: {stderr}")
                 return False
@@ -353,7 +367,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_webp_preview_sheet or create_gif_preview_sheet or create_webm_preview_sheet:
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
-                                                   preview_sheet_webm)
+                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -766,8 +780,8 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
-                                           add_black_bars,
-                                           create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm):
+                                           add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -868,6 +882,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                 logger.error(f"Error creating WebP preview: {stdout}\n{stderr}")
             else:
                 results += f"WebP preview saved: {preview_sheet_webp}\n"
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(preview_sheet_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview Sheet WebP")
+                    if upload_result:
+                        logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
+                    else:
+                        logger.warning(f"Upload failed for file: {preview_sheet_webp}")
 
         # WebM Preview
         if create_webm_preview_sheet:
@@ -892,6 +912,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                 logger.error(f"Error creating GIF preview: {stdout}\n{stderr}")
             else:
                 results += f"GIF preview saved: {preview_sheet_gif}\n"
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(preview_sheet_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview Sheet GIF")
+                    if upload_result:
+                        logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
+                    else:
+                        logger.warning(f"Upload failed for file: {preview_sheet_gif}")
 
         # logger.info("Thumbnail sheet generation completed successfully.")
         # logger.info(results)

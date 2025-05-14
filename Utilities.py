@@ -375,8 +375,9 @@ async def generate_template_video(
         scene_tags: list,
         studio_tags: list,
         image_output_format: str,
-        fill_imgbox_urls: bool,
+        fill_img_urls: bool,
         imgbox_file_path: str,
+        imgbb_file_path: str,
         suffix: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
@@ -413,27 +414,55 @@ async def generate_template_video(
     preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"  # Hardcoded due to HF supported file hosting requirements(Either WEBP or GIF)
     thumbnails_image = f"{new_filename_base_name}_thumbnails.{image_output_format}"
 
-    # Optionally fill URLs from imgbox
-    if fill_imgbox_urls and os.path.isfile(imgbox_file_path):
-        try:
-            with open(imgbox_file_path, "r", encoding="utf-8") as f:
-                imgbox_data = json.load(f)
+    # Optionally fill URLs from imgbb(first), imgbox
+    if imgbb_file_path != "":
+        if fill_img_urls and os.path.isfile(imgbb_file_path):
+            try:
+                with open(imgbb_file_path, "r", encoding="utf-8") as f:
+                    imgbb_data = json.load(f)
 
-            thumbs_key = f"{new_filename_base_name} - thumbnails"
-            cover_key = f"{new_filename_base_name} - cover"
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+                preview_sheet_key = f"{new_filename_base_name} - Preview Sheet WebP"
 
-            if thumbs_key in imgbox_data and isinstance(imgbox_data[thumbs_key], list):
-                thumbs_entry = imgbox_data[thumbs_key][0]
-                if "image_url" in thumbs_entry:
-                    thumbnails_image = thumbs_entry["image_url"]
+                if thumbs_key in imgbb_data and isinstance(imgbb_data[thumbs_key], list):
+                    thumbs_entry = imgbb_data[thumbs_key][0]
+                    if "direct_link" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["direct_link"]
 
-            if cover_key in imgbox_data and isinstance(imgbox_data[cover_key], list):
-                cover_entry = imgbox_data[cover_key][0]
-                if "image_url" in cover_entry:
-                    cover_image = cover_entry["image_url"]
+                if cover_key in imgbb_data and isinstance(imgbb_data[cover_key], list):
+                    cover_entry = imgbb_data[cover_key][0]
+                    if "direct_link" in cover_entry:
+                        cover_image = cover_entry["direct_link"]
 
-        except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-            raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
+                if preview_sheet_key in imgbb_data and isinstance(imgbb_data[preview_sheet_key], list):
+                    preview_sheet_entry = imgbb_data[preview_sheet_key][0]
+                    if "direct_link" in preview_sheet_entry:
+                        preview_sheet_image = preview_sheet_entry["direct_link"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse imgbb file or missing expected data: {e}")
+    elif imgbox_file_path != "":
+        if fill_img_urls and os.path.isfile(imgbox_file_path):
+            try:
+                with open(imgbox_file_path, "r", encoding="utf-8") as f:
+                    imgbox_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+
+                if thumbs_key in imgbox_data and isinstance(imgbox_data[thumbs_key], list):
+                    thumbs_entry = imgbox_data[thumbs_key][0]
+                    if "image_url" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["image_url"]
+
+                if cover_key in imgbox_data and isinstance(imgbox_data[cover_key], list):
+                    cover_entry = imgbox_data[cover_key][0]
+                    if "image_url" in cover_entry:
+                        cover_image = cover_entry["image_url"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
 
     # Load JSON config
     performers_images, exit_code = await load_json_file("Performers_Images.json")
