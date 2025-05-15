@@ -516,7 +516,10 @@ async def generate_template_video(
         processed_string += f" {resolution} HD"
     else:
         processed_string += f" {resolution}"
-    processed_string += f" {codec}"
+    if codec == "hevc":
+        processed_string += f" {codec} h265"
+    else:
+        processed_string += f" {codec}"
     processed_string += f" {extension.replace('.', '')}"
     if suffix != "":
         processed_string += f" {suffix}"

@@ -204,7 +204,9 @@ async def process_files():
                 year = year_full[-2:]
 
             # Provide fallback for missing description
-            scene_description = scene_description or "Scene description not found"
+            if not scene_description:
+                scene_description = "Scene description not found"
+                logger.warning("Scene description not found, please update manually in template")
 
             # Format month as full name and prepare scene date string
             month_name = datetime.strptime(month, "%m").strftime("%B")
