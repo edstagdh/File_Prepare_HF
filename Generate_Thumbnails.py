@@ -154,7 +154,7 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         raise
 
 
-async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps, info_image_path, font_full_name):
+async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps, info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows):
     """
     Generates a contact sheet from the extracted frames and saves it as an image.
 
@@ -166,6 +166,9 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
         output_path (str): Path to save the generated contact sheet.
         timestamps (list): List of timestamps to add to the frames.
         info_image_path (str): Path of image with information.
+        font_full_name: name of font to use
+        fit_thumbs_in_less_rows (str): flag if number of thumbs should be doubled for vertical video
+        is_vertical (bool): flag if video is vertical or not
 
     Raises:
         ValueError: If no thumbnails are found in the directory.
@@ -190,7 +193,11 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
 
             thumbs.append(img)
 
-        rows = -(-len(thumbs) // columns)
+        if is_vertical and fit_thumbs_in_less_rows and len(timestamps) >= 6:
+            rows = int(-(-len(thumbs) // columns / 2))
+        else:
+            rows = int(-(-len(thumbs) // columns))
+
         thumb_height = thumbs[0].height
 
         info_image = None
@@ -421,7 +428,10 @@ async def get_video_metadata(file_path, char_break_line, duration):
                    await break_string_at_char(filename, "-", char_break_line)
         add_lines += 1
 
-    file_size = f"{int(format_info.get('size', '0')) / (1024 * 1024):.2f} MB"
+    size_bytes = int(format_info.get('size', '0'))
+    size_mb = size_bytes / (1024 * 1024)
+    size_gb = size_bytes / (1024 * 1024 * 1024)
+    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
 
     # Extract resolution and FPS
     width = video_info.get("width", "N/A")
@@ -448,10 +458,8 @@ async def get_video_metadata(file_path, char_break_line, duration):
         ["File Name", filename],
         ["Title", title],
         ["File Size", file_size],
-        ["Resolution", resolution],
         ["Duration", timestamp_str],
-        ["Video", video_details],
-        ["Audio", audio_details],
+        ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
         ["MD5", md5_hash.upper()]
     ]
     if add_lines != 0:
@@ -475,7 +483,7 @@ async def output_file_exists(input_video_file_name, original_video_file_name, ou
     original_exists = os.path.exists(expected_original_output_file)
     input_exists = os.path.exists(expected_input_output_file)
 
-    if original_exists and input_exists and input_video_file_name != original_video_file_name:
+    if original_exists and input_exists and input_video_file_name.lower() != original_video_file_name.lower():
         # Ask user for input on how to handle both existing files
         logger.info(f"Both files '{expected_original_output_file}' and '{expected_input_output_file}' exist.")
         time.sleep(0.5)
@@ -497,7 +505,7 @@ async def output_file_exists(input_video_file_name, original_video_file_name, ou
                 logger.error("Invalid choice! Skipping file processing.")
                 return False
         elif user_choice == "r":
-            logger.info("User selected to regenerate both files.")
+            logger.info("User selected to regenerate the file.")
             # Regenerate output file
             return False  # Indicates regeneration needed
         else:
@@ -539,7 +547,7 @@ async def output_file_exists(input_video_file_name, original_video_file_name, ou
     return False  # Neither file exists, so no issues to resolve
 
 
-async def process_thumbnails(input_video_file_name, input_video_file_path, original_video_file_name, output_path, image_output_format):
+async def process_thumbnails(input_video_file_name, input_video_file_path, original_video_file_name, output_path, image_output_format, is_vertical):
     """
     Main function to process the video, generate thumbnails, and create a contact sheet.
     """
@@ -559,9 +567,11 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             output_file_name_suffix = config["output_file_name_suffix"]
             add_file_info = config["add_file_info"]
             font_full_name = config["font_full_name"]
+            fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
+            force_regenerate = config["force_regenerate"]
 
         # Check if the output file already exists
-        if await output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format):
+        if await output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format) and not force_regenerate:
             # logger.warning("Output file already exists. Skipping processing.")
             return True
 
@@ -573,6 +583,11 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             logger.error("Processing failed due to invalid configuration: Number of thumbnails must be divisible by columns and greater than zero to avoid black thumbnails")
             return False
 
+        # Vertical Adjustments
+        if is_vertical and fit_thumbs_in_less_rows and num_thumbs >= 6:
+            num_thumbs = int(num_thumbs * 2)
+            columns = int(columns * 2)
+            thumb_width = int(thumb_width / 2)
         char_break_line = 180
         if columns == 3:
             char_break_line = 130
@@ -586,13 +601,14 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
 
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:
-                sheet_width = (columns * thumb_width) + ((columns + 1) * padding)
+                sheet_width = int((columns * thumb_width) + ((columns + 1) * padding))
                 info_image_path = await create_info_image(metadata_table, temp_dir, input_video_file_name, sheet_width)
             else:
                 info_image_path = None
 
             await extract_frame_at_timestamps(input_video_full_path, timestamps, temp_dir)
-            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_full_name)
+            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_full_name, is_vertical,
+                                         fit_thumbs_in_less_rows)
 
         return True
 

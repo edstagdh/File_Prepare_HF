@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from loguru import logger
 from pymediainfo import MediaInfo
@@ -187,6 +188,8 @@ async def pre_process_files(directory, bad_words, mode):
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
                 continue
+            if  filename.lower().endswith('_old.mp4'):
+                continue
 
             if ' ' in filename:
                 logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
@@ -296,6 +299,8 @@ async def rename_file(file_path, new_filename):
     """
     Renames a file to a new filename without changing the path.
 
+    Handles case-only renaming on case-insensitive file systems (e.g. Windows).
+
     Args:
         file_path (str): The full current path of the file (including filename and extension).
         new_filename (str): The new filename (including extension) to rename the file to.
@@ -304,15 +309,20 @@ async def rename_file(file_path, new_filename):
         bool: True if renaming was successful, False otherwise.
     """
     try:
-        # Get the directory path where the file is located
         directory = os.path.dirname(file_path)
-        # Create the full new file path
         new_file_path = os.path.join(directory, new_filename)
-        if file_path.lower() != new_file_path.lower():
-            # Rename the file
+
+        # If only the case is changing, do a two-step rename
+        if os.path.abspath(file_path).lower() == os.path.abspath(new_file_path).lower() and file_path != new_file_path:
+            temp_name = f"__temp__{next(tempfile._get_candidate_names())}" + os.path.splitext(new_filename)[1]
+            temp_path = os.path.join(directory, temp_name)
+            os.rename(file_path, temp_path)
+            os.rename(temp_path, new_file_path)
+        else:
             os.rename(file_path, new_file_path)
-            logger.info(f"Renamed file: {file_path} -> {new_file_path}")
-            return True
+
+        logger.info(f"Renamed file: {file_path} -> {new_file_path}")
+        return True
 
     except FileNotFoundError:
         logger.error(f"File not found: {file_path}")

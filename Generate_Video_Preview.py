@@ -40,6 +40,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         confirm_cut_points_required = config["CONFIRM_CUT_POINTS_REQUIRED"]
         last_cut_point = config["LAST_CUT_POINT"]
         font_full_name = config["FONT_NAME_FULL"]
+        add_file_info = config["add_file_info"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -57,7 +58,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode)
+                                  new_filename_base_name, last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -112,7 +113,7 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode):
+                        last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -211,6 +212,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             if exit_code == 0 and ffprobe_output.strip():
                 try:
                     # Split by 'x' to get codec and resolution
+
                     parts = ffprobe_output.strip().split("x")
 
                     # If the split parts have the expected length, continue
@@ -367,7 +369,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_webp_preview_sheet or create_gif_preview_sheet or create_webm_preview_sheet:
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
-                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name)
+                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -781,7 +783,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
-                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name):
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -812,11 +814,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             grid == 0
 
         metadata_table, filename, original_fps = await get_video_metadata(file_path, char_break_line)
-        info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars)
+        if add_file_info:
+            info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars)
 
-        # Create the video from the info image (same resolution as image)
-        final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
-        await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
+            # Create the video from the info image (same resolution as image)
+            final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
+            await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
 
         # Process each group of videos and stack them horizontally
         for index, group in enumerate(video_groups):
@@ -838,14 +841,26 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # Stack all intermediate videos vertically with info image at top
         final_output = os.path.join(temp_folder, "final_thumbnail_sheet.mp4")
         downscaled_output = os.path.join(temp_folder, "downscaled_thumbnail_sheet.mp4")
-        image_scaled = f"-i \"{final_image_video_path}\""
-        input_files = f"{image_scaled} " + ' '.join([f"-i \"{file}\"" for file in intermediate_files])
 
-        filter_complex = f"[0:v]" + ''.join([f"[{i + 1}:v]" for i in range(len(intermediate_files))]) + f"vstack=inputs={len(intermediate_files) + 1}[v]"
-        final_command = f"ffmpeg {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -r {original_fps} -y \"{final_output}\""
-        stdout, stderr, exit_code = await run_command(final_command)
+        input_files_list = []
+        filter_inputs = []
+
+        if add_file_info:
+            input_files_list.append(f"-i \"{final_image_video_path}\"")
+            filter_inputs.append(f"[0:v]")
+
+        # Add intermediate stacked video inputs
+        for idx, file in enumerate(intermediate_files):
+            input_files_list.append(f"-i \"{file}\"")
+            filter_inputs.append(f"[{idx + (1 if add_file_info else 0)}:v]")
+
+        input_files_str = ' '.join(input_files_list)
+        filter_complex_str = ''.join(filter_inputs) + f"vstack=inputs={len(filter_inputs)}[v]"
+
+        command = f"ffmpeg {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}\""
+        stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
-            logger.error(f"Error running final stacking command: {stdout}\n{stderr}")
+            logger.error(f"Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}")
             return
 
         # Add scale if grid is 4
@@ -874,7 +889,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # WebP Preview
         if create_webp_preview_sheet:
             webp_command = (
-                f"ffmpeg -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos\" "
+                f"ffmpeg -y -i \"{final_output}\" -vf \"fps=24,scale=iw:ih:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
@@ -986,7 +1001,10 @@ async def get_video_metadata(file_path, char_break_line):
                    await break_string_at_char(filename, "-", char_break_line)
         add_lines += 1
     duration = await format_duration(format_info.get('duration', '0'))
-    file_size = f"{int(format_info.get('size', '0')) / (1024 * 1024):.2f} MB"
+    size_bytes = int(format_info.get('size', '0'))
+    size_mb = size_bytes / (1024 * 1024)
+    size_gb = size_bytes / (1024 * 1024 * 1024)
+    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
 
     # Extract resolution and FPS
     width = video_info.get("width", "N/A")
@@ -1008,11 +1026,9 @@ async def get_video_metadata(file_path, char_break_line):
         ["File Name", filename],
         ["Title", title],
         ["File Size", file_size],
-        ["Resolution", resolution],
         ["Duration", duration],
-        ["Video", video_details],
-        ["Audio", audio_details],
-        ["MD5", md5_hash]
+        ["V/A", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+        ["MD5", md5_hash.upper()]
     ]
     if add_lines != 0:
         for i in range(add_lines):

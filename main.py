@@ -52,15 +52,15 @@ async def process_files():
         bad_words = config["bad_words"]
         use_title = config["use_title"]
         create_sub_folder = config["create_sub_folder"]
-        upload_cover_imgbox = config["upload_cover_imgbox"]
-        upload_thumbnails_imgbox = config["upload_thumbnails_imgbox"]
-        upload_cover_imgbb = config["upload_cover_imgbb"]
-        upload_thumbnails_imgbb = config["upload_thumbnails_imgbb"]
+        imgbox_upload_cover = config["imgbox_upload_cover"]
+        imgbox_upload_thumbnails = config["imgbox_upload_thumbnails"]
+        imgbb_upload_cover = config["imgbb_upload_cover"]
+        imgbb_upload_thumbnails = config["imgbb_upload_thumbnails"]
         image_output_format = config["image_output_format"].lower()
         performer_image_output_format = config["performer_image_output_format"].lower()
         font_full_name = config["font_full_name"]
         imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
-        upload_previews_imgbb = config["upload_previews_imgbb"]
+        imgbb_upload_previews = config["imgbb_upload_previews"]
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -110,7 +110,7 @@ async def process_files():
     logger.info(f"Start processing in directory: {directory}")
 
     total_files, processed_files = 0, 0
-    failed_files, successful_files = [], []
+    failed_files, successful_files, partial_files = [], [], []
 
     # First pass: Count only .mp4 files in the given directory (no sub_folders)
     total_files = len([
@@ -124,6 +124,7 @@ async def process_files():
         f for f in Path(directory).iterdir()
         if f.is_file() and f.suffix.lower() == ".mp4" and f.suffix.lower() != "_old.mp4"
     ]
+    mp4_files = sorted(mp4_files)
     for file in mp4_files:
         try:
             file_full_name = str(file.name)  # Get the full file_full_name (with extension)
@@ -206,7 +207,6 @@ async def process_files():
             # Provide fallback for missing description
             if not scene_description:
                 scene_description = "Scene description not found"
-                logger.warning("Scene description not found, please update manually in template")
 
             # Format month as full name and prepare scene date string
             month_name = datetime.strptime(month, "%m").strftime("%B")
@@ -220,6 +220,11 @@ async def process_files():
             if not new_title or new_title == "Multiple results":
                 logger.error(f"{error_prefix} - missing or ambiguous title")
                 raise ValueError(f"Unable to find a valid title for {file_full_name}")
+
+            if new_title.endswith(" -"):
+                new_title = new_title[:-2]
+            if new_title.endswith(" - "):
+                new_title = new_title[:-3]
 
             # Validate performers (only if not using title as fallback)
             if (not performers or performers == "Invalid") and not use_title:
@@ -311,6 +316,7 @@ async def process_files():
         # Rename existing file to new file_full_name if needed
         new_full_filename = f"{new_filename}.{suffix}{file_extension}" if suffix else f"{new_filename}{file_extension}"
         new_file_full_path = os.path.join(directory, new_full_filename)
+
         if str(file) != str(new_file_full_path):
             await rename_file(str(file), new_full_filename)
 
@@ -337,27 +343,27 @@ async def process_files():
             codec = await get_video_codec(new_file_full_path)
 
             # Disable uploading to imgbox
-            if upload_thumbnails_imgbox or upload_cover_imgbox:
+            if imgbox_upload_thumbnails or imgbox_upload_cover:
                 if image_output_format not in ["png", "jpg"]:
-                    upload_cover_imgbox = False
-                    upload_thumbnails_imgbox = False
+                    imgbox_upload_cover = False
+                    imgbox_upload_thumbnails = False
                     logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
             if not create_cover_image:
-                upload_cover_imgbox = False
-                upload_cover_imgbb = False
+                imgbox_upload_cover = False
+                imgbb_upload_cover = False
             if not create_thumbnails:
-                upload_thumbnails_imgbox = False
-                upload_thumbnails_imgbb = False
+                imgbox_upload_thumbnails = False
+                imgbb_upload_thumbnails = False
 
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
             thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
             thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
 
-            imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt") if upload_cover_imgbox or upload_thumbnails_imgbox else ""
-            imgbb_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbb.txt") if upload_cover_imgbb or upload_thumbnails_imgbb else ""
+            imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt") if imgbox_upload_cover or imgbox_upload_thumbnails else ""
+            imgbb_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbb.txt") if imgbb_upload_cover or imgbb_upload_thumbnails else ""
 
-            if upload_cover_imgbox or upload_thumbnails_imgbox or upload_cover_imgbb or upload_thumbnails_imgbb:
+            if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails:
                 fill_img_urls = True
                 # Check if the imgbox file exists and delete it
                 if os.path.exists(imgbox_file_path):
@@ -375,14 +381,14 @@ async def process_files():
 
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory,
                                                                            image_output_format]),
-                (upload_cover_imgbox, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
-                (upload_cover_imgbb, imgbb_upload_single_image, [cover_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "cover"]),
+                (imgbox_upload_cover, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
+                (imgbb_upload_cover, imgbb_upload_single_image, [cover_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "cover"]),
 
-                (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format]),
-                (upload_thumbnails_imgbox, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
-                (upload_thumbnails_imgbb, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
+                (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical]),
+                (imgbox_upload_thumbnails, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
+                (imgbb_upload_thumbnails, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
 
-                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode]),
+                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, imgbb_upload_previews, imgbb_upload_headless_mode]),
 
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
@@ -424,6 +430,12 @@ async def process_files():
                     failed_files.append(file_full_name)
                     continue  # Skip to the next file
 
+                if scene_description == "Scene description not found":
+                    partial_files.append(file_full_name)
+                    logger.warning("Scene description not found, please update manually in template")
+                    logger.info(f"End file: {new_file_full_path}")
+                    processed_files += 1
+                    continue
             processed_files += 1
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
@@ -438,6 +450,8 @@ async def process_files():
     logger.info(f"Finish processing in directory: {directory}")
     for success in successful_files:
         logger.info(f"Successful file: {success}")
+    for partial in partial_files:
+        logger.info(f"Partial file: {partial}")
     for failed in failed_files:
         logger.warning(f"Failed file: {failed}")
 

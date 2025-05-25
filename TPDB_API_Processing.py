@@ -264,7 +264,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
             # Check if title contains 'interview'
             if "interview" in title:
                 sleep(0.5)
-                user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude/ignore it? (y/n): ").strip().lower()
+                user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
                 if user_input in ["y", "yes"]:
                     logger.info(f"Ignoring scene: {item.get('title')}")
                     continue

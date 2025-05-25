@@ -73,7 +73,7 @@ async def cover_image_output_file_exists(input_video_file_name, original_video_f
     original_exists = os.path.exists(expected_original_output_file)
     input_exists = os.path.exists(expected_input_output_file)
 
-    if original_exists and input_exists and input_video_file_name != original_video_file_name:
+    if original_exists and input_exists and input_video_file_name.lower() != original_video_file_name.lower():
         # Ask user for input on how to handle both existing files
         logger.info(f"Both files '{expected_original_output_file}' and '{expected_input_output_file}' exist.")
         time.sleep(0.5)

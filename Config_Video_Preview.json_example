@@ -20,5 +20,6 @@
   "CUSTOM_OUTPUT_PATH": "",
   "CONFIRM_CUT_POINTS_REQUIRED": false,
   "LAST_CUT_POINT": 0,
+  "add_file_info": true,
   "FONT_NAME_FULL": "Gotham_Medium.otf"
 }
