@@ -3,10 +3,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from loguru import logger
+from pymediainfo import MediaInfo
 
-CLEAN_CHARS = "!@#$%^&*()_+=’' :"
+CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
 
 
 async def run_command(command):
@@ -97,22 +99,22 @@ async def verify_ffmpeg_and_ffprobe():
         return False, ffmpeg_code if not ffmpeg_ok else ffprobe_code
 
 
-async def load_config(config_name):
+async def load_json_file(file_name):
     try:
-        with open(config_name, 'r') as config_file:
+        with open(file_name, 'r') as config_file:
             json_data = json.load(config_file)
             return json_data, 0  # Success
     except FileNotFoundError:
-        logger.error(f"{config_name} file not found.")
+        logger.error(f"{file_name} file not found.")
         return None, 20  # JSON file load error
     except KeyError as e:
-        logger.error(f"Key {e} is missing in the {config_name} file.")
+        logger.error(f"Key {e} is missing in the {file_name} file.")
         return None, 21  # Missing keys in JSON
     except json.JSONDecodeError:
-        logger.error(f"Error parsing {config_name}. Ensure the JSON is formatted correctly.")
+        logger.error(f"Error parsing {file_name}. Ensure the JSON is formatted correctly.")
         return None, 20  # JSON file load error
     except Exception:
-        logger.exception(f"An unexpected error occurred while loading {config_name}.")
+        logger.exception(f"An unexpected error occurred while loading {file_name}.")
         return None, 99  # Unknown exception
 
 
@@ -147,7 +149,10 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
 
     elif mode == 2:
         # Remove unwanted characters
-        clean_title = input_string.translate(str.maketrans("", "", CLEAN_CHARS))
+        clean_title = input_string.replace(", ", ".")
+        clean_title = clean_title.replace(" ", ".")
+        clean_title = clean_title.translate(str.maketrans("", "", CLEAN_CHARS))
+        clean_title = clean_title.replace("..", ".")
         return clean_title
     else:
         return ""
@@ -182,6 +187,8 @@ async def pre_process_files(directory, bad_words, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
+                continue
+            if  filename.lower().endswith('_old.mp4'):
                 continue
 
             if ' ' in filename:
@@ -260,7 +267,7 @@ async def format_performers(performers, mode):
     Returns:
         str: Formatted performer string.
     """
-    if not performers:
+    if not performers or performers is None:
         return ""
 
     unique_performers = sorted(set(p[0] for p in performers))
@@ -292,6 +299,8 @@ async def rename_file(file_path, new_filename):
     """
     Renames a file to a new filename without changing the path.
 
+    Handles case-only renaming on case-insensitive file systems (e.g. Windows).
+
     Args:
         file_path (str): The full current path of the file (including filename and extension).
         new_filename (str): The new filename (including extension) to rename the file to.
@@ -300,15 +309,20 @@ async def rename_file(file_path, new_filename):
         bool: True if renaming was successful, False otherwise.
     """
     try:
-        # Get the directory path where the file is located
         directory = os.path.dirname(file_path)
-        # Create the full new file path
         new_file_path = os.path.join(directory, new_filename)
-        if file_path.lower() != new_file_path.lower():
-            # Rename the file
+
+        # If only the case is changing, do a two-step rename
+        if os.path.abspath(file_path).lower() == os.path.abspath(new_file_path).lower() and file_path != new_file_path:
+            temp_name = f"__temp__{next(tempfile._get_candidate_names())}" + os.path.splitext(new_filename)[1]
+            temp_path = os.path.join(directory, temp_name)
+            os.rename(file_path, temp_path)
+            os.rename(temp_path, new_file_path)
+        else:
             os.rename(file_path, new_file_path)
-            logger.info(f"Renamed file: {file_path} -> {new_file_path}")
-            return True
+
+        logger.info(f"Renamed file: {file_path} -> {new_file_path}")
+        return True
 
     except FileNotFoundError:
         logger.error(f"File not found: {file_path}")
@@ -324,43 +338,33 @@ async def rename_file(file_path, new_filename):
         return False
 
 
-async def generate_mediainfo_file(filename, mediainfo_path):
+async def generate_mediainfo_file(input_file_full_path, output_path):
     try:
-
-        # Split the full path into directory, filename, and extension
-        file_path, file_name = os.path.split(filename)
-        file_base_name, file_extension = os.path.splitext(file_name)
+        # Split the full path into directory, file name, and extension
+        _, file_name = os.path.split(input_file_full_path)
+        file_base_name, _ = os.path.splitext(file_name)
 
         # Define the output text file name
-        output_file = os.path.join(file_path, f"{file_base_name}_mediainfo.txt")
+        output_file = os.path.join(output_path, f"{file_base_name}_mediainfo.txt")
 
         # Check if the output file exists and delete it
         if os.path.exists(output_file):
             os.remove(output_file)
             # logger.debug(f"Existing mediainfo file {output_file} deleted.")
 
-        # Enclose the mediainfo path in quotes in case it contains spaces, and use --Output=TEXT option
-        command = f'"{mediainfo_path}" --Inform=file://{output_file} "{filename}"'
-
-        # Run the mediainfo command and capture the output using the provided run_command function
-        stdout, stderr, returncode = await run_command(command)
-
-        # Check if there was an error with the mediainfo command
-        if returncode != 0:
-            raise Exception(f"Error running mediainfo: {stderr}")
+        # Use pymediainfo to parse the media file
+        media_info_text = MediaInfo.parse(input_file_full_path, output="text", full=False)
 
         # Write the mediainfo output to the text file
-        with open(output_file, 'w') as file:
-            file.write(stdout)
+        with open(output_file, 'w', encoding='utf-8', newline='') as file:
+            file.write(media_info_text)
 
-        # logger.debug(f"Mediainfo for {filename} has been saved to {output_file}")
+        # logger.debug(f"Mediainfo for {input_file_full_path} has been saved to {output_file}")
 
-        # Return True indicating success
         return True
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
-        # Return False indicating failure
         return False
 
 
@@ -379,7 +383,12 @@ async def generate_template_video(
         template_file_full_path: str,
         code_version: str,
         scene_tags: list,
-        studio_tag: list
+        studio_tags: list,
+        image_output_format: str,
+        fill_img_urls: bool,
+        imgbox_file_path: str,
+        imgbb_file_path: str,
+        suffix: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
 
@@ -400,7 +409,7 @@ async def generate_template_video(
         media_info = f.read()
 
     # Load JSON config
-    json_map, exit_code = await load_config("BBCode_Images.json")
+    json_map, exit_code = await load_json_file("BBCode_Images.json")
     if exit_code != 0 or json_map is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -409,35 +418,121 @@ async def generate_template_video(
     resolution_icon_url = json_map[f"{resolution}"]
     codec_icon_url = json_map[f"{codec}"]
     extension_icon_url = json_map[f"{extension.replace('.', '')}"]
-    cover_image = f"{new_filename_base_name}.webp"
-    preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"
-    thumbnails_image = f"{new_filename_base_name}_Thumbnails.webp"
 
-    # Step 1: Replace ", " with a separator for easy splitting (e.g., newline or temporary delimiter)
-    name_blocks = formatted_names.replace(", ", "\n").splitlines()
+    # Default image paths
+    cover_image = f"{new_filename_base_name}.{image_output_format}"
+    preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"  # Hardcoded due to HF supported file hosting requirements(Either WEBP or GIF)
+    thumbnails_image = f"{new_filename_base_name}_thumbnails.{image_output_format}"
 
-    # Step 2: Process each name block
-    processed_blocks = []
-    for block in name_blocks:
-        names = block.strip().split()
-        if len(names) > 1:
-            joined = ".".join(names)
-            processed_blocks.append(joined)
-        else:
-            processed_blocks.append(block.strip())
+    # Optionally fill URLs from imgbb(first), imgbox
+    if imgbb_file_path != "":
+        if fill_img_urls and os.path.isfile(imgbb_file_path):
+            try:
+                with open(imgbb_file_path, "r", encoding="utf-8") as f:
+                    imgbb_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+                preview_sheet_key = f"{new_filename_base_name} - Preview Sheet WebP"
+
+                if thumbs_key in imgbb_data and isinstance(imgbb_data[thumbs_key], list):
+                    thumbs_entry = imgbb_data[thumbs_key][0]
+                    if "direct_link" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["direct_link"]
+
+                if cover_key in imgbb_data and isinstance(imgbb_data[cover_key], list):
+                    cover_entry = imgbb_data[cover_key][0]
+                    if "direct_link" in cover_entry:
+                        cover_image = cover_entry["direct_link"]
+
+                if preview_sheet_key in imgbb_data and isinstance(imgbb_data[preview_sheet_key], list):
+                    preview_sheet_entry = imgbb_data[preview_sheet_key][0]
+                    if "direct_link" in preview_sheet_entry:
+                        preview_sheet_image = preview_sheet_entry["direct_link"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse imgbb file or missing expected data: {e}")
+    elif imgbox_file_path != "":
+        if fill_img_urls and os.path.isfile(imgbox_file_path):
+            try:
+                with open(imgbox_file_path, "r", encoding="utf-8") as f:
+                    imgbox_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+
+                if thumbs_key in imgbox_data and isinstance(imgbox_data[thumbs_key], list):
+                    thumbs_entry = imgbox_data[thumbs_key][0]
+                    if "image_url" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["image_url"]
+
+                if cover_key in imgbox_data and isinstance(imgbox_data[cover_key], list):
+                    cover_entry = imgbox_data[cover_key][0]
+                    if "image_url" in cover_entry:
+                        cover_image = cover_entry["image_url"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
+
+    # Load JSON config
+    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    if exit_code != 0 or performers_images is None:
+        raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+
+    if formatted_names:
+        # Step 1: Replace ", " with a separator for easy splitting
+        name_blocks = formatted_names.replace(", ", "\n").splitlines()
+
+        processed_blocks = []
+        mapped_names = []
+
+        for block in name_blocks:
+            full_name = block.strip()
+
+            # Step 2a: Prepare dot-joined name (e.g., "John Doe" -> "John.Doe")
+            names = full_name.split()
+            if len(names) > 1:
+                joined = ".".join(names)
+                processed_blocks.append(joined)
+            else:
+                processed_blocks.append(full_name)
+
+            # Step 2b: Map full name to image URL or fallback to name
+            if full_name in performers_images:
+                mapped_names.append(f"[img]{performers_images[full_name]}[/img]")
+            else:
+                mapped_names.append(f"[img]{full_name}[/img]")
+    else:
+        processed_blocks = ""
+        mapped_names = []
 
     processed_string = " ".join(processed_blocks)
-    for tag in studio_tag:
-        cleaned_tag = re.sub(pattern, ".", tag)
+    mapped_names = " ".join(mapped_names)
+
+    for tag in studio_tags:
+        cleaned_tag = tag.replace("'", "")
+        cleaned_tag = re.sub(pattern, ".", cleaned_tag)
         processed_string += " " + cleaned_tag
-        if cleaned_tag != tag.replace(" ", ""):
-            processed_string += " " + tag.replace(" ", "")
+        if cleaned_tag != tag.replace(" ", "") and (cleaned_tag.replace(" ", "")) not in processed_string:
+            processed_string += " " + cleaned_tag.replace(" ", "").lower()
 
     processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
-    processed_string += f" {resolution}"  # Currently, supports on 2160p/1080p/720p
-    processed_string += f" {codec}"
+    if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} FHD"
+    elif resolution == "2160p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} UHD 4K"
+    elif resolution == "720p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution} HD"
+    else:
+        processed_string += f" {resolution}"
+    if codec == "hevc":
+        processed_string += f" {codec} h265"
+    else:
+        processed_string += f" {codec}"
     processed_string += f" {extension.replace('.', '')}"
+    if suffix != "":
+        processed_string += f" {suffix}"
     # Build output filename and path
     tags_filename = f"{new_filename_base_name}_HF_tags.txt"
     tags_path = os.path.join(directory, tags_filename)
@@ -455,7 +550,7 @@ async def generate_template_video(
         "{NEW_TITLE}": new_title,
         "{SCENE_PRETTY_DATE}": scene_pretty_date,
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
-        "{FORMATTED_NAMES}": formatted_names,
+        "{FORMATTED_NAMES}": mapped_names,
         "{FPS}": fps_icon_url,
         "{RESOLUTION}": resolution_icon_url,
         "{IS_VERTICAL}": "yes" if is_vertical else "no",
@@ -470,7 +565,8 @@ async def generate_template_video(
     try:
         # Replace placeholders
         for placeholder, value in replacements.items():
-            template_content = template_content.replace(placeholder, value)
+            if placeholder in template_content:
+                template_content = template_content.replace(placeholder, value)
 
         # Make sure the target directory exists
         os.makedirs(directory, exist_ok=True)
