@@ -8,12 +8,13 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
-from Utilities import load_config, run_command
+from Utilities import load_json_file, run_command
+from Upload_IMGBB import imgbb_upload_single_image
 
 
-async def create_preview_tool(new_file_full_path, directory, new_filename_base_name):
+async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode):
     # Load Preview Config
-    config, exit_code = await load_config("Preview_Config.json")
+    config, exit_code = await load_json_file("Config_Video_Preview.json")
     if not config:
         exit(exit_code)
     else:
@@ -38,6 +39,8 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
         custom_output_path = config["CUSTOM_OUTPUT_PATH"]
         confirm_cut_points_required = config["CONFIRM_CUT_POINTS_REQUIRED"]
         last_cut_point = config["LAST_CUT_POINT"]
+        font_full_name = config["FONT_NAME_FULL"]
+        add_file_info = config["add_file_info"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -55,7 +58,8 @@ async def create_preview_tool(new_file_full_path, directory, new_filename_base_n
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point)
+                                  new_filename_base_name, last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info)
+
     if not results:
         logger.error("Preview creation has failed, please check the log.")
         return False
@@ -109,7 +113,7 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point):
+                        last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -208,6 +212,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             if exit_code == 0 and ffprobe_output.strip():
                 try:
                     # Split by 'x' to get codec and resolution
+
                     parts = ffprobe_output.strip().split("x")
 
                     # If the split parts have the expected length, continue
@@ -268,7 +273,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point)
+                                                       print_cut_points, last_cut_point, font_full_name)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -306,6 +311,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and os.path.exists(output_webp):
                 logger.success(f"Preview WebP created successfully: {output_webp}")
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(output_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview WebP")
+                    if upload_result:
+                        logger.success(f"Preview WebP uploaded successfully: {output_webp}")
+                    else:
+                        logger.warning(f"upload failed for file: {output_webp}")
             else:
                 logger.error(f"Failed to create WebP: {stderr}")
                 return False
@@ -343,6 +354,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and os.path.exists(output_gif):
                 logger.success(f"Preview GIF created successfully: {output_gif}")
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(output_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview GIF")
+                    if upload_result:
+                        logger.success(f"Preview GIF uploaded successfully: {output_gif}")
+                    else:
+                        logger.warning(f"Upload failed for file: {output_gif}")
             else:
                 logger.error(f"Failed to create GIF: {stderr}")
                 return False
@@ -352,7 +369,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_webp_preview_sheet or create_gif_preview_sheet or create_webm_preview_sheet:
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
-                                                   preview_sheet_webm)
+                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -424,7 +441,8 @@ async def generate_cut_points(
         video_path,
         filename_without_ext,
         print_cut_points,
-        last_cut_point
+        last_cut_point,
+        font_full_name
 ):
     """Generate unique evenly spaced cut points with random variations."""
     calc_failed_counter = 0
@@ -498,7 +516,8 @@ async def generate_cut_points(
             is_vertical,
             black_bars,
             timestamps_mode,
-            preview_sheet_required
+            preview_sheet_required,
+            font_full_name
         )
 
         if not temp_files_preview:
@@ -515,7 +534,7 @@ async def generate_cut_points(
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
-                                  preview_sheet_required):
+                                  preview_sheet_required, font_full_name):
     """Generates video segments from a given video and overlays timestamps on them."""
     temp_files_webp = []
 
@@ -556,7 +575,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_full_name)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -613,37 +632,63 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path):
-    """Extracts timestamp from filename and overlays it on the video."""
-    match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
-    if not match:
-        logger.error(f"Could not extract timestamp from {video_path}")
-        return None
+async def overlay_timestamp(temp_folder, video_path, font_full_name):
+    """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
+    try:
+        match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
+        if not match:
+            logger.error(f"Could not extract timestamp from {video_path}")
+            return None
 
-    timestamp = match.group(1).replace(".", r"\:")  # Escape colons for FFmpeg
-    output_path = f"timestamped_{os.path.basename(video_path)}"
-    full_video_path = os.path.join(temp_folder, video_path)
-    full_output_path = os.path.join(temp_folder, output_path)
+        timestamp = match.group(1).replace(".", r"\:")  # Escape colons for FFmpeg
+        output_path = f"timestamped_{os.path.basename(video_path)}"
+        full_video_path = os.path.join(temp_folder, video_path)
+        full_output_path = os.path.join(temp_folder, output_path)
 
-    # Correct font path syntax for FFmpeg
-    font_file = r"C\\:/Windows/Fonts/arial.ttf"  # Use the correct syntax for font path
+        font_path = f"assets/{font_full_name}"
 
-    # FFmpeg command with correct font file path
-    ffmpeg_cmd = (
-        f"ffmpeg -i \"{full_video_path}\" "
-        f"-vf \"drawtext=text='{timestamp}':fontfile={font_file}:fontcolor=white:fontsize=20:"
-        f"x=(w-text_w)-10:y=10:box=1:boxcolor=black@0.4:boxborderw=5|2 \" "
-        f"-c:v libx264 -crf 23 -preset slow -c:a copy \"{full_output_path}\" -y"
-    )
+        if not os.path.exists(font_path):
+            logger.error(f"Font file not found at expected path: {font_path}")
+            return None
 
-    stdout, stderr, exit_code = await run_command(ffmpeg_cmd)
+        font_expr = f"fontfile='{font_path}'"
 
-    if exit_code == 0 and os.path.exists(full_output_path):
-        # logger.debug(f"Timestamp overlay added: {full_output_path}")
-        return full_output_path  # Return the final path
-    else:
-        # Log the error message from stderr if FFmpeg fails
-        logger.error(f"Failed to overlay timestamp on {video_path}, Exit Code: {exit_code}, Error: {stderr}")
+        drawtext_filters = []
+        shadow_offsets = [(-2, -2), (-2, 0), (-2, 2),
+                          (0, -2), (0, 2),
+                          (2, -2), (2, 0), (2, 2)]
+
+        for dx, dy in shadow_offsets:
+            drawtext_filters.append(
+                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize=32:"
+                f"x=(w-text_w)-10+{dx}:y=10+{dy}:"
+                f"alpha=1"
+            )
+
+        drawtext_filters.append(
+            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize=32:"
+            f"x=(w-text_w)-10:y=10:"
+            f"borderw=0:alpha=1"
+        )
+
+        vf_filters = ",".join(drawtext_filters)
+
+        ffmpeg_cmd = (
+            f"ffmpeg -i \"{full_video_path}\" "
+            f"-vf \"{vf_filters}\" "
+            f"-c:v libx264 -preset fast -c:a copy \"{full_output_path}\" -y"
+        )
+
+        stdout, stderr, exit_code = await run_command(ffmpeg_cmd)
+
+        if exit_code == 0 and os.path.exists(full_output_path):
+            return full_output_path
+        else:
+            logger.error(f"Failed to overlay timestamp on {video_path}, Exit Code: {exit_code}, Error: {stderr}")
+            return None
+
+    except Exception as e:
+        logger.exception(f"Exception occurred while overlaying timestamp on {video_path}: {e}")
         return None
 
 
@@ -737,8 +782,8 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
-                                           add_black_bars,
-                                           create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm):
+                                           add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -769,11 +814,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             grid == 0
 
         metadata_table, filename, original_fps = await get_video_metadata(file_path, char_break_line)
-        info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars)
+        if add_file_info:
+            info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars)
 
-        # Create the video from the info image (same resolution as image)
-        final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
-        await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
+            # Create the video from the info image (same resolution as image)
+            final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
+            await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
 
         # Process each group of videos and stack them horizontally
         for index, group in enumerate(video_groups):
@@ -795,14 +841,26 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # Stack all intermediate videos vertically with info image at top
         final_output = os.path.join(temp_folder, "final_thumbnail_sheet.mp4")
         downscaled_output = os.path.join(temp_folder, "downscaled_thumbnail_sheet.mp4")
-        image_scaled = f"-i \"{final_image_video_path}\""
-        input_files = f"{image_scaled} " + ' '.join([f"-i \"{file}\"" for file in intermediate_files])
 
-        filter_complex = f"[0:v]" + ''.join([f"[{i + 1}:v]" for i in range(len(intermediate_files))]) + f"vstack=inputs={len(intermediate_files) + 1}[v]"
-        final_command = f"ffmpeg {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -r {original_fps} -y \"{final_output}\""
-        stdout, stderr, exit_code = await run_command(final_command)
+        input_files_list = []
+        filter_inputs = []
+
+        if add_file_info:
+            input_files_list.append(f"-i \"{final_image_video_path}\"")
+            filter_inputs.append(f"[0:v]")
+
+        # Add intermediate stacked video inputs
+        for idx, file in enumerate(intermediate_files):
+            input_files_list.append(f"-i \"{file}\"")
+            filter_inputs.append(f"[{idx + (1 if add_file_info else 0)}:v]")
+
+        input_files_str = ' '.join(input_files_list)
+        filter_complex_str = ''.join(filter_inputs) + f"vstack=inputs={len(filter_inputs)}[v]"
+
+        command = f"ffmpeg {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}\""
+        stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
-            logger.error(f"Error running final stacking command: {stdout}\n{stderr}")
+            logger.error(f"Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}")
             return
 
         # Add scale if grid is 4
@@ -831,7 +889,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # WebP Preview
         if create_webp_preview_sheet:
             webp_command = (
-                f"ffmpeg -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos\" "
+                f"ffmpeg -y -i \"{final_output}\" -vf \"fps=24,scale=iw:ih:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
@@ -839,6 +897,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                 logger.error(f"Error creating WebP preview: {stdout}\n{stderr}")
             else:
                 results += f"WebP preview saved: {preview_sheet_webp}\n"
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(preview_sheet_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview Sheet WebP")
+                    if upload_result:
+                        logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
+                    else:
+                        logger.warning(f"Upload failed for file: {preview_sheet_webp}")
 
         # WebM Preview
         if create_webm_preview_sheet:
@@ -863,6 +927,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                 logger.error(f"Error creating GIF preview: {stdout}\n{stderr}")
             else:
                 results += f"GIF preview saved: {preview_sheet_gif}\n"
+                if upload_previews_imgbb:
+                    upload_result = await imgbb_upload_single_image(preview_sheet_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview Sheet GIF")
+                    if upload_result:
+                        logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
+                    else:
+                        logger.warning(f"Upload failed for file: {preview_sheet_gif}")
 
         # logger.info("Thumbnail sheet generation completed successfully.")
         # logger.info(results)
@@ -931,7 +1001,10 @@ async def get_video_metadata(file_path, char_break_line):
                    await break_string_at_char(filename, "-", char_break_line)
         add_lines += 1
     duration = await format_duration(format_info.get('duration', '0'))
-    file_size = f"{int(format_info.get('size', '0')) / (1024 * 1024):.2f} MB"
+    size_bytes = int(format_info.get('size', '0'))
+    size_mb = size_bytes / (1024 * 1024)
+    size_gb = size_bytes / (1024 * 1024 * 1024)
+    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
 
     # Extract resolution and FPS
     width = video_info.get("width", "N/A")
@@ -944,7 +1017,7 @@ async def get_video_metadata(file_path, char_break_line):
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_md5.update(chunk)
-        md5_hash = hash_md5.hexdigest()
+        md5_hash = hash_md5.hexdigest().upper()
     except Exception as e:
         logger.error(f"Error computing MD5 hash: {e}")
         md5_hash = "N/A"
@@ -953,11 +1026,9 @@ async def get_video_metadata(file_path, char_break_line):
         ["File Name", filename],
         ["Title", title],
         ["File Size", file_size],
-        ["Resolution", resolution],
         ["Duration", duration],
-        ["Video", video_details],
-        ["Audio", audio_details],
-        ["MD5", md5_hash]
+        ["V/A", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+        ["MD5", md5_hash.upper()]
     ]
     if add_lines != 0:
         for i in range(add_lines):
@@ -999,7 +1070,7 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
     line_height = 30
     height = len(metadata_table) * line_height + 20
 
-    img = Image.new("RGB", (width, height), color=(128, 128, 128))
+    img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     try:

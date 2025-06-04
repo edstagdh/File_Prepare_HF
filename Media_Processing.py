@@ -9,10 +9,9 @@ import subprocess
 import textwrap
 import time
 from io import BytesIO
-from pathlib import Path
 from loguru import logger
 from mutagen.mp4 import MP4
-from Utilities import run_command
+from Utilities import run_command, load_json_file
 from TPDB_API_Processing import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
 
@@ -59,35 +58,98 @@ async def get_existing_description(input_file):
         return None
 
 
-async def image_download_and_conversion(image_url: str,
-                                        alt_image_url: str,
-                                        original_name: str,
-                                        new_name: str,
-                                        target_dir: str) -> bool:
+async def cover_image_output_file_exists(input_video_file_name, original_video_file_name, output_path, image_output_format):
+    """
+    Check if an output file already exists for the input or original video, and handle user input if both exist.
+    """
+    input_base_name, _ = os.path.splitext(input_video_file_name)
+    original_base_name, _ = os.path.splitext(original_video_file_name)
+
+    # Construct file paths for both original and input video files
+    expected_input_output_file = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
+    expected_original_output_file = os.path.join(output_path, f"{original_base_name}.{image_output_format}")
+
+    # Check if the original file exists
+    original_exists = os.path.exists(expected_original_output_file)
+    input_exists = os.path.exists(expected_input_output_file)
+
+    if original_exists and input_exists and input_video_file_name.lower() != original_video_file_name.lower():
+        # Ask user for input on how to handle both existing files
+        logger.info(f"Both files '{expected_original_output_file}' and '{expected_input_output_file}' exist.")
+        time.sleep(0.5)
+        user_choice = input(f"Would you like to (K)eep one of existing files or (R)e-download? [K/R]: ").lower()
+
+        if user_choice == "k":
+            logger.info("User selected to keep one of the files, Which file would you like to keep? ")
+            time.sleep(0.5)
+            keep_file = input(f"(O)riginal '{expected_original_output_file}' or (I)nput '{expected_input_output_file}': ").lower()
+            if keep_file == "o":
+                os.remove(expected_input_output_file)
+                os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
+                return True  # Renamed and kept the original
+            elif keep_file == "i":
+                os.remove(expected_original_output_file)
+                os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
+                return True  # Renamed and kept the input
+            else:
+                logger.error("Invalid choice! Skipping file processing.")
+                return False
+        elif user_choice == "r":
+            logger.info("User selected to re-download file.")
+            # Regenerate output file
+            return False  # Re-download the cover image
+        else:
+            logger.error("Invalid choice! Skipping file processing.")
+            return False
+
+    elif original_exists:
+        # If only the original file exists, ask user whether to keep or regenerate
+        logger.info(f"File '{expected_original_output_file}' exists.")
+        time.sleep(0.5)
+        user_choice = input(f"Would you like to (K)eep it or (R)e-download? [K/R]: ").lower()
+        if user_choice == "k":
+            os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
+            return True  # Renamed and kept the original
+        elif user_choice == "r":
+            os.remove(expected_original_output_file)
+            logger.info("User selected to re-download the cover image.")
+            return False  # Re-download the cover image
+        else:
+            logger.error("Invalid choice! Skipping file processing.")
+            return False
+
+    elif input_exists:
+        # If only the input file exists, ask user whether to keep or regenerate
+        logger.info(f"File '{expected_input_output_file}' exists.")
+        time.sleep(0.5)
+        user_choice = input(f"Would you like to (K)eep it or (R)e-download? [K/R]: ").lower()
+        if user_choice == "k":
+            os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
+            return True  # Renamed and kept the input
+        elif user_choice == "r":
+            os.remove(expected_input_output_file)
+            logger.info("User selected to re-download the cover image")
+            return False  # Re-download the cover image
+        else:
+            logger.error("Invalid choice! Skipping file processing.")
+            return False
+
+    return False  # Neither file exists, so no issues to resolve
+
+
+async def cover_image_download_and_conversion(image_url: str,
+                                              alt_image_url: str,
+                                              input_video_file_name: str,
+                                              original_video_file_name: str,
+                                              output_path: str,
+                                              image_output_format: str) -> bool:
     try:
-        os.makedirs(target_dir, exist_ok=True)
-        target_path = Path(target_dir)
-
-        original_jpg_path = target_path / f"{original_name}.jpg"
-        final_webp_path = target_path / f"{new_name}.webp"
-
-        # Step 1: If the final .webp image already exists, return True
-        if final_webp_path.exists():
+        # Check if the output file already exists
+        input_base_name, _ = os.path.splitext(input_video_file_name)
+        if await cover_image_output_file_exists(input_video_file_name, original_video_file_name, output_path, image_output_format):
+            # logger.warning("Output file already exists. Skipping processing.")
             return True
 
-        # Step 2: If original .jpg exists, convert it to .webp
-        if original_jpg_path.exists():
-            try:
-                if await convert_image_to_webp(original_jpg_path, output_name=new_name):
-                    return True
-                else:
-                    logger.error(f"Conversion failed for {original_jpg_path}")
-                    return False
-            except Exception:
-                logger.exception(f"Exception while converting {original_jpg_path} to webp")
-                return False
-
-        # Step 3: Function to download the image
         def download_image(url):
             response = requests.get(url, timeout=10)
             response.raise_for_status()
@@ -106,7 +168,6 @@ async def image_download_and_conversion(image_url: str,
 
             return response
 
-        # Step 4: Try downloading from image_url, then alt_image_url
         response = None
         try:
             response = download_image(image_url)
@@ -118,179 +179,85 @@ async def image_download_and_conversion(image_url: str,
                 logger.error(f"Failed to download from alternative URL: {alt_image_url}, error: {e}")
                 return False
 
-        # Step 5: Save downloaded image as .jpg
-        temp_jpg_path = target_path / f"{new_name}.jpg"
-        with open(temp_jpg_path, "wb") as f:
+        # Save the downloaded image to a temporary file
+        temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
+        with open(temp_image_path, 'wb') as f:
             f.write(response.content)
+        # logger.debug(f"Image saved to {temp_image_path}")
+        final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
+        # Check if the image format matches the desired format
+        if not temp_image_path.lower().endswith(f".{image_output_format}"):
+            # Convert the image format if needed
+            await convert_image_format(temp_image_path, final_image_path, image_output_format)
+            os.remove(temp_image_path)  # Remove the temporary file after conversion
+            logger.info(f"Image converted to {image_output_format} and saved to {final_image_path}")
+        else:
+            os.rename(temp_image_path, final_image_path)
+            logger.success(f"Image saved as {final_image_path}")
 
-        # Step 6: Convert downloaded .jpg to .webp
-        try:
-            if await convert_image_to_webp(temp_jpg_path, output_name=new_name):
-                return True
-            else:
-                logger.error(f"Conversion failed for {temp_jpg_path}")
-                return False
-        except Exception:
-            logger.exception(f"Exception while converting downloaded image to webp")
-            return False
-
+        return True
     except Exception:
         logger.exception("Unexpected error in image_download_and_conversion")
         return False
 
 
-async def generate_scorp_thumbnails_and_conversion(filename, directory, original_filename, scorp_exe_path):
+async def convert_image_format(input_file_path: str, output_file_path: str, output_format: str):
     """
-    Generate a thumbnail for the given file and convert it to WebP format.
+    Converts an image to the specified format and saves it in the same directory.
 
     Args:
-        filename (str): New file name (without extension).
-        directory (str): Directory containing the files.
-        original_filename (str): Original file name (without extension).
-        scorp_exe_path (str): Path to the executable used to generate thumbnails.
-    """
-    if not os.path.isfile(scorp_exe_path):
-        logger.error(f"Invalid path to thumbnails_maker executable: {scorp_exe_path}")
-        return False
-
-    base_name = filename
-    og_base_name = original_filename
-
-    jpg_thumb_path = os.path.join(directory, f"{base_name}_thumbnails.jpg")
-    webp_thumb_path = os.path.join(directory, f"{base_name}_thumbnails.webp")
-    if base_name == og_base_name:
-        if os.path.isfile(webp_thumb_path):
-            logger.info(f"WebP thumbnail already exists: {webp_thumb_path}")
-            return True
-        if os.path.isfile(jpg_thumb_path):
-            logger.info(f"JPG thumbnail exists: {jpg_thumb_path}. Converting to WebP...")
-            try:
-                success = await convert_image_to_webp(Path(jpg_thumb_path))
-                if not success:
-                    logger.error(f"Failed to convert JPG to WebP for: {jpg_thumb_path}")
-                    return False
-                else:
-                    return True
-            except Exception as e:
-                logger.error(f"Exception during conversion to WebP: {e}")
-                return False
-
-        # Generate thumbnail
-        full_video_path = os.path.join(directory, f"{filename}.mp4")
-        command = f'"{scorp_exe_path}" "{full_video_path}" /silent'
-        try:
-            _, _, _ = await run_command(command)
-        except Exception as e:
-            logger.error(f"Failed to execute thumbnail generator: {e}")
-            return False
-
-        if os.path.isfile(jpg_thumb_path):
-            try:
-                success = await convert_image_to_webp(Path(jpg_thumb_path))
-                if success:
-                    logger.info(f"Thumbnail generated and converted successfully for {filename}")
-                    return True
-                else:
-                    logger.error(f"Thumbnail generated but conversion to WebP failed for {filename}")
-                    return False
-            except Exception as e:
-                logger.error(f"Exception during WebP conversion: {e}")
-                return False
-        else:
-            logger.error(f"Thumbnail generation failed, JPG not found: {jpg_thumb_path}")
-            return False
-    else:
-        # Case: filename != original_filename
-        og_jpg_path = os.path.join(directory, f"{og_base_name}_thumbnails.jpg")
-        og_webp_path = os.path.join(directory, f"{og_base_name}_thumbnails.webp")
-
-        if os.path.isfile(og_webp_path):
-            new_webp_path = os.path.join(directory, f"{base_name}_thumbnails.webp")
-            try:
-                os.rename(og_webp_path, new_webp_path)
-                logger.info(f"Renamed existing WebP thumbnail from {og_webp_path} to {new_webp_path}")
-                return True
-            except Exception as e:
-                logger.error(f"Failed to rename WebP thumbnail: {e}")
-                return False
-        elif os.path.isfile(og_jpg_path):
-            new_jpg_path = os.path.join(directory, f"{base_name}_thumbnails.jpg")
-            try:
-                os.rename(og_jpg_path, new_jpg_path)
-                logger.info(f"Renamed existing JPG thumbnail from {og_jpg_path} to {new_jpg_path}")
-                try:
-                    success = await convert_image_to_webp(Path(new_jpg_path))
-                    if success:
-                        logger.info(f"Converted renamed JPG to WebP: {new_jpg_path}")
-                        return True
-                    else:
-                        logger.error(f"Failed to convert renamed JPG to WebP: {new_jpg_path}")
-                        return False
-                except Exception as e:
-                    logger.error(f"Exception during conversion of renamed JPG: {e}")
-                    return False
-            except Exception as e:
-                logger.error(f"Failed to rename JPG thumbnail: {e}")
-                return False
-        else:
-            # Generate thumbnail
-            full_video_path = os.path.join(directory, f"{filename}.mp4")
-            command = f'"{scorp_exe_path}" "{full_video_path}" /silent'
-            try:
-                _, _, _ = await run_command(command)
-            except Exception as e:
-                logger.error(f"Failed to execute thumbnail generator: {e}")
-                return False
-
-            if os.path.isfile(jpg_thumb_path):
-                try:
-                    success = await convert_image_to_webp(Path(jpg_thumb_path))
-                    if success:
-                        logger.info(f"Thumbnail generated and converted successfully for {filename}")
-                        return True
-                    else:
-                        logger.error(f"Thumbnail generated but conversion to WebP failed for {filename}")
-                        return False
-                except Exception as e:
-                    logger.error(f"Exception during WebP conversion: {e}")
-                    return False
-            else:
-                logger.error(f"Thumbnail generation failed, JPG not found: {jpg_thumb_path}")
-                return False
-
-
-async def convert_image_to_webp(source_path: Path, output_name: str = None, quality: int = 85) -> bool:
-    """
-    Converts the given image file to WebP format and removes the original.
-
-    Args:
-        source_path (Path): The path to the original image file.
-        output_name (str): Optional new name for the output WebP file (without extension).
-        quality (int): Compression quality for WebP.
+        input_file_path (str): Full path to the input image file.
+        output_file_path (str): Path to save the image
+        output_format (str): Target image format (e.g., "jpeg", "png", "webp", "jpg").
 
     Returns:
-        bool: True if conversion succeeds, False otherwise.
+        Bool: if successful
+        str: path to file generated
     """
     try:
-        if output_name:
-            webp_path = source_path.with_name(f"{output_name}.webp")
-        else:
-            webp_path = source_path.with_suffix(".webp")
+        if not os.path.exists(input_file_path):
+            raise FileNotFoundError(f"Input file does not exist: {input_file_path}")
 
-        with Image.open(source_path) as img:
-            img.save(webp_path, format="WEBP", quality=quality, method=6)
-        source_path.unlink()  # Remove original file
-        logger.success(f"Converted to WebP: {webp_path}")
-        return True
-    except Exception:
-        logger.exception(f"Failed to convert {source_path} to WebP")
-        return False
+        format_mapping = {
+            "jpg": "JPEG",
+            "jpeg": "JPEG",
+            "png": "PNG",
+            "webp": "WEBP",
+            "bmp": "BMP",
+        }
+
+        normalized_format = output_format.lower()
+        pil_format = format_mapping.get(normalized_format)
+
+        if not pil_format:
+            raise ValueError(f"Unsupported output format: {output_format}")
+
+        input_dir, input_filename = os.path.split(input_file_path)
+        base_name, _ = os.path.splitext(input_filename)
+        output_file_name = f"{base_name}.{normalized_format}"
+        output_image_path = os.path.join(output_file_path, output_file_name)
+
+        with Image.open(input_file_path) as img:
+            if img.mode in ("RGBA", "P", "LA"):
+                img = img.convert("RGB")
+            img.save(output_image_path, format=pil_format)
+
+        logger.success(f"Image converted to {pil_format} and saved at: {output_image_path}")
+        return True, output_image_path
+
+    except Exception as e:
+        logger.error(f"Failed to convert image: {e}")
+        return False, None
 
 
-async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN):
+async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN,
+                                             performer_image_output_format, font_full_name):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
+        :param font_full_name:
+        :param performer_image_output_format:
+        :param MTCNN:
         :param posters_limit:
         :param target_size: Set the desired output size (X, Y)
         :param zoom_factor: Set the zoom factor for cropping
@@ -299,6 +266,8 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         :param performers: List of tuples, where the second item in each tuple is a performer ID.
         :param directory: Path to the base directory where the 'faces' folder will be created.
         """
+    if not performers or performers == "":
+        return True
     try:
         faces_dir = os.path.join(directory, "faces")
         os.makedirs(faces_dir, exist_ok=True)
@@ -307,6 +276,11 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         logger.exception(f"Failed to create directory in: {directory}")
         return False
 
+    # Load JSON config
+    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    if exit_code != 0 or performers_images is None:
+        raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+
     for data in performers:
         try:
             if len(data) < 2:
@@ -314,6 +288,10 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
                 continue
             performer_name = data[0]
             performer_id = data[1]
+
+            if performer_name in performers_images:
+                logger.debug(f"Performer {performer_name} already has mapped image in json file")
+                continue
             logger.debug(f"Processing performer {performer_name}, ID: {performer_id}")
             performer_posters, performer_slug = await get_performer_profile_picture(performer_name, performer_id, posters_limit)
             # performer_url = tpdb_performer_url + performer_slug if performer_slug else ""
@@ -327,7 +305,8 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             text_color = (255, 255, 255)  # Text color (black)
             position_percentage = 0.8
             for file in downloaded_files:
-                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN)
+                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN,
+                                        performer_image_output_format, font_full_name)
 
         except Exception:
             logger.exception(f"Error processing performer {performer_name}, ID: {performer_id}")
@@ -388,7 +367,8 @@ async def download_poster_images(poster_urls: list[str], faces_dir: str, perform
         return False
 
 
-async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN):
+async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN,
+                            performer_image_output_format, font_full_name):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
@@ -413,7 +393,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             continue
 
         # Save the face image with a long vertical elliptical shape
-        output_file = f"{base_filename}-face-{i + 1}.webp"
+        output_file = f"{base_filename}-face-{i + 1}.{performer_image_output_format}"
         full_output_file_path = os.path.join(output_path, output_file)
         await save_face_image_with_rounded_corners(face, mask, full_output_file_path, target_size)
 
@@ -422,6 +402,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             output_file=full_output_file_path,
             text=text,
             font_size=font_size,
+            font_full_name=font_full_name,
             text_color=text_color,  # White text
             glow_color=(0, 0, 0),  # Black glow
             glow_thickness=3,  # Thickness of the glow
@@ -429,7 +410,7 @@ async def process_detection(image_path, output_path, zoom_factor, target_size, b
             bold_thickness=0,  # Adjust thickness as needed
             max_chars_per_line=13,
             position_percentage=position_percentage,
-            line_spacing=15  # Increased spacing for better readability
+            line_spacing=15,  # Increased spacing for better readability
         )
 
         logger.success(f"Finished processing {image_path} - {output_file}")
@@ -440,6 +421,7 @@ async def overlay_text(
         output_file,
         text,
         font_size,
+        font_full_name,
         text_color=(255, 255, 255),  # White text
         glow_color=(0, 0, 0),  # Black glow
         glow_thickness=3,  # Thickness of the glow
@@ -462,12 +444,11 @@ async def overlay_text(
     # Draw on the overlay
     draw = ImageDraw.Draw(overlay)
 
-    # Try loading a common system font with specified size
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
-    except OSError:
-        font = ImageFont.load_default()
-        logger.warning("Falling back to default font. Font size may not match expected size.")
+        font_path = f"assets/{font_full_name}"
+        font = ImageFont.truetype(font_path, size=18)  # Adjust size here
+    except IOError:
+        font = ImageFont.load_default()  # Fallback if font is not available
 
     # Wrap text into multiple lines
     wrapped_text = textwrap.fill(text, width=max_chars_per_line)
