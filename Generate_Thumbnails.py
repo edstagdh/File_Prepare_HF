@@ -555,7 +555,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
         input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
 
-        config, exit_code = await load_json_file("Config_Thumbnails.json")
+        config, exit_code = await load_json_file("Configs/Config_Thumbnails.json")
         if not config:
             logger.error("Processing failed due to invalid configuration")
             return False

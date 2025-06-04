@@ -9,12 +9,12 @@ from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
 from Utilities import load_json_file, run_command
-from Upload_IMGBB import imgbb_upload_single_image
+from Uploaders.Upload_IMGBB import imgbb_upload_single_image
 
 
 async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode):
     # Load Preview Config
-    config, exit_code = await load_json_file("Config_Video_Preview.json")
+    config, exit_code = await load_json_file("Configs/Config_Video_Preview.json")
     if not config:
         exit(exit_code)
     else:

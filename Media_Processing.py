@@ -277,7 +277,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         return False
 
     # Load JSON config
-    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -445,7 +445,7 @@ async def overlay_text(
     draw = ImageDraw.Draw(overlay)
 
     try:
-        font_path = f"assets/{font_full_name}"
+        font_path = f"Resources/{font_full_name}"
         font = ImageFont.truetype(font_path, size=18)  # Adjust size here
     except IOError:
         font = ImageFont.load_default()  # Fallback if font is not available
@@ -719,16 +719,15 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
                         predicted_size_kib = (current_size_kib / encoded_time) * duration
                         predicted_size = format_size(predicted_size_kib)
                         estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
-
-                        logger.info(
-                            f"Encoded {encoded_time:.2f}s / {duration}s "
-                            f"({(encoded_time / duration) * 100:.1f}%), "
-                            f"Speed: {speed:.2f}x, "
-                            f"Elapsed: {elapsed_human}, "
-                            f"ETA: {eta_human}, "
-                            f"Estimated Size: {predicted_size}, "
-                            f"Estimated Bit rate: {estimated_bitrate}"
-                        )
+                        msg = ""
+                        msg += f"Encoded {encoded_time:.2f}s / {duration}s "
+                        msg += f"({(encoded_time / duration) * 100:.1f}%), "
+                        msg += f"Speed: {speed:.2f}x, "
+                        msg += f"Elapsed: {elapsed_human}, "
+                        msg += f"ETA: {eta_human}, "
+                        msg += f"Estimated Size: {predicted_size}, "
+                        msg += f"Estimated Bit rate: {estimated_bitrate}"
+                        logger.info(msg)
                     else:
                         logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
                 else:

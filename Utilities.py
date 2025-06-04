@@ -409,7 +409,7 @@ async def generate_template_video(
         media_info = f.read()
 
     # Load JSON config
-    json_map, exit_code = await load_json_file("BBCode_Images.json")
+    json_map, exit_code = await load_json_file("Resources/BBCode_Images.json")
     if exit_code != 0 or json_map is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -475,7 +475,7 @@ async def generate_template_video(
                 raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
 
     # Load JSON config
-    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 

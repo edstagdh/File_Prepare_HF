@@ -13,13 +13,13 @@ from Media_Processing import get_existing_title, get_existing_description, cover
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails import process_thumbnails
-from Upload_IMGBOX import imgbox_upload_single_image
-from Upload_IMGBB import imgbb_upload_single_image
+from Uploaders.Upload_IMGBOX import imgbox_upload_single_image
+from Uploaders.Upload_IMGBB import imgbb_upload_single_image
 
 
 async def process_files():
     # Load Config file
-    config, exit_code = await load_json_file("Config.json")
+    config, exit_code = await load_json_file("Configs/Config.json")
     if not config:
         exit(exit_code)
     else:
@@ -61,6 +61,7 @@ async def process_files():
         font_full_name = config["font_full_name"]
         imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
         imgbb_upload_previews = config["imgbb_upload_previews"]
+        ignore_list = config["ignore_list"]
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -122,7 +123,10 @@ async def process_files():
     # Second pass: Get the list of .mp4 files in the same directory (not sub_folders)
     mp4_files = [
         f for f in Path(directory).iterdir()
-        if f.is_file() and f.suffix.lower() == ".mp4" and f.suffix.lower() != "_old.mp4"
+        if f.is_file()
+           and f.suffix.lower() == ".mp4"
+           and not f.name.lower().endswith("_old.mp4")
+           and f.name not in ignore_list
     ]
     mp4_files = sorted(mp4_files)
     for file in mp4_files:
@@ -378,7 +382,6 @@ async def process_files():
             optional_steps = [
                 (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale]),
 
-
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory,
                                                                            image_output_format]),
                 (imgbox_upload_cover, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
@@ -457,7 +460,7 @@ async def process_files():
 
 
 if __name__ == "__main__":
-    logger.add("App_Log_{time:YYYY.MMMM}.log", rotation="30 days", backtrace=True, enqueue=False, catch=True)  # Load Logger
+    logger.add("Logs/App_Log_{time:YYYY.MMMM}.log", rotation="30 days", backtrace=True, enqueue=False, catch=True)  # Load Logger
     ffmpeg_ffprobe_results, ff_exit_code = asyncio.run(verify_ffmpeg_and_ffprobe())
     if not ffmpeg_ffprobe_results:
         exit(ff_exit_code)
