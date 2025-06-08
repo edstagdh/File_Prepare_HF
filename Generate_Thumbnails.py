@@ -110,7 +110,7 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         draw = ImageDraw.Draw(image)
 
         try:
-            font_path = f"assets/{font_full_name}"
+            font_path = f"{font_full_name}"
             font = ImageFont.truetype(font_path, size=32)  # Adjust size here
         except IOError:
             font = ImageFont.load_default()  # Fallback if font is not available
@@ -306,21 +306,24 @@ async def is_valid_integer_division(numerator, denominator):
         return False
 
 
-async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
+async def create_info_image(metadata_table, temp_folder, filename, sheet_width, font_path=None):
     """Create an image displaying video metadata."""
 
     font_size = 18
-
     line_height = 30
     height = len(metadata_table) * line_height + 20
 
     img = Image.new("RGB", (sheet_width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
+    # Load custom font if provided, else fallback to Arial or default
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
+        if font_path and os.path.exists(font_path):
+            font = ImageFont.truetype(font_path, font_size)
+        else:
+            font = ImageFont.truetype("arial.ttf", font_size)
     except IOError:
-        logger.warning("Arial font not found, using default font.")
+        logger.warning("Specified font not found, using default font.")
         font = ImageFont.load_default()
 
     y_offset = 10
@@ -328,8 +331,8 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
         key, value = row
 
         # Check if the value is a coroutine and await it
-        if callable(value):  # If value is a coroutine (function), await it
-            value = await value  # Correctly await the coroutine
+        if callable(value):
+            value = await value
 
         # Split value by newline for multiline content
         value_lines = str(value).split('\n')
@@ -342,7 +345,7 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
         draw.text((150, y_offset), value_lines[0], font=font, fill=(255, 255, 255))
         y_offset += line_height
 
-        # Print the subsequent lines (continuation of the value without the key)
+        # Print the subsequent lines
         for line in value_lines[1:]:
             draw.text((150, y_offset), line, font=font, fill=(255, 255, 255))
             y_offset += line_height
@@ -351,7 +354,6 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
     output_image_path = os.path.join(temp_folder, output_image_name)
     try:
         img.save(output_image_path)
-        # logger.debug(f"Image saved as {output_image_path}")
     except Exception as e:
         logger.error(f"Error saving image: {e}")
 
@@ -598,16 +600,16 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
-
+        font_path = f"Resources\{font_full_name}"
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:
                 sheet_width = int((columns * thumb_width) + ((columns + 1) * padding))
-                info_image_path = await create_info_image(metadata_table, temp_dir, input_video_file_name, sheet_width)
+                info_image_path = await create_info_image(metadata_table, temp_dir, input_video_file_name, sheet_width, font_path)
             else:
                 info_image_path = None
 
             await extract_frame_at_timestamps(input_video_full_path, timestamps, temp_dir)
-            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_full_name, is_vertical,
+            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_path, is_vertical,
                                          fit_thumbs_in_less_rows)
 
         return True
