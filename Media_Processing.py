@@ -184,20 +184,38 @@ async def cover_image_download_and_conversion(image_url: str,
         with open(temp_image_path, 'wb') as f:
             f.write(response.content)
         # logger.debug(f"Image saved to {temp_image_path}")
+
+        # Check and downscale if the image exceeds 1080p resolution
+        try:
+            with Image.open(temp_image_path) as img:
+                width, height = img.size
+                if width > 1920 or height > 1080:
+                    try:
+                        resample = Image.Resampling.LANCZOS  # Pillow >= 10
+                    except AttributeError:
+                        resample = Image.LANCZOS  # Pillow < 10
+
+                    img.thumbnail((1920, 1080), resample)
+                    img.save(temp_image_path, format=image_output_format.upper())
+                    logger.info(f"Image downscaled to fit within 1080p: {temp_image_path}")
+        except Exception as e:
+            logger.error(f"Error while checking/downscaling image resolution: {e}")
+
         final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
         # Check if the image format matches the desired format
         if not temp_image_path.lower().endswith(f".{image_output_format}"):
             # Convert the image format if needed
             await convert_image_format(temp_image_path, final_image_path, image_output_format)
             os.remove(temp_image_path)  # Remove the temporary file after conversion
-            logger.info(f"Image converted to {image_output_format} and saved to {final_image_path}")
+            logger.info(f"Converted image saved to {final_image_path}")
         else:
-            os.rename(temp_image_path, final_image_path)
-            logger.success(f"Image saved as {final_image_path}")
+            shutil.move(temp_image_path, final_image_path)
+            logger.info(f"Image moved to final destination: {final_image_path}")
 
         return True
-    except Exception:
-        logger.exception("Unexpected error in image_download_and_conversion")
+
+    except Exception as e:
+        logger.error(f"Unhandled error in cover image processing: {e}")
         return False
 
 

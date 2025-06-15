@@ -275,7 +275,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
             if item_date == scene_date:
                 valid_entries.append(item)
             # Date range check (within ±1 to ±4 days)
-            elif abs((item_date - scene_date).days) in range(1, 5):
+            elif abs((item_date - scene_date).days) in range(1, 30):
                 sleep(0.5)
                 user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
                                    f"include it? (y/n): ").strip().lower()
