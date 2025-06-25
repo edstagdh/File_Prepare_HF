@@ -278,7 +278,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
             elif abs((item_date - scene_date).days) in range(1, 30):
                 sleep(0.5)
                 user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
-                                   f"include it? (y/n): ").strip().lower()
+                                   f"include it in the results? (y/n): ").strip().lower()
                 if user_input in ["y", "yes"]:
                     valid_entries.append(item)
                     logger.warning(f"Scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date and was added.")
@@ -318,7 +318,7 @@ async def extract_female_performers(selected_entry):
             if (
                     performer.get("parent") and
                     performer["parent"].get("extras") and
-                    performer["parent"]["extras"].get("gender") == "Female"
+                    (performer["parent"]["extras"].get("gender") == "Female" or performer["parent"]["extras"].get("gender") == "Transgender Female")
             ):
                 if performer.get("name") == performer["parent"].get("name"):
                     female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
