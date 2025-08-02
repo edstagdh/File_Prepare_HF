@@ -674,8 +674,11 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
-    duration = await get_video_duration(file_path)
+    duration, fps = await get_video_duration(file_path)
 
+    keyint = int(fps * 2)  # every 2 seconds
+
+    # Updated logic to use CRF 24 for general purpose streaming and remove unwanted metadata that could impact compatibility.
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
@@ -683,10 +686,20 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
         "-map", "0:a",
         "-c:v", "libx265",
         "-vtag", "hvc1",
-        "-x265-params", "crf=22",
+        "-x265-params",
+        (
+            "crf=24:"
+            "preset=medium:"
+            "ref=3:"
+            "limit-refs=2:"
+            f"keyint={keyint}:"
+        ),
         "-c:a", "aac",
         "-b:a", "128k",
-        "-map_metadata", "0"
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        "-dn",
+        "-sn"
     ]
 
     # Add scale filter if resolution is higher than 1080p and downscaling is enabled
@@ -695,14 +708,6 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
             ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
         elif is_vertical and height > 1080:
             ffmpeg_cmd += ["-vf", "scale=-2:1080"]
-
-    # Enforce bitrate limits for high-bitrate non-vertical videos
-    if not is_vertical and bit_rate and bit_rate > 20_000_000:
-        ffmpeg_cmd += [
-            "-minrate", "2M",
-            "-maxrate", "10M",
-            "-bufsize", "5M"
-        ]
 
     ffmpeg_cmd.append(temp_output)
 
@@ -717,7 +722,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     for line in process.stderr:
         now = time.time()
-        if now - last_update_time >= 3:
+        if now - last_update_time >= 10:
             time_match = time_pattern.search(line)
             size_match = size_pattern.search(line)
             speed_match = speed_pattern.search(line)
@@ -809,7 +814,7 @@ async def get_video_duration(filepath):
     if fps == 0:
         logger.error(f"Invalid FPS value for file: {filepath}")
         return 0
-    return int(frame_count // fps)
+    return int(frame_count // fps), fps
 
 
 async def get_video_fps(video_path: str) -> float:
@@ -932,9 +937,9 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description, re_encode_hevc):
+async def update_metadata(input_file, title, description):
     """
-    Updates the metadata of an MP4 video file with the specified title, description, and adds "HEVC" to the Tags field.
+    Updates the metadata of an MP4 video file with the specified title, description.
 
     Args:
         input_file (str): Path to the video file.
@@ -946,7 +951,6 @@ async def update_metadata(input_file, title, description, re_encode_hevc):
         :param description:
         :param title:
         :param input_file:
-        :param re_encode_hevc:
     """
     try:
         # Load the MP4 file
@@ -955,12 +959,6 @@ async def update_metadata(input_file, title, description, re_encode_hevc):
         # Update metadata fields
         video["\xa9nam"] = title  # Title
         video["\xa9cmt"] = description  # Comment/Description
-        if re_encode_hevc:
-            # Add "HEVC" to the Tags field
-            current_tags = video.get("\xa9gen", [])  # Get current tags or initialize an empty list
-            if "HEVC" not in current_tags:
-                current_tags.append("HEVC")  # Add "HEVC" if not already present
-            video["\xa9gen"] = current_tags  # Update Tags field
 
         # Save changes
         video.save()

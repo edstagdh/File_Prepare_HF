@@ -126,6 +126,7 @@ async def process_files():
         if f.is_file()
            and f.suffix.lower() == ".mp4"
            and not f.name.lower().endswith("_old.mp4")
+           and not f.name.lower().endswith("_temp.mp4")
            and f.name not in ignore_list
     ]
     mp4_files = sorted(mp4_files)
@@ -325,21 +326,22 @@ async def process_files():
             await rename_file(str(file), new_full_filename)
 
         try:
-            # Check existing metadata
-            existing_title = await get_existing_title(new_file_full_path)
-            existing_description = await get_existing_description(new_file_full_path)
-            description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
-            if existing_title == new_title and existing_description == description:
-                # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
-                pass
-            else:
-                # logger.info(f"File: {file.name} - Title and Description already exist and are identical")
-                results_metadata = await update_metadata(new_file_full_path, new_title, description, re_encode_hevc)
-                if not results_metadata:
-                    logger.error(f"Failed to modify file: {new_full_filename}")
-                    logger.warning(f"End file: {file_full_name}")
-                    failed_files.append(new_file_full_path)
-                    continue  # Skip to the next file
+            if not re_encode_hevc:
+                # Check existing metadata
+                existing_title = await get_existing_title(new_file_full_path)
+                existing_description = await get_existing_description(new_file_full_path)
+                description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
+                if existing_title == new_title and existing_description == description:
+                    # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                    pass
+                else:
+                    # logger.info(f"File: {file.name} - Title and Description already exist and are identical")
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description)
+                    if not results_metadata:
+                        logger.error(f"Failed to modify file: {new_full_filename}")
+                        logger.warning(f"End file: {file_full_name}")
+                        failed_files.append(new_file_full_path)
+                        continue  # Skip to the next file
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
             fps = await get_video_fps(new_file_full_path)
@@ -382,6 +384,9 @@ async def process_files():
             optional_steps = [
                 (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale]),
 
+                # runs only if re-encoding is enabled, to re-fetch and update metadata
+                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"]),
+
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory,
                                                                            image_output_format]),
                 (imgbox_upload_cover, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
@@ -402,18 +407,20 @@ async def process_files():
                   template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, suffix]),
             ]
             failed = False
+            where_failed = None
             # Run each enabled optional step
             for flag, func, args in optional_steps:
                 if flag:
                     result = await func(*args)
                     if not result:
                         failed = True
+                        where_failed = f"{func}"
                         break  # Exit inner loop
                     else:
                         # logger.debug(f"function {func} success")
                         pass
             if failed:
-                logger.error(f"Processing failed for file: {new_file_full_path}")
+                logger.error(f"Processing failed for file: {new_file_full_path}, error in: {where_failed}")
                 logger.warning(f"End file: {new_file_full_path}")
                 failed_files.append(new_file_full_path)
                 continue  # Skip to the next file

@@ -20,10 +20,13 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             return None, None, None, None, None, None, None, None, None, None, None
 
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        if response_data is None or not response_data.get('data') and part_match:
+        if response_data is None or not response_data.get('data') or part_match:
             string_parse_fallback = await convert_number_suffix_to_word(string_parse)
-            if string_parse_fallback != string_parse:
+            if string_parse_fallback != string_parse and part_match:
                 response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
+            elif response_data is None or not response_data.get('data'):
+                string_advanced_parse_fallback = await remove_date_from_text(string_parse)
+                response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
 
         if response_data is None or not response_data.get('data'):
             return None, None, None, None, None, None, None, None, None, None, None
@@ -74,7 +77,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             sleep(0.5)
             female_performers = []
             while True:
-                logger.debug("Enter Performers Manually")
+                logger.info("Enter Performers Manually")
                 user_input = input("Enter a value (or type 'exit' to stop): ")
                 if user_input.lower() == 'exit':
                     break
@@ -274,8 +277,8 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
             # Exact date match
             if item_date == scene_date:
                 valid_entries.append(item)
-            # Date range check (within ±1 to ±4 days)
-            elif abs((item_date - scene_date).days) in range(1, 30):
+            # Date range check (within ±1 to ±7 days)
+            elif abs((item_date - scene_date).days) in range(1, 7):
                 sleep(0.5)
                 user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
                                    f"include it in the results? (y/n): ").strip().lower()
@@ -460,3 +463,13 @@ async def convert_number_suffix_to_word(s: str) -> str:
         number_word = num2words(int(number))
         return f"{prefix}{number_word}"
     return s
+
+
+async def remove_date_from_text(text: str) -> str:
+    # This pattern matches dates in formats like YY.MM.DD or YYYY.MM.DD
+    date_pattern = r'\b(?:\d{2}|\d{4})\.\d{2}\.\d{2}\b'
+    # Remove the date pattern and any extra dots caused by removal
+    cleaned = re.sub(date_pattern, '', text)
+    # Remove any duplicate or trailing dots caused by the removal
+    cleaned = re.sub(r'\.{2,}', '.', cleaned).strip('.')
+    return cleaned

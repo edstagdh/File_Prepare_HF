@@ -631,7 +631,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         if columns == 4:
             char_break_line = 150
 
-        duration = await get_video_duration(input_video_full_path)
+        duration, fps = await get_video_duration(input_video_full_path)
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
