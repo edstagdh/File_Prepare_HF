@@ -188,7 +188,7 @@ async def pre_process_files(directory, bad_words, mode):
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
                 continue
-            if  filename.lower().endswith('_old.mp4'):
+            if filename.lower().endswith('_old.mp4'):
                 continue
 
             if ' ' in filename:

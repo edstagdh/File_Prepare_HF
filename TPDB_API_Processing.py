@@ -19,13 +19,16 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None
 
+        # logger.debug(string_parse)
         response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        if response_data is None or not response_data.get('data') or part_match:
+        if response_data is None or not response_data.get('data'):
             string_parse_fallback = await convert_number_suffix_to_word(string_parse)
+            # logger.debug(string_parse_fallback)
             if string_parse_fallback != string_parse and part_match:
                 response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
             elif response_data is None or not response_data.get('data'):
                 string_advanced_parse_fallback = await remove_date_from_text(string_parse)
+                # logger.debug(string_advanced_parse_fallback)
                 response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
 
         if response_data is None or not response_data.get('data'):

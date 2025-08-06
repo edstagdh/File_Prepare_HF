@@ -143,7 +143,7 @@ async def process_files():
             logger.info(f"Start file: {file}, file {processed_files + 1} out of {total_files}")
 
             # Define flags and initialize them
-            flag_names = ["vr2normal", "upscaled", "bts"]
+            flag_names = ["vr2normal", "upscaled", "bts", "pov", "vertical"]
             file_flags = {flag: False for flag in flag_names}
 
             # Check for flags in the file name and clean them
@@ -156,7 +156,7 @@ async def process_files():
                     clean_tpdb_check_filename = re.sub(re.escape(flag), "", clean_tpdb_check_filename, flags=re.IGNORECASE)
 
             # Unpack flags
-            vr2normal, upscaled, bts_video = (file_flags[flag] for flag in flag_names)
+            vr2normal, upscaled, bts_video, vertical, pov = (file_flags[flag] for flag in flag_names)
 
             # Check for Part in file base name
             part_match = re.search(r"\.part\.\d+", file_base_name, re.IGNORECASE)
@@ -252,6 +252,10 @@ async def process_files():
             suffix = "BTS"
         elif upscaled:
             suffix = "Upscaled"
+        elif vertical:
+            suffix = "Vertical"
+        elif pov:
+            suffix = "Pov"
         else:
             suffix = ""
 
