@@ -46,6 +46,7 @@ async def process_files():
         posters_limit = config["posters_limit"]
         template_file_name = config["template_name"]
         re_encode_downscale = config["re_encode_downscale"]
+        limit_cpu_usage = config["limit_cpu_usage"]
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         code_version = config["Code_Version"]
@@ -386,7 +387,7 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale]),
+                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
                 (re_encode_hevc, update_metadata, [new_file_full_path, new_title, f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"]),

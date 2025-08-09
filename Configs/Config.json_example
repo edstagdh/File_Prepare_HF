@@ -8,6 +8,7 @@
   "create_hf_template" : false,
   "re_encode_hevc": true,
   "re_encode_downscale": false,
+  "limit_cpu_usage": false,
   "keep_original_file": true,
   "manual_mode": false,
   "tpdb_scenes_url": "https://theporndb.net/scenes/",

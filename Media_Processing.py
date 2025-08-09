@@ -1,3 +1,5 @@
+import math
+
 import cv2
 import json
 import numpy as np
@@ -622,11 +624,11 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage)
 
     if temp_output is None:
         # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
@@ -656,7 +658,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage):
     """Re-encode the given file to HEVC and show progress.
 
     Returns:
@@ -678,7 +680,20 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     keyint = int(fps * 2)  # every 2 seconds
 
-    # Updated logic to use CRF 24 for general purpose streaming and remove unwanted metadata that could impact compatibility.
+    x265_params = (
+        "crf=24:"
+        "preset=medium:"
+        "ref=3:"
+        "limit-refs=2:"
+        f"keyint={keyint}:"
+    )
+
+    if limit_cpu_usage:
+        # Calculate half of total CPU cores (round up to avoid 0)
+        half_threads = max(1, math.ceil(os.cpu_count() / 2))
+        # Add x265 pools option to limit encoding threads
+        x265_params += f"pools={half_threads}:"
+
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
@@ -686,14 +701,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
         "-map", "0:a",
         "-c:v", "libx265",
         "-vtag", "hvc1",
-        "-x265-params",
-        (
-            "crf=24:"
-            "preset=medium:"
-            "ref=3:"
-            "limit-refs=2:"
-            f"keyint={keyint}:"
-        ),
+        "-x265-params", x265_params,
         "-c:a", "aac",
         "-b:a", "128k",
         "-map_metadata", "-1",
