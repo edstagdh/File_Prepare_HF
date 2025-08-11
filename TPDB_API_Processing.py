@@ -242,19 +242,21 @@ async def get_user_input():
     while True:
         try:
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
-            if response == "yes" or response == "y":
-                temp_performers.append(input("Enter Performers Manually: "))
+            if response in ("yes", "y"):
+                while True:
+                    name = input("Enter Performer (leave blank to finish): ").strip()
+                    if not name:
+                        break
+                    temp_performers.append(name)
                 if temp_performers:
-                    female_performers = temp_performers
-                    return female_performers
-            elif response == "no" or response == "n":
+                    return temp_performers
+            elif response in ("no", "n"):
                 return None
             else:
                 logger.warning("Invalid input. Please enter 'yes' or 'no'.")
-
         except Exception as e:
             logger.error(f"An error occurred: {e}")
-            return None  # Return None in case of unexpected errors
+            return None
 
 
 async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
@@ -346,7 +348,7 @@ async def extract_female_performers(selected_entry):
         else:
             user_entries = await get_user_input()
             if user_entries:
-                female_performers.extend(user_entries)
+                female_performers.extend([(name, "") for name in user_entries])
             if not female_performers or len(female_performers) < 1:
                 return None
             else:

@@ -624,11 +624,11 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters)
 
     if temp_output is None:
         # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
@@ -658,7 +658,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
     """Re-encode the given file to HEVC and show progress.
 
     Returns:
@@ -697,7 +697,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
-        "-map", "0:v",
+        "-map", "0:v:0",
         "-map", "0:a",
         "-c:v", "libx265",
         "-vtag", "hvc1",
@@ -705,7 +705,14 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         "-c:a", "aac",
         "-b:a", "128k",
         "-map_metadata", "-1",
-        "-map_chapters", "-1",
+    ]
+
+    if remove_chapters:
+        ffmpeg_cmd += ["-map_chapters", "-1"]
+    else:
+        ffmpeg_cmd += ["-map_chapters", "0"]
+
+    ffmpeg_cmd += [
         "-dn",
         "-sn"
     ]
