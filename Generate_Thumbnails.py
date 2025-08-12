@@ -110,7 +110,7 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         draw = ImageDraw.Draw(image)
 
         try:
-            font_path = f"assets/{font_full_name}"
+            font_path = f"{font_full_name}"
             font = ImageFont.truetype(font_path, size=32)  # Adjust size here
         except IOError:
             font = ImageFont.load_default()  # Fallback if font is not available
@@ -154,7 +154,9 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         raise
 
 
-async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps, info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows):
+async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps,
+                                 info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows,
+                                 alternate_layout=False):
     """
     Generates a contact sheet from the extracted frames and saves it as an image.
 
@@ -169,6 +171,7 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
         font_full_name: name of font to use
         fit_thumbs_in_less_rows (str): flag if number of thumbs should be doubled for vertical video
         is_vertical (bool): flag if video is vertical or not
+        alternate_layout (bool): flag to enable alternate layout with one enlarged image
 
     Raises:
         ValueError: If no thumbnails are found in the directory.
@@ -180,17 +183,45 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
         if not image_files:
             raise ValueError("No thumbnails found.")
 
+        total_slots = columns * columns if alternate_layout else None
         thumbs = []
+
+        # Adjust image count for alternate layout
+        if alternate_layout:
+            if len(image_files) < 2:
+                raise ValueError("Need at least 2 frames for alternate layout.")
+
+            # First image will be enlarged
+            first_image_file = image_files[0]
+            remaining_images = image_files[1:]
+
+            # Calculate number of images to keep
+            target_frame_count = columns * columns - 3  # 3 slots used by the enlarged image
+
+            if len(remaining_images) > target_frame_count:
+                last_index = len(remaining_images) - 1
+                num_needed = target_frame_count - 1  # reserve 1 slot for the last frame
+
+                if num_needed < 0:
+                    raise ValueError("Target frame count too small to keep last frame.")
+
+                # Randomly sample from the rest, excluding last
+                random_indexes = sorted(random.sample(range(last_index), num_needed))
+                random_indexes.append(last_index)  # always include last frame
+
+                remaining_images = [remaining_images[i] for i in random_indexes]
+
+            # Reassemble image list
+            image_files = [first_image_file] + remaining_images
+            timestamps = [timestamps[0]] + [timestamps[i + 1] for i in random_indexes]
+
         for i, file in enumerate(image_files):
             img = Image.open(file)
-            # Resize the image to the desired thumb_width while maintaining aspect ratio
             ratio = thumb_width / img.width
             new_size = (thumb_width, int(img.height * ratio))
             img = img.resize(new_size)
 
-            # Add timestamp to the top-right corner of each frame
             img = await add_timestamp_to_frame(img, timestamps[i], font_full_name)
-
             thumbs.append(img)
 
         if is_vertical and fit_thumbs_in_less_rows and len(timestamps) >= 6:
@@ -200,41 +231,44 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
 
         thumb_height = thumbs[0].height
 
-        info_image = None
-        info_width, info_height = 0, 0
-
-        if info_image_path is not None and os.path.exists(info_image_path):
-            info_image = Image.open(info_image_path)
-            info_width, info_height = info_image.size
-
-        # Ensure the contact sheet is at least as wide as the info image
-        sheet_width = max((columns * thumb_width) + ((columns + 1) * padding), info_width)
-        sheet_height = (rows * thumb_height) + ((rows + 1) * padding) + (info_height + padding if info_image else 0)
+        info_image = Image.open(info_image_path)
+        sheet_width = columns * thumb_width + (columns + 1) * padding
+        sheet_height = info_image.height + padding + rows * (thumb_height + padding)
 
         contact_sheet = Image.new('RGB', (sheet_width, sheet_height), color=(0, 0, 0))
+        contact_sheet.paste(info_image, (padding, padding))
 
-        # Paste info image at the top center if it exists
-        if info_image:
-            info_x = (sheet_width - info_width) // 2
-            contact_sheet.paste(info_image, (info_x, padding))
-            y_start = info_height + 2 * padding
-        else:
-            y_start = padding
+        y_offset = info_image.height + 2 * padding
 
-        # Paste thumbnails
-        for index, thumb in enumerate(thumbs):
-            col = index % columns
-            row = index // columns
-            x = padding + col * (thumb_width + padding)
-            y = y_start + row * (thumb_height + padding)
-            contact_sheet.paste(thumb, (x, y))
+        index = 0
+        for row in range(rows):
+            for col in range(columns):
+                if alternate_layout and index == 0:
+                    # Paste the large image in top-left 2x2 grid
+                    large_img = thumbs[0]
+                    large_width = 2 * thumb_width + padding
+                    large_height = 2 * thumb_height + padding
+                    large_img_resized = large_img.resize((large_width, large_height))
+                    contact_sheet.paste(large_img_resized, (padding, y_offset))
+                    index += 1
+                    continue
+
+                if alternate_layout and row < 2 and col < 2:
+                    continue  # Skip 2x2 area used by large image
+
+                if index >= len(thumbs):
+                    break
+
+                x = col * (thumb_width + padding) + padding
+                y = y_offset + row * (thumb_height + padding)
+                contact_sheet.paste(thumbs[index], (x, y))
+                index += 1
 
         contact_sheet.save(output_path)
-        logger.success(f"Contact sheet saved to {output_path}")
+        logger.success(f"Contact sheet saved to: {output_path}")
 
     except Exception as e:
-        logger.exception(f"Error generating contact sheet from {image_dir}.")
-        raise
+        logger.error(f"Error generating contact sheet: {e}")
 
 
 async def convert_image_format(input_file_path: str, output_file_path: str, output_format: str):
@@ -306,21 +340,24 @@ async def is_valid_integer_division(numerator, denominator):
         return False
 
 
-async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
+async def create_info_image(metadata_table, temp_folder, filename, sheet_width, font_path=None):
     """Create an image displaying video metadata."""
 
     font_size = 18
-
     line_height = 30
     height = len(metadata_table) * line_height + 20
 
     img = Image.new("RGB", (sheet_width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
+    # Load custom font if provided, else fallback to Arial or default
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
+        if font_path and os.path.exists(font_path):
+            font = ImageFont.truetype(font_path, font_size)
+        else:
+            font = ImageFont.truetype("arial.ttf", font_size)
     except IOError:
-        logger.warning("Arial font not found, using default font.")
+        logger.warning("Specified font not found, using default font.")
         font = ImageFont.load_default()
 
     y_offset = 10
@@ -328,8 +365,8 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
         key, value = row
 
         # Check if the value is a coroutine and await it
-        if callable(value):  # If value is a coroutine (function), await it
-            value = await value  # Correctly await the coroutine
+        if callable(value):
+            value = await value
 
         # Split value by newline for multiline content
         value_lines = str(value).split('\n')
@@ -342,7 +379,7 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
         draw.text((150, y_offset), value_lines[0], font=font, fill=(255, 255, 255))
         y_offset += line_height
 
-        # Print the subsequent lines (continuation of the value without the key)
+        # Print the subsequent lines
         for line in value_lines[1:]:
             draw.text((150, y_offset), line, font=font, fill=(255, 255, 255))
             y_offset += line_height
@@ -351,7 +388,6 @@ async def create_info_image(metadata_table, temp_folder, filename, sheet_width):
     output_image_path = os.path.join(temp_folder, output_image_name)
     try:
         img.save(output_image_path)
-        # logger.debug(f"Image saved as {output_image_path}")
     except Exception as e:
         logger.error(f"Error saving image: {e}")
 
@@ -555,13 +591,13 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
         input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
 
-        config, exit_code = await load_json_file("Config_Thumbnails.json")
+        config, exit_code = await load_json_file("Configs/Config_Thumbnails.json")
         if not config:
             logger.error("Processing failed due to invalid configuration")
             return False
         else:
             num_thumbs = config["num_thumbs"]
-            thumb_width = config["thumb_width"]
+            thumb_width = config["thumb_width"]  # This times columns must match 1890 for ideal screen size
             columns = config["columns"]
             padding = config["padding"]
             output_file_name_suffix = config["output_file_name_suffix"]
@@ -569,6 +605,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             font_full_name = config["font_full_name"]
             fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
             force_regenerate = config["force_regenerate"]
+            alternate_layout = config["alternate_layout"]  # Only works in 4 by 4 grid: num_thumbs=16 and columns=4
 
         # Check if the output file already exists
         if await output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format) and not force_regenerate:
@@ -594,21 +631,21 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         if columns == 4:
             char_break_line = 150
 
-        duration = await get_video_duration(input_video_full_path)
+        duration, fps = await get_video_duration(input_video_full_path)
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
-
+        font_path = f"Resources\{font_full_name}"
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:
                 sheet_width = int((columns * thumb_width) + ((columns + 1) * padding))
-                info_image_path = await create_info_image(metadata_table, temp_dir, input_video_file_name, sheet_width)
+                info_image_path = await create_info_image(metadata_table, temp_dir, input_video_file_name, sheet_width, font_path)
             else:
                 info_image_path = None
 
             await extract_frame_at_timestamps(input_video_full_path, timestamps, temp_dir)
-            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_full_name, is_vertical,
-                                         fit_thumbs_in_less_rows)
+            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_path, is_vertical,
+                                         fit_thumbs_in_less_rows, alternate_layout)
 
         return True
 

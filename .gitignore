@@ -45,9 +45,9 @@ dist/
 
 # User Configs
 *.cfg
-Config.json
-Config_Thumbnails.json
-Config_Video_Preview.json
+Configs/Config.json
+Configs/Config_Thumbnails.json
+Configs/Config_Video_Preview.json
 
 # Resources Files
 Resources.json
@@ -57,4 +57,4 @@ Resources.json
 Secret.json
 
 # Performers json
-Performers_Images.json
+Resources/Performers_Images.json

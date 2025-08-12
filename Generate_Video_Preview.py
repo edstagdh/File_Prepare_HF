@@ -9,12 +9,12 @@ from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
 from Utilities import load_json_file, run_command
-from Upload_IMGBB import imgbb_upload_single_image
+from Uploaders.Upload_IMGBB import imgbb_upload_single_image
 
 
 async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode):
     # Load Preview Config
-    config, exit_code = await load_json_file("Config_Video_Preview.json")
+    config, exit_code = await load_json_file("Configs/Config_Video_Preview.json")
     if not config:
         exit(exit_code)
     else:
@@ -46,6 +46,8 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
         return True
 
+    font_path = f"Resources\{font_full_name}"
+
     # Verify Segments and Grid values
     is_valid = await validate_preview_sheet_requirements(grid_width, num_of_segments, number_of_segments_gif, create_webp_preview_sheet, create_webm_preview_sheet,
                                                          create_gif_preview_sheet)
@@ -58,7 +60,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info)
+                                  new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -113,7 +115,7 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point, font_full_name, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info):
+                        last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -273,7 +275,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point, font_full_name)
+                                                       print_cut_points, last_cut_point, font_path)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -369,7 +371,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_webp_preview_sheet or create_gif_preview_sheet or create_webm_preview_sheet:
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
-                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info)
+                                                   preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -442,7 +444,7 @@ async def generate_cut_points(
         filename_without_ext,
         print_cut_points,
         last_cut_point,
-        font_full_name
+        font_path
 ):
     """Generate unique evenly spaced cut points with random variations."""
     calc_failed_counter = 0
@@ -517,7 +519,7 @@ async def generate_cut_points(
             black_bars,
             timestamps_mode,
             preview_sheet_required,
-            font_full_name
+            font_path
         )
 
         if not temp_files_preview:
@@ -534,7 +536,7 @@ async def generate_cut_points(
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
-                                  preview_sheet_required, font_full_name):
+                                  preview_sheet_required, font_path):
     """Generates video segments from a given video and overlays timestamps on them."""
     temp_files_webp = []
 
@@ -575,7 +577,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file, font_full_name)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -632,7 +634,7 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path, font_full_name):
+async def overlay_timestamp(temp_folder, video_path, font_path):
     """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
     try:
         match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
@@ -644,8 +646,6 @@ async def overlay_timestamp(temp_folder, video_path, font_full_name):
         output_path = f"timestamped_{os.path.basename(video_path)}"
         full_video_path = os.path.join(temp_folder, video_path)
         full_output_path = os.path.join(temp_folder, output_path)
-
-        font_path = f"assets/{font_full_name}"
 
         if not os.path.exists(font_path):
             logger.error(f"Font file not found at expected path: {font_path}")
@@ -783,7 +783,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
-                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info):
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -815,7 +815,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
 
         metadata_table, filename, original_fps = await get_video_metadata(file_path, char_break_line)
         if add_file_info:
-            info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars)
+            info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars, font_path)
 
             # Create the video from the info image (same resolution as image)
             final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
@@ -1047,7 +1047,7 @@ async def break_string_at_char(s, break_char, char_break_line):
     return s
 
 
-async def create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars):
+async def create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars, font_path):
     """Create an image displaying video metadata."""
 
     font_size = 18
@@ -1073,10 +1073,14 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
     img = Image.new("RGB", (width, height), color=(0, 0, 0))
     draw = ImageDraw.Draw(img)
 
+    # Load custom font if provided, else fallback to Arial or default
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
+        if font_path and os.path.exists(font_path):
+            font = ImageFont.truetype(font_path, font_size)
+        else:
+            font = ImageFont.truetype("arial.ttf", font_size)
     except IOError:
-        logger.warning("Arial font not found, using default font.")
+        logger.warning("Specified font not found, using default font.")
         font = ImageFont.load_default()
 
     y_offset = 10

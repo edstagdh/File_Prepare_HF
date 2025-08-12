@@ -1,3 +1,4 @@
+import math
 import cv2
 import json
 import numpy as np
@@ -184,20 +185,38 @@ async def cover_image_download_and_conversion(image_url: str,
         with open(temp_image_path, 'wb') as f:
             f.write(response.content)
         # logger.debug(f"Image saved to {temp_image_path}")
+
+        # Check and downscale if the image exceeds 1080p resolution
+        try:
+            with Image.open(temp_image_path) as img:
+                width, height = img.size
+                if width > 1920 or height > 1080:
+                    try:
+                        resample = Image.Resampling.LANCZOS  # Pillow >= 10
+                    except AttributeError:
+                        resample = Image.LANCZOS  # Pillow < 10
+
+                    img.thumbnail((1920, 1080), resample)
+                    img.save(temp_image_path, format=image_output_format.upper())
+                    logger.info(f"Image downscaled to fit within 1080p: {temp_image_path}")
+        except Exception as e:
+            logger.error(f"Error while checking/downscaling image resolution: {e}")
+
         final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
         # Check if the image format matches the desired format
         if not temp_image_path.lower().endswith(f".{image_output_format}"):
             # Convert the image format if needed
             await convert_image_format(temp_image_path, final_image_path, image_output_format)
             os.remove(temp_image_path)  # Remove the temporary file after conversion
-            logger.info(f"Image converted to {image_output_format} and saved to {final_image_path}")
+            logger.info(f"Converted image saved to {final_image_path}")
         else:
-            os.rename(temp_image_path, final_image_path)
-            logger.success(f"Image saved as {final_image_path}")
+            shutil.move(temp_image_path, final_image_path)
+            logger.info(f"Image moved to final destination: {final_image_path}")
 
         return True
-    except Exception:
-        logger.exception("Unexpected error in image_download_and_conversion")
+
+    except Exception as e:
+        logger.error(f"Unhandled error in cover image processing: {e}")
         return False
 
 
@@ -277,7 +296,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
         return False
 
     # Load JSON config
-    performers_images, exit_code = await load_json_file("Performers_Images.json")
+    performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
@@ -445,7 +464,7 @@ async def overlay_text(
     draw = ImageDraw.Draw(overlay)
 
     try:
-        font_path = f"assets/{font_full_name}"
+        font_path = f"Resources/{font_full_name}"
         font = ImageFont.truetype(font_path, size=18)  # Adjust size here
     except IOError:
         font = ImageFont.load_default()  # Fallback if font is not available
@@ -604,11 +623,11 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters)
 
     if temp_output is None:
         # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
@@ -638,7 +657,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
     """Re-encode the given file to HEVC and show progress.
 
     Returns:
@@ -656,19 +675,45 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
-    duration = await get_video_duration(file_path)
+    duration, fps = await get_video_duration(file_path)
+
+    keyint = int(fps * 2)  # every 2 seconds
+
+    x265_params = (
+        "crf=24:"
+        "preset=medium:"
+        "ref=3:"
+        "limit-refs=2:"
+        f"keyint={keyint}:"
+    )
+
+    if limit_cpu_usage:
+        # Calculate half of total CPU cores (round up to avoid 0)
+        half_threads = max(1, math.ceil(os.cpu_count() / 2))
+        # Add x265 pools option to limit encoding threads
+        x265_params += f"pools={half_threads}:"
 
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
-        "-map", "0:v",
+        "-map", "0:v:0",
         "-map", "0:a",
         "-c:v", "libx265",
         "-vtag", "hvc1",
-        "-x265-params", "crf=22",
+        "-x265-params", x265_params,
         "-c:a", "aac",
         "-b:a", "128k",
-        "-map_metadata", "0"
+        "-map_metadata", "-1",
+    ]
+
+    if remove_chapters:
+        ffmpeg_cmd += ["-map_chapters", "-1"]
+    else:
+        ffmpeg_cmd += ["-map_chapters", "0"]
+
+    ffmpeg_cmd += [
+        "-dn",
+        "-sn"
     ]
 
     # Add scale filter if resolution is higher than 1080p and downscaling is enabled
@@ -677,14 +722,6 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
             ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
         elif is_vertical and height > 1080:
             ffmpeg_cmd += ["-vf", "scale=-2:1080"]
-
-    # Enforce bitrate limits for high-bitrate non-vertical videos
-    if not is_vertical and bit_rate and bit_rate > 20_000_000:
-        ffmpeg_cmd += [
-            "-minrate", "2M",
-            "-maxrate", "10M",
-            "-bufsize", "5M"
-        ]
 
     ffmpeg_cmd.append(temp_output)
 
@@ -699,7 +736,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
 
     for line in process.stderr:
         now = time.time()
-        if now - last_update_time >= 3:
+        if now - last_update_time >= 10:
             time_match = time_pattern.search(line)
             size_match = size_pattern.search(line)
             speed_match = speed_pattern.search(line)
@@ -719,16 +756,15 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale):
                         predicted_size_kib = (current_size_kib / encoded_time) * duration
                         predicted_size = format_size(predicted_size_kib)
                         estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
-
-                        logger.info(
-                            f"Encoded {encoded_time:.2f}s / {duration}s "
-                            f"({(encoded_time / duration) * 100:.1f}%), "
-                            f"Speed: {speed:.2f}x, "
-                            f"Elapsed: {elapsed_human}, "
-                            f"ETA: {eta_human}, "
-                            f"Estimated Size: {predicted_size}, "
-                            f"Estimated Bit rate: {estimated_bitrate}"
-                        )
+                        msg = ""
+                        msg += f"Encoded {encoded_time:.2f}s / {duration}s "
+                        msg += f"({(encoded_time / duration) * 100:.1f}%), "
+                        msg += f"Speed: {speed:.2f}x, "
+                        msg += f"Elapsed: {elapsed_human}, "
+                        msg += f"ETA: {eta_human}, "
+                        msg += f"Estimated Size: {predicted_size}, "
+                        msg += f"Estimated Bit rate: {estimated_bitrate}"
+                        logger.info(msg)
                     else:
                         logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
                 else:
@@ -792,7 +828,7 @@ async def get_video_duration(filepath):
     if fps == 0:
         logger.error(f"Invalid FPS value for file: {filepath}")
         return 0
-    return int(frame_count // fps)
+    return int(frame_count // fps), fps
 
 
 async def get_video_fps(video_path: str) -> float:
@@ -915,9 +951,9 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description, re_encode_hevc):
+async def update_metadata(input_file, title, description):
     """
-    Updates the metadata of an MP4 video file with the specified title, description, and adds "HEVC" to the Tags field.
+    Updates the metadata of an MP4 video file with the specified title, description.
 
     Args:
         input_file (str): Path to the video file.
@@ -929,7 +965,6 @@ async def update_metadata(input_file, title, description, re_encode_hevc):
         :param description:
         :param title:
         :param input_file:
-        :param re_encode_hevc:
     """
     try:
         # Load the MP4 file
@@ -938,12 +973,6 @@ async def update_metadata(input_file, title, description, re_encode_hevc):
         # Update metadata fields
         video["\xa9nam"] = title  # Title
         video["\xa9cmt"] = description  # Comment/Description
-        if re_encode_hevc:
-            # Add "HEVC" to the Tags field
-            current_tags = video.get("\xa9gen", [])  # Get current tags or initialize an empty list
-            if "HEVC" not in current_tags:
-                current_tags.append("HEVC")  # Add "HEVC" if not already present
-            video["\xa9gen"] = current_tags  # Update Tags field
 
         # Save changes
         video.save()
