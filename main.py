@@ -64,6 +64,7 @@ async def process_files():
         imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
         imgbb_upload_previews = config["imgbb_upload_previews"]
         ignore_list = config["ignore_list"]
+        filename_ignore_part_x = config["filename_ignore_part_x"]
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -197,6 +198,15 @@ async def process_files():
                 create_hf_template
             )
 
+            # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
+            match = re.search(r"\bPart\s*(\d+)\b", new_title, re.IGNORECASE)
+            if match and not filename_ignore_part_x:
+                part_number = match.group(1)  # the number after 'Part'
+                pre_suffix = f"Part.{part_number}"
+                logger.info(f"Detected Part in title: {pre_suffix}")
+            else:
+                pre_suffix = None
+
             # Check if all critical metadata is missing
             if all(value is None for value in (
                     new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description
@@ -268,8 +278,10 @@ async def process_files():
         safe_title = await clean_filename(new_title, bad_words, mode=2)
 
         # Compose potential folder names
-        temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{part_number}"
-        new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{part_number}"
+        temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}.{pre_suffix}" if pre_suffix else \
+            f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
+        new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}.{pre_suffix}" if pre_suffix else \
+            f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
 
         # Decide whether to use title-based naming
         use_title_mode = use_title or len(temp_filename_check) > 200
@@ -290,7 +302,10 @@ async def process_files():
             else:
                 if create_sub_folder:
                     # Use performer-based folder name while adding suffix back
-                    new_folder_name = f"{temp_filename_check}.{suffix}" if suffix else temp_filename_check
+                    if pre_suffix:
+                        new_folder_name = f"{temp_filename_check}.{pre_suffix}.{suffix}" if suffix else temp_filename_check
+                    else:
+                        new_folder_name = f"{temp_filename_check}.{suffix}" if suffix else temp_filename_check
                     title_folder_full_path = os.path.join(directory, new_folder_name)
 
                     if not os.path.exists(title_folder_full_path):
