@@ -183,7 +183,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory, bad_words, mode):
+async def pre_process_files(directory, bad_words, free_string_parse, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -191,11 +191,13 @@ async def pre_process_files(directory, bad_words, mode):
             if filename.lower().endswith('_old.mp4'):
                 continue
 
-            if ' ' in filename:
-                logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
-                return False, 12
-
-            new_filename = await clean_filename(filename, bad_words, mode)
+            if not free_string_parse:
+                if ' ' in filename:
+                    logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
+                    return False, 12
+                new_filename = await clean_filename(filename, bad_words, mode)
+            else:
+                new_filename = filename
             old_path = os.path.join(directory, filename)
             new_path = os.path.join(directory, new_filename)
 
@@ -207,7 +209,7 @@ async def pre_process_files(directory, bad_words, mode):
                     logger.error(f"Failed to rename '{filename}' -> '{new_filename}': {e}")
                     return False, 13  # Exit code for rename failure
 
-            if not await is_valid_filename_format(new_filename):
+            if not await is_valid_filename_format(new_filename) and not free_string_parse:
                 logger.error(f"Filename does not match required format: '{new_filename}'")
                 return False, 14  # Exit code for bad format
 

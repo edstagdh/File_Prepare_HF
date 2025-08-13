@@ -65,6 +65,7 @@ async def process_files():
         imgbb_upload_previews = config["imgbb_upload_previews"]
         ignore_list = config["ignore_list"]
         filename_ignore_part_x = config["filename_ignore_part_x"]
+        free_string_parse = config["free_string_parse"]
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -103,7 +104,7 @@ async def process_files():
     # Start Pre Processing files
     logger.info("-" * 100)
     logger.info(f"Start pre processing in directory: {directory}")
-    pre_process_results, exit_code = await pre_process_files(directory, bad_words, mode=1)
+    pre_process_results, exit_code = await pre_process_files(directory, bad_words, free_string_parse, mode=1)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
@@ -161,42 +162,58 @@ async def process_files():
             # Unpack flags
             vr2normal, upscaled, bts_video, vertical, pov = (file_flags[flag] for flag in flag_names)
 
-            # Check for Part in file base name
-            part_match = re.search(r"\.part\.\d+", file_base_name, re.IGNORECASE)
-            part_number = part_match.group(0) if part_match else ""
+            if free_string_parse:
+                if any(flag_names):
+                    file_base_name = clean_tpdb_check_filename
+                # Query scene data from API
+                new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                    file_base_name,
+                    None,
+                    None,
+                    tpdb_scenes_url,
+                    None,
+                    create_hf_template,
+                    mode=1
+                )
+            else:
 
-            # Split file_full_name into parts
-            parts = file_base_name.split('.')
+                # Check for Part in file base name
+                part_match = re.search(r"\.part\.\d+", file_base_name, re.IGNORECASE)
+                part_number = part_match.group(0) if part_match else ""
 
-            # Start working on file_full_name
-            if len(parts) < 4:
-                logger.error(f"Invalid file_full_name format: {file_base_name}, moving to next file")
-                logger.warning(f"End file: {file_full_name}")
-                failed_files.append(file_full_name)
-                continue  # Skip to the next file
+                # Split file_full_name into parts
+                parts = file_base_name.split('.')
 
-            year, month, day = parts[1], parts[2], parts[3]
-            is_valid, exit_code = await validate_date(year, month, day)
+                # Start working on file_full_name
+                if len(parts) < 4:
+                    logger.error(f"Invalid file_full_name format: {file_base_name}, moving to next file")
+                    logger.warning(f"End file: {file_full_name}")
+                    failed_files.append(file_full_name)
+                    continue  # Skip to the next file
 
-            if not is_valid:
-                logger.error(f"Invalid date in file_full_name: {file_base_name}, moving to next file")
-                logger.warning(f"End file: {file_full_name}")
-                failed_files.append(file_full_name)
-                continue  # Skip to the next file
+                year, month, day = parts[1], parts[2], parts[3]
+                is_valid, exit_code = await validate_date(year, month, day)
 
-            # Convert to 4-digit year for scene identification
-            year_full = f"20{year}"
-            scene_api_date = f"{year_full}-{month}-{day}"
+                if not is_valid:
+                    logger.error(f"Invalid date in file_full_name: {file_base_name}, moving to next file")
+                    logger.warning(f"End file: {file_full_name}")
+                    failed_files.append(file_full_name)
+                    continue  # Skip to the next file
 
-            # Query scene data from API
-            new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
-                clean_tpdb_check_filename,
-                scene_api_date,
-                manual_mode,
-                tpdb_scenes_url,
-                part_match,
-                create_hf_template
-            )
+                # Convert to 4-digit year for scene identification
+                year_full = f"20{year}"
+                scene_api_date = f"{year_full}-{month}-{day}"
+
+                # Query scene data from API
+                new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                    clean_tpdb_check_filename,
+                    scene_api_date,
+                    manual_mode,
+                    tpdb_scenes_url,
+                    part_match,
+                    create_hf_template,
+                    mode=2
+                )
 
             # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
             match = re.search(r"\bPart\s*(\d+)\b", new_title, re.IGNORECASE)
@@ -216,10 +233,9 @@ async def process_files():
                 failed_files.append(file_full_name)
                 continue  # Skip to the next file
 
-            # Adjust year/month/day if scene_date differs from the search date
-            if scene_date != scene_api_date:
-                year_full, month, day = scene_date.split("-")
-                year = year_full[-2:]
+            # Adjust year/month/day so scene date will always come from database
+            year_full, month, day = scene_date.split("-")
+            year = year_full[-2:]
 
             # Provide fallback for missing description
             if not scene_description:
