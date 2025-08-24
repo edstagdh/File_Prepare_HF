@@ -135,6 +135,7 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
         base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
         # base_name = await replace_episode_tag(base_name)
         base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+        base_name = re.sub(re.escape(".Xxx.1080p.Mp4-ktr"), "", base_name, flags=re.IGNORECASE)
         for word in bad_words:
             base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
         # Remove unwanted characters

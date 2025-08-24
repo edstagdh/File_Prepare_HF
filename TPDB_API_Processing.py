@@ -304,12 +304,12 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                     else:
                         logger.info(f"Scene '{item.get('title')}' was not included due to date difference.")
                 else:
-                    unmatched_entries.append((item.get('title'), full_scene_url, item))
+                    unmatched_entries.append((item.get('title'), full_scene_url, item, item.get('date')))
         # If still no valid entries, show unmatched ones for manual selection
             if not valid_entries and unmatched_entries:
                 logger.warning("No entries matched the exact or close date range, but the following scenes were found with some confidence to be matched:")
-                for idx, (title, url, _) in enumerate(unmatched_entries, 1):
-                    logger.info(f"{idx}. {title} — {url}")
+                for idx, (title, url, _, scene_date) in enumerate(unmatched_entries, 1):
+                    logger.info(f"{idx}. {title} — {scene_date} — {url}")
                 await asyncio.sleep(0.5)
                 user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
                 if user_input.isdigit():

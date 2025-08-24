@@ -85,12 +85,18 @@ async def process_files():
 
     if create_hf_template:
         if template_file_name != "":
-            template_file_full_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), template_file_name)
+            # Add "Resources" folder before the filename
+            template_file_full_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "Resources",
+                template_file_name
+            )
+
             if not os.path.exists(template_file_full_path):
                 logger.error(f"Invalid template file path: {template_file_full_path}")
                 exit(35)
         elif not create_mediainfo:
-            logger.error("Conflict in configration, in order to generate HFtemplate file, generating media info file is a must")
+            logger.error("Conflict in configuration, in order to generate HFtemplate file, generating media info file is a must")
             exit(37)
         else:
             logger.error(f"Invalid template file name: {template_file_name}")
