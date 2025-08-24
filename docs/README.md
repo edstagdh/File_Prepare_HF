@@ -22,6 +22,9 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [ ] Support other types of databases, e.g. StashDB.
 - [x] Add an option to use jpg format images.
 - [x] Add an option to upload to imgbox(supported static format images only), this requires restructure.
+- [x] Add an option to upload to imgbb(webp)
+- [x] Add an option to use free string parsing for scene matching.
+- [ ] Add an option to upload to hamster(webp)
 
 
 ## Installation
@@ -55,8 +58,9 @@ This process requires matching scene via TPDB, it is not a standalone script.
    - MP4 extension.
    - Valid HF template file.
    - FFMPEG installed in configured via PATH(recent ffmpeg version)
-   - Valid filename format, see example below(use only female performer names),
-   Note - this still might not be enough for a match in TPDB.
+   - Valid filename format, see example below(use only female performer names),<br>
+   Note - this still might not be enough for a match in TPDB.<br>
+   Note 2 - Required only when not using `free_string_parse` in the configuration.
    ```
    STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
    or
@@ -91,25 +95,34 @@ This process requires matching scene via TPDB, it is not a standalone script.
 
 ```
 File_Prepare_HF/
-├── gitignore                                  # Specifies files to ignore in Git
-├── BBCode_Images.json                          # Icons mapping for images URLs
-├── Config.json_example                         # Example configuration file
-├── Config_Thumbnails.json_example              # Example Thumbnails configuration file
-├── Config_Video_Preview.json_example           # Example Preview configuration file
+├── gitignore                                   # Specifies files to ignore in Git
+└── Configs/                                    # Config files
+   ├── Config.json_example                      # Example configuration file
+   ├── Config_Thumbnails.json_example           # Example Thumbnails configuration file
+   ├── Config_Video_Preview.json_example        # Example Preview configuration file
+└── docs/                                       # Documentation files
+   ├── exit_codes.json                          # Common exit codes for the application
+   ├── README.md                                # README file
+└── Logs/                                       # Log files
+└── Resources/                                  # Resource files used in code
+   ├── BBCode_Images.json                       # Icons mapping for images URLs
+   ├── Gotham_Medium.otf                        # Font file for previews text overlay
+   ├── HF_Template.txt                          # Example template file with placeholders for HF uploading
+   ├── Performers_Images.json_Example           # Contains mapped performer face images to auto insert in template
+   ├── Sort_Performers_Images.py                # Helper script to sort the performer images json.
+└── Uploaders/                                  # Uploaders Integration
+   ├── Upload_IMGBOX.py                         # IMGBOX code integration
+   ├── Upload_IMGBB.py                          # IMGBB code integration
 ├── creds.secret_example                        # Example credentials file
 ├── Generate_Thumbnails.py.py                   # Thumbnails generation code
 ├── Generate_Video_Preview.py                   # Preview generation code
-├── HF_Template.txt                             # Example template file with placeholders for HF uploading
 ├── LICENSE                                     # License file
 ├── main.py                                     # Main Application code for processing files
 ├── Media_Processing.py                         # Handles media file processing
 ├── Requirements.txt                            # Python dependencies requirements file
 ├── TPDB_API_Processing.py                      # TPDB API code
-├── Upload_IMGBOX.py                            # IMGBOX code integration
 ├── Utilities.py                                # Utility functions for processing
-└── docs/                                       # Documentation files
-    ├── exit_codes.json                         # Common exit codes for the application
-    ├── README.md                               # README file
+
 ```
 
 ## License

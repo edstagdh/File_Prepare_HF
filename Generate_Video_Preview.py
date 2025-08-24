@@ -5,6 +5,8 @@ import random
 import re
 import shutil
 from datetime import datetime
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
@@ -46,7 +48,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
         return True
 
-    font_path = f"Resources\{font_full_name}"
+    font_path = f"Resources/{font_full_name}"
 
     # Verify Segments and Grid values
     is_valid = await validate_preview_sheet_requirements(grid_width, num_of_segments, number_of_segments_gif, create_webp_preview_sheet, create_webm_preview_sheet,
@@ -651,7 +653,7 @@ async def overlay_timestamp(temp_folder, video_path, font_path):
             logger.error(f"Font file not found at expected path: {font_path}")
             return None
 
-        font_expr = f"fontfile='{font_path}'"
+        font_expr = f"fontfile='{font_path.replace('/', '//')}'"
 
         drawtext_filters = []
         shadow_offsets = [(-2, -2), (-2, 0), (-2, 2),

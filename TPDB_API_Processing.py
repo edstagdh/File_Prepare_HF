@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import requests
@@ -10,7 +11,7 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, mode):
     max_retries = 3
     delay = 5
     try:
@@ -19,21 +20,27 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None
 
-        # logger.debug(string_parse)
-        response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        if response_data is None or not response_data.get('data'):
-            string_parse_fallback = await convert_number_suffix_to_word(string_parse)
-            # logger.debug(string_parse_fallback)
-            if string_parse_fallback != string_parse and part_match:
-                response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
-            elif response_data is None or not response_data.get('data'):
-                string_advanced_parse_fallback = await remove_date_from_text(string_parse)
-                # logger.debug(string_advanced_parse_fallback)
-                response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
+        if mode == 1:
+            # logger.debug(string_parse)
+            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
+        elif mode == 2:
+            # logger.debug(string_parse)
+            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
+            if response_data is None or not response_data.get('data'):
+                string_parse_fallback = await convert_number_suffix_to_word(string_parse)
+                # logger.debug(string_parse_fallback)
+                if string_parse_fallback != string_parse and part_match:
+                    response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
+                elif response_data is None or not response_data.get('data'):
+                    string_advanced_parse_fallback = await remove_date_from_text(string_parse)
+                    # logger.debug(string_advanced_parse_fallback)
+                    response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
+        else:
+            return None, None, None, None, None, None, None, None, None, None, None
 
         if response_data is None or not response_data.get('data'):
             return None, None, None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url)
+        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode)
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {string_parse}")
@@ -259,58 +266,61 @@ async def get_user_input():
             return None
 
 
-async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url):
+async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode):
     try:
         valid_entries = []
         unmatched_entries = []
-        scene_date = datetime.strptime(scene_date, '%Y-%m-%d')
-        for item in response_data['data']:
-            slug = item.get('slug', '').lower()
-            full_scene_url = f"{tpdb_scenes_url}{slug}"
-            title = item.get('title', '').lower()
-            item_date = datetime.strptime(item.get('date', ''), '%Y-%m-%d')  # Assuming item date is also 'YYYY-MM-DD'
-            # Check if title contains 'interview'
-            if "interview" in title:
-                sleep(0.5)
-                user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
-                if user_input in ["y", "yes"]:
-                    logger.info(f"Ignoring scene: {item.get('title')}")
-                    continue
-                else:
-                    logger.info(f"Including scene: {item.get('title')}")
-
-            # Exact date match
-            if item_date == scene_date:
+        if mode == 1:
+            for item in response_data['data']:
                 valid_entries.append(item)
-            # Date range check (within ±1 to ±7 days)
-            elif abs((item_date - scene_date).days) in range(1, 7):
-                sleep(0.5)
-                user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
-                                   f"include it in the results? (y/n): ").strip().lower()
-                if user_input in ["y", "yes"]:
-                    valid_entries.append(item)
-                    logger.warning(f"Scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date and was added.")
-                else:
-                    logger.info(f"Scene '{item.get('title')}' was not included due to date difference.")
-            else:
-                unmatched_entries.append((item.get('title'), full_scene_url, item))
-        # If still no valid entries, show unmatched ones for manual selection
-        if not valid_entries and unmatched_entries:
-            logger.warning("No entries matched the exact or close date range, but the following scenes were found with some confidence to be matched:")
-            for idx, (title, url, _) in enumerate(unmatched_entries, 1):
-                logger.info(f"{idx}. {title} — {url}")
+        elif mode == 2:
+            scene_date = datetime.strptime(scene_date, '%Y-%m-%d')
+            for item in response_data['data']:
+                slug = item.get('slug', '').lower()
+                full_scene_url = f"{tpdb_scenes_url}{slug}"
+                title = item.get('title', '').lower()
+                item_date = datetime.strptime(item.get('date', ''), '%Y-%m-%d')  # Assuming item date is also 'YYYY-MM-DD'
+                # Check if title contains 'interview'
+                if "interview" in title:
+                    await asyncio.sleep(0.5)
+                    user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
+                    if user_input in ["y", "yes"]:
+                        logger.info(f"Ignoring scene: {item.get('title')}")
+                        continue
+                    else:
+                        logger.info(f"Including scene: {item.get('title')}")
 
-            sleep(0.5)
-            user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
-            if user_input.isdigit():
-                selection_index = int(user_input) - 1
-                if 0 <= selection_index < len(unmatched_entries):
-                    valid_entries.append(unmatched_entries[selection_index][2])
-                    logger.info(f"Manually selected entry: {unmatched_entries[selection_index][0]}")
+                # Exact date match
+                if item_date == scene_date:
+                    valid_entries.append(item)
+                # Date range check (within ±1 to ±7 days)
+                elif abs((item_date - scene_date).days) in range(1, 7):
+                    await asyncio.sleep(0.5)
+                    user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
+                                       f"include it in the results? (y/n): ").strip().lower()
+                    if user_input in ["y", "yes"]:
+                        valid_entries.append(item)
+                        logger.warning(f"Scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date and was added.")
+                    else:
+                        logger.info(f"Scene '{item.get('title')}' was not included due to date difference.")
                 else:
-                    logger.warning("Invalid selection index. No entry added.")
-            else:
-                logger.info("No entry selected manually.")
+                    unmatched_entries.append((item.get('title'), full_scene_url, item, item.get('date')))
+        # If still no valid entries, show unmatched ones for manual selection
+            if not valid_entries and unmatched_entries:
+                logger.warning("No entries matched the exact or close date range, but the following scenes were found with some confidence to be matched:")
+                for idx, (title, url, _, scene_date) in enumerate(unmatched_entries, 1):
+                    logger.info(f"{idx}. {title} — {scene_date} — {url}")
+                await asyncio.sleep(0.5)
+                user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
+                if user_input.isdigit():
+                    selection_index = int(user_input) - 1
+                    if 0 <= selection_index < len(unmatched_entries):
+                        valid_entries.append(unmatched_entries[selection_index][2])
+                        logger.info(f"Manually selected entry: {unmatched_entries[selection_index][0]}")
+                    else:
+                        logger.warning("Invalid selection index. No entry added.")
+                else:
+                    logger.info("No entry selected manually.")
 
         return valid_entries if valid_entries else None
 

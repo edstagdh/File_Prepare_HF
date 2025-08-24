@@ -178,8 +178,12 @@ async def upload_to_imgbb(headless_mode, imgbb_username, imgbb_password, imgbb_a
 
 async def imgbb_upload_single_image(filepath, new_filename_base_name, headless_mode, image_output_format, mode):
 
-    # Load Config file
-    creds, exit_code = await load_json_file("../creds.secret")
+    # Get project root
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    # Load config file from project root
+    creds_path = os.path.join(project_root, "creds.secret")
+    creds, exit_code = await load_json_file(creds_path)
     if not creds:
         exit(exit_code)
     imgbb_username = creds["imgbb_username"]
