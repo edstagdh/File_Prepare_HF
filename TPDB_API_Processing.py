@@ -142,7 +142,7 @@ async def filter_entries_by_user_choice(valid_entries):
         for index, item in enumerate(valid_entries, start=1):
 
             try:
-                logger.info(f"{index}. {item['title']} | {item['site']['name']} | {item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. {item['site']['name']} | {item['title']} | {item['date']} | {item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 

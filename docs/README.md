@@ -25,6 +25,7 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [x] Add an option to upload to imgbb(webp)
 - [x] Add an option to use free string parsing for scene matching.
 - [ ] Add an option to upload to hamster(webp)
+- [ ] Add an option to change output file naming format(select from list)
 
 
 ## Installation
