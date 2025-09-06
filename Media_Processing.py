@@ -689,13 +689,15 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
 
     if limit_cpu_usage:
         # Calculate 75% of total CPU cores (round up, minimum 1)
-        threads = max(1, math.ceil(os.cpu_count() * 0.75))
+        threads = max(1, math.ceil(os.cpu_count() * 0.70))
         # Add x265 pools option to limit encoding threads
         x265_params += f"pools={threads}:"
 
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
+        # "-ss", "00:00:00",
+        # "-to", "00:01:04",
         "-map", "0:v:0",
         "-map", "0:a",
         "-c:v", "libx265",

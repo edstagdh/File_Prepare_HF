@@ -5,7 +5,6 @@ import requests
 from num2words import num2words
 import time
 from loguru import logger
-from time import sleep
 from datetime import datetime
 from typing import Optional
 from Utilities import load_credentials
@@ -84,7 +83,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if not manual_mode:
             female_performers = await extract_female_performers(selected_entry)
         else:
-            sleep(0.5)
+            await asyncio.sleep(0.5)
             female_performers = []
             while True:
                 logger.info("Enter Performers Manually")
@@ -129,7 +128,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
             logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
@@ -142,11 +141,12 @@ async def filter_entries_by_user_choice(valid_entries):
         for index, item in enumerate(valid_entries, start=1):
 
             try:
-                logger.info(f"{index}. {item['site']['name']} | {item['title']} | {item['date']} | {item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | {item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
         logger.info("0. None of the results are good")
+        await asyncio.sleep(0.5)
 
         while True:
             try:
@@ -232,7 +232,7 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
             logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
@@ -403,7 +403,7 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
 
             except Exception:
                 logger.exception(f"Error occurred while requesting data for performer: {performer_name}")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         logger.error(f"Failed to retrieve profile picture data after {max_retries} attempts for: {performer_name}")
         return None, None

@@ -221,6 +221,30 @@ async def process_files():
                     mode=2
                 )
 
+            # Check if all critical metadata is missing
+            critical_fields = {
+                "new_title": new_title,
+                "performers": performers,
+                "image_url": image_url,
+                "slug": slug,
+                "scene_url": scene_url,
+                "tpdb_image_url": tpdb_image_url,
+                "tpdb_site": tpdb_site,
+                "site_studio": site_studio,
+                "scene_description": scene_description
+            }
+
+            # Log which fields are None with explicit details
+            none_fields = {key: value for key, value in critical_fields.items() if value is None}
+            if none_fields:
+                logger.debug(f"Missing metadata for {file_full_name}: {', '.join([f'{k}=None' for k in none_fields.keys()])}")
+
+            if all(value is None for value in critical_fields.values()):
+                logger.error(f"Failed to find a match via TPDB for file: {file_full_name}")
+                logger.warning(f"End file: {file_full_name}")
+                failed_files.append(file_full_name)
+                continue  # Skip to the next file
+
             # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
             match = re.search(r"\bPart\s*(\d+)\b", new_title, re.IGNORECASE)
             if match and not filename_ignore_part_x:
@@ -229,15 +253,6 @@ async def process_files():
                 logger.info(f"Detected Part in title: {pre_suffix}")
             else:
                 pre_suffix = None
-
-            # Check if all critical metadata is missing
-            if all(value is None for value in (
-                    new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description
-            )):
-                logger.error(f"Failed to find a match via TPDB for file: {file_full_name}")
-                logger.warning(f"End file: {file_full_name}")
-                failed_files.append(file_full_name)
-                continue  # Skip to the next file
 
             # Adjust year/month/day so scene date will always come from database
             year_full, month, day = scene_date.split("-")
@@ -271,7 +286,7 @@ async def process_files():
                 raise ValueError(f"Unable to find valid performers for {file_full_name}")
 
         except Exception as e:
-            logger.error(f"Error in API data for file: {file} - {str(e)}")
+            logger.exception(f"Error in API data for file: {file} - {str(e)}")
             logger.warning(f"End file: {file_full_name}")
             failed_files.append(file_full_name)
             continue  # Skip to the next file

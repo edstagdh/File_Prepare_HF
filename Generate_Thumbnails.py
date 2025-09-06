@@ -2,13 +2,14 @@ import hashlib
 import json
 import os
 import tempfile
+import asyncio
+import random
+import time
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 from Utilities import run_command, load_json_file
 from Media_Processing import get_video_duration
-import asyncio
-import random
-import time
+from pymediainfo import MediaInfo
 
 
 async def generate_random_timestamps(duration, count, preferred_min_gap=60, absolute_min_gap=5):
@@ -406,80 +407,150 @@ async def break_string_at_char(s, break_char, char_break_line):
 
 
 async def get_video_metadata(file_path, char_break_line, duration):
-    """Extract video metadata using ffprobe."""
+    """Extract video metadata using pymediainfo."""
     filename = os.path.basename(file_path)
     file_dir = os.path.dirname(file_path)
+    add_lines = 0
 
     try:
-
-        # Get video metadata
-        cmd = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,profile,width,height,r_frame_rate,bit_rate -of json \"{file_path}\"'
-        video_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,bit_rate,profile -of json \"{file_path}\"'
-        audio_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -show_entries format=duration,size:format_tags=title -of json \"{file_path}\"'
-        format_info_json, stderr, exit_code = await run_command(cmd)
-
-        # Parse JSON outputs
-        video_info = json.loads(video_info_json).get("streams", [{}])[0]
-        audio_info = json.loads(audio_info_json).get("streams", [{}])[0]
-        format_info = json.loads(format_info_json).get("format", {})
-        fps = video_info.get("r_frame_rate", "N/A")
-        try:
-            num, denom = map(int, fps.split("/"))
-            fps = round(num / denom, 2)
-        except Exception as e:
-            fps = "N/A"
-
+        media_info = MediaInfo.parse(file_path)
     except Exception as e:
-        logger.error(f"Error extracting metadata: {e}")
+        logger.error(f"Error parsing media info for {file_path}: {e}")
         return [], file_dir, None
 
-    # Extract and format video information
-    video_codec = video_info.get('codec_name', 'N/A').upper()
-    video_profile = video_info.get('profile', 'N/A')
-    video_bitrate = round(int(video_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in video_info else 0
-    video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps"
+    # Initialize tracks
+    video_track = None
+    audio_track = None
+    general_track = None
 
-    # Extract and format audio information
-    audio_codec = audio_info.get('codec_name', 'N/A').upper()
-    audio_channels = audio_info.get('channels', 'N/A')
-    audio_bitrate = round(int(audio_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in audio_info else 0
+    try:
+        for track in media_info.tracks:
+            ttype = getattr(track, "track_type", "").lower()
+            # logger.debug(f"Found track: id={getattr(track,'track_id',None)}, type={ttype}")
+            if ttype == "video" and video_track is None:
+                video_track = track
+            elif ttype == "audio" and audio_track is None:
+                # Ensure it has meaningful properties
+                if getattr(track, "format", None) or getattr(track, "channel_s", None):
+                    audio_track = track
+            elif ttype == "general" and general_track is None:
+                general_track = track
+    except Exception as e:
+        logger.error(f"Error iterating tracks for {file_path}: {e}")
+        return [], file_dir, None
 
-    if audio_codec == "AAC" and "LC" in audio_info.get('profile', '').upper():
-        audio_codec += " (LC)"
+    # Video properties
+    try:
+        video_codec = (video_track.format or "N/A").upper() if video_track else "N/A"
+        video_profile = getattr(video_track, "format_profile", "N/A") if video_track else "N/A"
+        video_bitrate = round(int(video_track.bit_rate or 0) / 1000) if video_track and video_track.bit_rate else 0
+        width = video_track.width if video_track and video_track.width else "N/A"
+        height = video_track.height if video_track and video_track.height else "N/A"
+        resolution = f"{width}x{height}"
 
-    audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
-    add_lines = 0
-    # Extract other metadata
-    title = format_info.get("tags", {}).get("title", "N/A")
-    if len(title) > char_break_line:
-        title = await break_string_at_char(title, " ", char_break_line)
-        add_lines += 1
-    if len(filename) > char_break_line:
-        filename = await break_string_at_char(filename, ".", char_break_line) or \
-                   await break_string_at_char(filename, " ", char_break_line) or \
-                   await break_string_at_char(filename, "-", char_break_line)
-        add_lines += 1
+        # FPS
+        try:
+            fps = round(float(video_track.frame_rate), 2) if video_track and video_track.frame_rate else "N/A"
+        except Exception as e:
+            logger.error(f"Error parsing FPS: {e}")
+            fps = "N/A"
 
-    size_bytes = int(format_info.get('size', '0'))
-    size_mb = size_bytes / (1024 * 1024)
-    size_gb = size_bytes / (1024 * 1024 * 1024)
-    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+        # CRF
+        crf_value = "N/A"
+        encoding_settings = getattr(video_track, "encoding_settings", "") if video_track else ""
+        if encoding_settings and "crf=" in encoding_settings:
+            try:
+                crf_raw = encoding_settings.split("crf=")[1].split(" ")[0].replace("/", "").strip()
+                crf_value = str(int(round(float(crf_raw))))
+            except Exception as e:
+                logger.error(f"Error parsing CRF: {e}")
 
-    # Extract resolution and FPS
-    width = video_info.get("width", "N/A")
-    height = video_info.get("height", "N/A")
-    resolution = f"{width}x{height}"
+        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}"
+    except Exception as e:
+        logger.error(f"Error extracting video properties: {e}")
+        video_details = "N/A"
+        resolution = "N/A"
+        fps = None
 
-    # Convert timestamp to HH:MM:SS format
-    hours, remainder = divmod(int(duration), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    # Audio properties
+    try:
+        if audio_track:
+            # logger.debug(f"Audio track raw data: {audio_track}")
 
-    # Calculate MD5 checksum
+            # Format / codec
+            audio_codec = getattr(audio_track, "format", None)
+            if audio_codec:
+                audio_codec = str(audio_codec).upper()
+            else:
+                audio_codec = "N/A"
+
+            # Channels
+            audio_channels = getattr(audio_track, "channel_s", None)
+            if audio_channels is None:
+                audio_channels = "N/A"
+            else:
+                audio_channels = str(audio_channels)
+
+            # Bitrate
+            bit_rate = getattr(audio_track, "bit_rate", None)
+            if bit_rate is None:
+                audio_bitrate = 0
+            else:
+                try:
+                    audio_bitrate = round(int(bit_rate) / 1000)
+                except Exception as e:
+                    logger.error(f"Error converting audio bit_rate '{bit_rate}' to int: {e}")
+                    audio_bitrate = 0
+
+            # Profile
+            profile = getattr(audio_track, "format_profile", None)
+            if profile:
+                profile = str(profile)
+                if audio_codec == "AAC" and "LC" in profile.upper():
+                    audio_codec += " (LC)"
+
+        else:
+            audio_codec = "N/A"
+            audio_channels = "N/A"
+            audio_bitrate = 0
+
+        audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
+
+    except Exception as e:
+        logger.error(f"Error extracting audio properties: {e}")
+        audio_details = "N/A"
+
+    # General metadata
+    try:
+        title = getattr(general_track, "title", "N/A") if general_track else "N/A"
+        if len(title) > char_break_line:
+            title = await break_string_at_char(title, " ", char_break_line)
+            add_lines += 1
+
+        if len(filename) > char_break_line:
+            filename = await break_string_at_char(filename, ".", char_break_line) or \
+                       await break_string_at_char(filename, " ", char_break_line) or \
+                       await break_string_at_char(filename, "-", char_break_line)
+            add_lines += 1
+
+        size_bytes = int(getattr(general_track, "file_size", 0)) if general_track else 0
+        size_mb = size_bytes / (1024 * 1024)
+        size_gb = size_bytes / (1024 * 1024 * 1024)
+        file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+    except Exception as e:
+        logger.error(f"Error extracting general metadata: {e}")
+        file_size = "N/A"
+
+    # Duration formatting
+    try:
+        hours, remainder = divmod(int(duration), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    except Exception as e:
+        logger.error(f"Error formatting duration: {e}")
+        timestamp_str = "N/A"
+
+    # MD5 checksum
     try:
         hash_md5 = hashlib.md5()
         with open(file_path, "rb") as f:
@@ -490,17 +561,23 @@ async def get_video_metadata(file_path, char_break_line, duration):
         logger.error(f"Error computing MD5 hash: {e}")
         md5_hash = "N/A"
 
-    info_table = [
-        ["File Name", filename],
-        ["Title", title],
-        ["File Size", file_size],
-        ["Duration", timestamp_str],
-        ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
-        ["MD5", md5_hash.upper()]
-    ]
-    if add_lines != 0:
-        for i in range(add_lines):
-            info_table.append([" ", " "])  # Append an empty row with two empty strings to avoid overwriting last values in image
+    # Build info table
+    try:
+        info_table = [
+            ["File Name", filename],
+            ["Title", title],
+            ["File Size", file_size],
+            ["Duration", timestamp_str],
+            ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+            ["MD5", md5_hash.upper()]
+        ]
+        if add_lines != 0:
+            for _ in range(add_lines):
+                info_table.append([" ", " "])
+    except Exception as e:
+        logger.error(f"Error building info table: {e}")
+        return [], fps
+
     return info_table, fps
 
 
@@ -633,6 +710,9 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
 
         duration, fps = await get_video_duration(input_video_full_path)
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
+        if not metadata_table or not original_fps:
+            logger.error(f"failed to extract video file metadata required for thumbnails")
+            return False
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
         font_path = f"Resources\{font_full_name}"
