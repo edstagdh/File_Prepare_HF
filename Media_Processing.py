@@ -1,4 +1,5 @@
 import math
+import sys
 import cv2
 import json
 import numpy as np
@@ -15,6 +16,7 @@ from mutagen.mp4 import MP4
 from Utilities import run_command, load_json_file
 from TPDB_API_Processing import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
+from tqdm import tqdm
 
 
 async def get_existing_title(input_file):
@@ -663,22 +665,24 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
-    """Re-encode the given file to HEVC and show progress.
+async def re_encode_to_hevc(file_path, is_vertical,
+                            re_encode_downscale, limit_cpu_usage,
+                            remove_chapters):
+    """
+    Re-encode the given file to HEVC and show progress with a tqdm bar.
 
     Returns:
-        str: Path to the converted file if successful.
-        None: If already encoded in HEVC.
-        False: If encoding failed.
+        str  : Path to the converted file if successful
+        None : If already encoded in HEVC/AV1
+        False: If encoding failed
     """
     encode_results = await is_video_hevc_or_av1(file_path)
     if encode_results:  # Already encoded with HEVC/AV1
         return None
-    if encode_results is None:  # Could not determine encoding (fail)
+    if encode_results is None:
         return False
 
     width, height, bit_rate = await get_video_resolution(file_path)
-
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
     duration, fps = await get_video_duration(file_path)
@@ -694,16 +698,12 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
     )
 
     if limit_cpu_usage:
-        # Calculate 75% of total CPU cores (round up, minimum 1)
         threads = max(1, math.ceil(os.cpu_count() * 0.70))
-        # Add x265 pools option to limit encoding threads
         x265_params += f"pools={threads}:"
 
     ffmpeg_cmd = [
         "ffmpeg",
         "-i", file_path,
-        # "-ss", "00:00:00",
-        # "-to", "00:01:04",
         "-map", "0:v:0",
         "-map", "0:a",
         "-c:v", "libx265",
@@ -714,20 +714,13 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         "-map_metadata", "-1",
     ]
 
-    if remove_chapters:
-        ffmpeg_cmd += ["-map_chapters", "-1"]
-    else:
-        ffmpeg_cmd += ["-map_chapters", "0"]
-
+    ffmpeg_cmd += ["-map_chapters", "-1" if remove_chapters else "0"]
     ffmpeg_cmd += [
-        "-dn",
-        "-sn",
-        # --- strip Title tags ---
+        "-dn", "-sn",
         "-metadata:s:v:0", "title=",
         "-metadata:s:a", "title="
     ]
 
-    # Add scale filter if resolution is higher than 1080p and downscaling is enabled
     if re_encode_downscale and width and height:
         if not is_vertical and (width > 1920 or height > 1080):
             ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
@@ -736,56 +729,60 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
 
     ffmpeg_cmd.append(temp_output)
 
-    start_time = time.time()
-    last_update_time = 0
-
-    process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    # --- start ffmpeg process ---
+    process = subprocess.Popen(
+        ffmpeg_cmd,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,  # ignore stdout
+        text=True
+    )
 
     time_pattern = re.compile(r"time=(\d+:\d+:\d+\.\d+)")
     size_pattern = re.compile(r"size=\s*(\d+)KiB")
     speed_pattern = re.compile(r"speed=([\d\.x]+)")
 
+    start_time = time.time()
+    last_update = 0
+
+    # tqdm progress bar
+    pbar = tqdm(total=duration,
+                unit="s",
+                ncols=120,
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}s")
+
     for line in process.stderr:
         now = time.time()
-        if now - last_update_time >= 10:
-            time_match = time_pattern.search(line)
-            size_match = size_pattern.search(line)
-            speed_match = speed_pattern.search(line)
+        if now - last_update >= 2:  # update every 2 seconds
+            t_match = time_pattern.search(line)
+            s_match = size_pattern.search(line)
+            sp_match = speed_pattern.search(line)
 
-            if time_match and size_match:
-                encoded_time = parse_ffmpeg_time(time_match.group(1))
-                current_size_kib = int(size_match.group(1))
+            if t_match and s_match:
+                encoded_time = parse_ffmpeg_time(t_match.group(1))
+                current_size_kib = int(s_match.group(1))
+                speed = float(sp_match.group(1).replace('x', '')) if sp_match else 1.0
+
                 elapsed = now - start_time
-                elapsed_human = format_eta(elapsed)
-                speed = float(speed_match.group(1).replace('x', '')) if speed_match else 1.0
+                remaining = max(0, duration / speed - elapsed)
+                eta_human = format_eta(int(remaining))
+                predicted_size = format_size((current_size_kib / encoded_time) * duration)
+                bitrate = format_bitrate(current_size_kib, encoded_time)
 
-                if encoded_time > 0:  # Only proceed if encoded_time is greater than zero
-                    if duration > 0 and speed > 0:
-                        est_total_time = duration / speed
-                        remaining = max(0, int(est_total_time) - int(elapsed))
-                        eta_human = format_eta(remaining)
-                        predicted_size_kib = (current_size_kib / encoded_time) * duration
-                        predicted_size = format_size(predicted_size_kib)
-                        estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
-                        msg = ""
-                        msg += f"Encoded {encoded_time:.2f}s / {duration}s "
-                        msg += f"({(encoded_time / duration) * 100:.1f}%), "
-                        msg += f"Speed: {speed:.2f}x, "
-                        msg += f"Elapsed: {elapsed_human}, "
-                        msg += f"ETA: {eta_human}, "
-                        msg += f"Estimated Size: {predicted_size}, "
-                        msg += f"Estimated Bit rate: {estimated_bitrate}"
-                        logger.info(msg)
-                    else:
-                        logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
-                else:
-                    logger.warning("Encoded time is zero, skipping bitrate prediction.")
+                msg = (f"Speed: {speed:.2f}x "
+                       f"ETA: {eta_human} "
+                       f"Estimated Size: {predicted_size} "
+                       f"Bitrate: {bitrate}")
 
-                last_update_time = now
+                pbar.update(encoded_time - pbar.n)  # jump to current second
+                pbar.set_description(msg)
+
+                last_update = now
 
     process.wait()
+    pbar.close()
+
     if process.returncode != 0 or not os.path.exists(temp_output):
-        logger.error(f"Re-encoding failed for {file_path}, return code: {process.returncode}")
+        sys.stderr.write(f"\n[ERROR] Re-encoding failed for {file_path} (code {process.returncode})\n")
         return False
 
     return temp_output

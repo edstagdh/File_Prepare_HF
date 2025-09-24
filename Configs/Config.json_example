@@ -22,7 +22,7 @@
   "posters_limit": 10,
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
-  "Code_Version": "7.9",
+  "Code_Version": "8",
   "bad_words": [".Hardcore"],
   "use_title": false,
   "create_sub_folder": false,

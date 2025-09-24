@@ -19,13 +19,14 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [x] Add tags generation for scene upload process.
 - [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
 - [x] Support for Static thumbnails generation without using Scorp VTM software.
-- [ ] Support other types of databases, e.g. StashDB.
+- [ ] ~~Support other types of databases, e.g. StashDB.~~ Note - I don't have access to other databases at this time.
 - [x] Add an option to use jpg format images.
 - [x] Add an option to upload to imgbox(supported static format images only), this requires restructure.
 - [x] Add an option to upload to imgbb(webp)
 - [x] Add an option to use free string parsing for scene matching.
 - [ ] Add an option to upload to hamster(webp)
 - [ ] Add an option to change output file naming format(select from list)
+- [x] Switch re-encoding progress bar from logger lines to tqdm.
 
 
 ## Installation
@@ -57,10 +58,11 @@ This process requires matching scene via TPDB, it is not a standalone script.
    - Python version 3.10(any sub versions should work) for maximum compatibility.
    - TPDB credentials(API Key).
    - MP4 extension.
-   - Valid HF template file.
+   - Valid HF template file<br>
+   Note - Required only when using `create_hf_template` in the configuration.
    - FFMPEG installed in configured via PATH(recent ffmpeg version)
-   - Valid filename format, see example below(use only female performer names),<br>
-   Note - this still might not be enough for a match in TPDB.<br>
+   - Valid filename format, see example below(use only female performer names)<br>
+   Note - This still might not be enough for a match in TPDB.<br>
    Note 2 - Required only when not using `free_string_parse` in the configuration.
    ```
    STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
