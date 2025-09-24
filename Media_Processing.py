@@ -648,6 +648,12 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
 
             final_output = os.path.join(directory, new_filename)
             shutil.move(temp_output, final_output)
+            encoder_change = await update_encoder_metadata(final_output)
+
+            if encoder_change is False:
+                logger.error(f"processing failed for {file_path}")
+                return False
+
             logger.info(f"Replaced original file with HEVC version: {final_output}")
             return True
         else:
@@ -715,7 +721,10 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
 
     ffmpeg_cmd += [
         "-dn",
-        "-sn"
+        "-sn",
+        # --- strip Title tags ---
+        "-metadata:s:v:0", "title=",
+        "-metadata:s:a", "title="
     ]
 
     # Add scale filter if resolution is higher than 1080p and downscaling is enabled
@@ -975,6 +984,40 @@ async def update_metadata(input_file, title, description):
         # Update metadata fields
         video["\xa9nam"] = title  # Title
         video["\xa9cmt"] = description  # Comment/Description
+        video["\xa9cpy"] = [""]  # Copyright
+        video["\xa9ART"] = [""]  # Author/Performer/Artist
+
+        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
+            # logger.debug(video.get("\xa9too"))  # logs the list or an empty list
+            video["\xa9too"] = [""]  # clear the encoder field
+
+        # Save changes
+        video.save()
+
+        # logger.info(f"Metadata updated successfully for: {input_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update metadata for {input_file}: {e}")
+        return False
+
+
+async def update_encoder_metadata(input_file):
+    """
+    Updates the metadata of an MP4 video file, Encoder
+
+    Args:
+        input_file (str): Path to the video file.
+
+    Returns:
+        bool: True if the metadata update was successful, False otherwise.
+        param input_file:
+    """
+    try:
+        # Load the MP4 file
+        video = MP4(input_file)
+
+        # Update metadata fields
+        video["\xa9too"] = "File_Prepare_HF"  # Encoder
 
         # Save changes
         video.save()

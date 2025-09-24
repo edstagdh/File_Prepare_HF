@@ -141,10 +141,17 @@ async def process_files():
     ]
     mp4_files = sorted(mp4_files)
     for file in mp4_files:
+        await asyncio.sleep(0.1)
+        file_full_name = str(file.name)  # Get the full file_full_name (with extension)
+        file_base_name = str(file.stem)  # Get the file_full_name without extension
+        file_extension = str(file.suffix)
+        if not Path(file).exists():
+            logger.error(f"Failed to find file: {file_full_name}, moving to next file")
+            logger.error(f"End file: {file_full_name}")
+            failed_files.append(file_full_name)
+            continue  # Skip to the next file
+
         try:
-            file_full_name = str(file.name)  # Get the full file_full_name (with extension)
-            file_base_name = str(file.stem)  # Get the file_full_name without extension
-            file_extension = str(file.suffix)
             if create_sub_folder:
                 output_directory = os.path.join(directory, file_base_name)
                 os.makedirs(output_directory, exist_ok=True)

@@ -141,7 +141,7 @@ async def filter_entries_by_user_choice(valid_entries):
         for index, item in enumerate(valid_entries, start=1):
 
             try:
-                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | {item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']}\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
@@ -150,7 +150,7 @@ async def filter_entries_by_user_choice(valid_entries):
 
         while True:
             try:
-                choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): "))
+                choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): \n"))
                 if 0 <= choice <= len(valid_entries):
                     break
                 else:
