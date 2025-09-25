@@ -160,7 +160,7 @@ async def cover_image_download_and_conversion(image_url: str,
             content_type = response.headers.get('Content-Type', '')
 
             if not content_type.startswith('image/'):
-                logger.warning(f"No or unexpected Content-Type for URL: {url} (Got: '{content_type}')")
+                # logger.warning(f"No or unexpected Content-Type for URL: {url} (Got: '{content_type}')")
                 # Try to validate by attempting to open as image
                 try:
                     img = Image.open(BytesIO(response.content))
@@ -752,7 +752,7 @@ async def re_encode_to_hevc(file_path, is_vertical,
 
     for line in process.stderr:
         now = time.time()
-        if now - last_update >= 2:  # update every 2 seconds
+        if now - last_update >= 3:  # update every 3 seconds
             t_match = time_pattern.search(line)
             s_match = size_pattern.search(line)
             sp_match = speed_pattern.search(line)
@@ -765,12 +765,15 @@ async def re_encode_to_hevc(file_path, is_vertical,
                 elapsed = now - start_time
                 remaining = max(0, duration / speed - elapsed)
                 eta_human = format_eta(int(remaining))
-                predicted_size = format_size((current_size_kib / encoded_time) * duration)
+                if encoded_time > 0:
+                    predicted_size = format_size((current_size_kib / encoded_time) * duration)
+                else:
+                    predicted_size = "estimating…"
                 bitrate = format_bitrate(current_size_kib, encoded_time)
 
                 msg = (f"Speed: {speed:.2f}x "
                        f"ETA: {eta_human} "
-                       f"Estimated Size: {predicted_size} "
+                       f"Est Size: {predicted_size} "
                        f"Bitrate: {bitrate}")
 
                 pbar.update(encoded_time - pbar.n)  # jump to current second
