@@ -139,9 +139,13 @@ async def filter_entries_by_user_choice(valid_entries):
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
         for index, item in enumerate(valid_entries, start=1):
-
+            duration = item['duration']
+            formatted_duration = (
+                time.strftime('%H:%M:%S', time.gmtime(duration))
+                if duration is not None else None
+            )
             try:
-                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']}\n{item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | Duration: {formatted_duration}\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
