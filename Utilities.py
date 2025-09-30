@@ -4,99 +4,160 @@ import re
 import subprocess
 import sys
 import tempfile
+import asyncio
 from datetime import datetime
 from loguru import logger
 from pymediainfo import MediaInfo
+from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
+# Define the minimum version required (e.g., 4.0.0)
+MIN_FFMPEG_VERSION = (4, 0, 0)
+MIN_FFMPEG_DATE = datetime(2024, 9, 1)
 
 
-async def run_command(command):
-    """Execute a shell command and return stdout, stderr, and exit code."""
+async def run_command(command: Union[str, Sequence[str]]) -> Tuple[str, str, int]:
+    """
+    Execute a command and return (stdout, stderr, code).
+    - Accepts either a list/tuple (recommended) or a string.
+    - Tries asyncio subprocess APIs first (non-blocking). If they are unsupported
+      on the current event loop (Windows selectors), falls back to running the
+      blocking subprocess in a thread to avoid blocking the loop.
+    - Returns rc == 0 as 0, non-zero as 22, exceptions as 99 (to match your existing codes).
+    """
+
+    RUN_DEBUG_MODE = False
+
+    # Normalize & choose shell mode
+    is_sequence = isinstance(command, (list, tuple))
+    use_shell = not is_sequence  # string -> shell, list -> exec
+    cmd_for_log = ' '.join(command) if is_sequence else command
+
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            errors='ignore'  # Silently ignore decode errors
-        )
-        stdout = result.stdout.strip() if result.stdout else ''
-        stderr = result.stderr.strip() if result.stderr else ''
-        return stdout, stderr, result.returncode if result.returncode == 0 else 22  # 22 = Command Failed
+        if RUN_DEBUG_MODE:
+            logger.debug(f"run_command using asyncio subprocess: {cmd_for_log!r}")
+        if use_shell:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-    except Exception as e:
-        logger.exception(f"Command failed: {command}")
-        return '', str(e), 99  # 99 = Unknown exception
+        stdout_bytes, stderr_bytes = await proc.communicate()
 
+        stdout = stdout_bytes.decode(errors='ignore').strip() if stdout_bytes else ''
+        stderr = stderr_bytes.decode(errors='ignore').strip() if stderr_bytes else ''
 
-async def verify_ffmpeg_and_ffprobe():
-    # Define the minimum version required (e.g., 4.0.0)
-    MIN_FFMPEG_VERSION = (4, 0, 0)
-    MIN_FFMPEG_DATE = datetime(2024, 9, 1)
+        rc = proc.returncode
+        if rc == 0:
+            return stdout, stderr, 0
+        else:
+            return stdout, stderr, 22
 
-    async def check_ffmpeg_or_ffprobe(command, tool_name):
+    except Exception as exc:
+        # Often on Windows you'll see NotImplementedError / RuntimeError for selector loops.
+        if RUN_DEBUG_MODE:
+            logger.debug(f"async subprocess failed ({exc!r}), falling back to threaded subprocess.run")
+
         try:
-            stdout, stderr, code = await run_command(command)
-            if code != 0:
-                logger.error(f"{tool_name} returned a non-zero exit code.")
-                logger.error(f"stderr: {stderr}")
-                return False, 22  # Command failed
-
-            version_ok = False
-            date_ok = False
-
-            # Extract version info
-            version_match = re.search(rf"{tool_name} version (\d+)\.(\d+)\.(\d+)", stdout)
-            if version_match:
-                tool_version = tuple(map(int, version_match.groups()))
-                if tool_version >= MIN_FFMPEG_VERSION:
-                    version_ok = True
-                else:
-                    logger.error(
-                        f"{tool_name} version {tool_version[0]}.{tool_version[1]}.{tool_version[2]} "
-                        f"is too old. Minimum required version is {MIN_FFMPEG_VERSION[0]}."
-                        f"{MIN_FFMPEG_VERSION[1]}.{MIN_FFMPEG_VERSION[2]}."
+            def sync_run():
+                if is_sequence:
+                    # safer: pass list with shell=False
+                    return subprocess.run(
+                        list(command),
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                        errors='ignore'
                     )
-            else:
-                # logger.warning(f"Could not parse {tool_name} version number.")
-                pass
-
-            # Extract build date
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", stdout)
-            if date_match:
-                tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
-                if tool_date >= MIN_FFMPEG_DATE:
-                    date_ok = True
                 else:
+                    # string -> run in shell (user asked for string)
+                    return subprocess.run(
+                        command,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        errors='ignore'
+                    )
+
+            # Python 3.9+: use asyncio.to_thread, otherwise run_in_executor
+            try:
+                result = await asyncio.to_thread(sync_run)
+            except AttributeError:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, sync_run)
+
+            stdout = result.stdout.strip() if result.stdout else ''
+            stderr = result.stderr.strip() if result.stderr else ''
+            rc = result.returncode
+            if rc == 0:
+                return stdout, stderr, 0
+            else:
+                return stdout, stderr, 22
+
+        except Exception as exc2:
+            logger.exception(f"Fallback subprocess.run failed for command: {cmd_for_log!r}")
+            return '', str(exc2), 99
+
+
+async def check_ffmpeg_or_ffprobe(command, tool_name):
+    try:
+        stdout, stderr, code = await run_command(command)
+        if code != 0:
+            logger.error(f"{tool_name} returned a non-zero exit code.")
+            logger.error(f"stderr: {stderr}")
+            return False, 22  # Command failed
+
+        version_ok = False
+        date_ok = True  # assume OK unless proven otherwise
+
+        # ---- Version Check ----
+        # Works with: "ffmpeg version 4.4.2-0ubuntu0.22.04.1", "ffmpeg version 7.0.1-full_build"
+        version_match = re.search(r"version\s+(\d+)\.(\d+)\.(\d+)", stdout)
+        if version_match:
+            tool_version = tuple(map(int, version_match.groups()))
+            if tool_version >= MIN_FFMPEG_VERSION:
+                version_ok = True
+            else:
+                logger.error(
+                    f"{tool_name} version {'.'.join(map(str, tool_version))} is too old. "
+                    f"Minimum required: {'.'.join(map(str, MIN_FFMPEG_VERSION))}."
+                )
+        else:
+            logger.warning(f"Could not parse {tool_name} version from output.")
+            version_ok = False
+
+        # ---- Build Date Check ----
+        # Windows builds often have "built on 2024-10-01", Ubuntu builds don’t
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", stdout)
+        if date_match:
+            try:
+                tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
+                if tool_date < MIN_FFMPEG_DATE:
+                    date_ok = False
                     logger.error(
                         f"{tool_name} build date {tool_date.strftime('%Y-%m-%d')} is too old. "
                         f"Minimum required build date is {MIN_FFMPEG_DATE.strftime('%Y-%m-%d')}."
                     )
-            else:
-                # logger.warning(f"Could not parse {tool_name} build date.")
-                pass
+            except ValueError:
+                logger.warning(f"Invalid date format detected for {tool_name}: {date_match.group(1)}")
 
-            if version_ok or date_ok:
-                # logger.debug(f"{tool_name} passed check (version_ok={version_ok}, date_ok={date_ok}).")
-                return True, 0
-            else:
-                logger.error(f"{tool_name} did not meet version or build date requirements.")
-                return False, 33  # Neither version nor date are acceptable
+        # ---- Final Decision ----
+        if version_ok and date_ok:
+            return True, 0
+        else:
+            logger.error(f"{tool_name} did not meet version/date requirements.")
+            return False, 33  # Requirement failure
 
-        except Exception:
-            logger.exception(f"An exception occurred while verifying {tool_name} installation.")
-            return False, 98  # Exception during check
-
-    # Run both checks
-    ffmpeg_ok, ffmpeg_code = await check_ffmpeg_or_ffprobe(["ffmpeg", "-version"], "ffmpeg")
-    ffprobe_ok, ffprobe_code = await check_ffmpeg_or_ffprobe(["ffprobe", "-version"], "ffprobe")
-
-    if ffmpeg_ok and ffprobe_ok:
-        return True, 0  # All good
-    else:
-        # Return the first failure code found (prioritizing ffmpeg)
-        return False, ffmpeg_code if not ffmpeg_ok else ffprobe_code
+    except Exception:
+        logger.exception(f"An exception occurred while verifying {tool_name}.")
+        return False, 98
 
 
 async def load_json_file(file_name):
