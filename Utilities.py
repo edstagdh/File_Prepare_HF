@@ -11,9 +11,7 @@ from pymediainfo import MediaInfo
 from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
-# Define the minimum version required (e.g., 4.0.0)
-MIN_FFMPEG_VERSION = (4, 0, 0)
-MIN_FFMPEG_DATE = datetime(2024, 9, 1)
+RUN_DEBUG_MODE = False
 
 
 async def run_command(command: Union[str, Sequence[str]]) -> Tuple[str, str, int]:
@@ -25,8 +23,6 @@ async def run_command(command: Union[str, Sequence[str]]) -> Tuple[str, str, int
       blocking subprocess in a thread to avoid blocking the loop.
     - Returns rc == 0 as 0, non-zero as 22, exceptions as 99 (to match your existing codes).
     """
-
-    RUN_DEBUG_MODE = False
 
     # Normalize & choose shell mode
     is_sequence = isinstance(command, (list, tuple))
@@ -106,58 +102,83 @@ async def run_command(command: Union[str, Sequence[str]]) -> Tuple[str, str, int
             return '', str(exc2), 99
 
 
-async def check_ffmpeg_or_ffprobe(command, tool_name):
-    try:
-        stdout, stderr, code = await run_command(command)
-        if code != 0:
-            logger.error(f"{tool_name} returned a non-zero exit code.")
-            logger.error(f"stderr: {stderr}")
-            return False, 22  # Command failed
+async def verify_ffmpeg_and_ffprobe():
+    # Define the minimum version required (e.g., 4.0.0)
+    MIN_FFMPEG_VERSION = (4, 0, 0)
+    MIN_FFMPEG_DATE = datetime(2024, 9, 1)
 
-        version_ok = False
-        date_ok = True  # assume OK unless proven otherwise
+    async def check_ffmpeg_or_ffprobe(command, tool_name):
+        try:
+            stdout, stderr, code = await run_command(command)
+            if code != 0:
+                logger.error(f"{tool_name} returned a non-zero exit code.")
+                logger.error(f"stderr: {stderr}")
+                return False, 22  # Command failed
 
-        # ---- Version Check ----
-        # Works with: "ffmpeg version 4.4.2-0ubuntu0.22.04.1", "ffmpeg version 7.0.1-full_build"
-        version_match = re.search(r"version\s+(\d+)\.(\d+)\.(\d+)", stdout)
-        if version_match:
-            tool_version = tuple(map(int, version_match.groups()))
-            if tool_version >= MIN_FFMPEG_VERSION:
-                version_ok = True
-            else:
-                logger.error(
-                    f"{tool_name} version {'.'.join(map(str, tool_version))} is too old. "
-                    f"Minimum required: {'.'.join(map(str, MIN_FFMPEG_VERSION))}."
-                )
-        else:
-            logger.warning(f"Could not parse {tool_name} version from output.")
             version_ok = False
+            date_ok = True  # assume OK unless proven otherwise
 
-        # ---- Build Date Check ----
-        # Windows builds often have "built on 2024-10-01", Ubuntu builds don’t
-        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", stdout)
-        if date_match:
-            try:
-                tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
-                if tool_date < MIN_FFMPEG_DATE:
-                    date_ok = False
+            # ---- Version Check ----
+            output = stdout + '\n' + stderr
+            if RUN_DEBUG_MODE:
+                logger.debug(output)
+
+            # ---- Version Check ----
+            # Only accept semantic versions like 4.4.2
+            version_match = re.search(r"version\s+(\d+)\.(\d+)\.(\d+)", output)
+
+            # ---- Build Date Check ----
+            # Match YYYY-MM-DD anywhere, including Git/Windows builds
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", output)
+
+            if version_match:
+                tool_version = tuple(map(int, version_match.groups()))
+                if tool_version >= MIN_FFMPEG_VERSION:
+                    version_ok = True
+                else:
                     logger.error(
-                        f"{tool_name} build date {tool_date.strftime('%Y-%m-%d')} is too old. "
-                        f"Minimum required build date is {MIN_FFMPEG_DATE.strftime('%Y-%m-%d')}."
+                        f"{tool_name} version {'.'.join(map(str, tool_version))} is too old. "
+                        f"Minimum required: {'.'.join(map(str, MIN_FFMPEG_VERSION))}."
                     )
-            except ValueError:
-                logger.warning(f"Invalid date format detected for {tool_name}: {date_match.group(1)}")
+            else:
+                if RUN_DEBUG_MODE:
+                    logger.debug(f"Could not parse {tool_name} version from output.")
+                version_ok = False
 
-        # ---- Final Decision ----
-        if version_ok and date_ok:
-            return True, 0
-        else:
-            logger.error(f"{tool_name} did not meet version/date requirements.")
-            return False, 33  # Requirement failure
+            # ---- Build Date Check ----
+            if date_match:
+                try:
+                    tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
+                    if tool_date < MIN_FFMPEG_DATE:
+                        date_ok = False
+                        logger.error(
+                            f"{tool_name} build date {tool_date.strftime('%Y-%m-%d')} is too old. "
+                            f"Minimum required build date is {MIN_FFMPEG_DATE.strftime('%Y-%m-%d')}."
+                        )
+                except ValueError:
+                    logger.warning(f"Invalid date format detected for {tool_name}: {date_match.group(1)}")
 
-    except Exception:
-        logger.exception(f"An exception occurred while verifying {tool_name}.")
-        return False, 98
+            # ---- Final Decision ----
+            # Pass if either semantic version OR date meets the minimum
+            if version_ok or date_ok:
+                return True, 0
+            else:
+                logger.error(f"{tool_name} did not meet version/date requirements.")
+                return False, 33  # Requirement failure
+
+        except Exception:
+            logger.exception(f"An exception occurred while verifying {tool_name}.")
+            return False, 98
+
+    # Run both checks
+    ffmpeg_ok, ffmpeg_code = await check_ffmpeg_or_ffprobe(["ffmpeg", "-version"], "ffmpeg")
+    ffprobe_ok, ffprobe_code = await check_ffmpeg_or_ffprobe(["ffprobe", "-version"], "ffprobe")
+
+    if ffmpeg_ok and ffprobe_ok:
+        return True, 0  # All good
+    else:
+        # Return the first failure code found (prioritizing ffmpeg)
+        return False, ffmpeg_code if not ffmpeg_ok else ffprobe_code
 
 
 async def load_json_file(file_name):
