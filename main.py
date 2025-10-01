@@ -15,6 +15,7 @@ from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails import process_thumbnails
 from Uploaders.Upload_IMGBOX import imgbox_upload_single_image
 from Uploaders.Upload_IMGBB import imgbb_upload_single_image
+from Uploaders.Upload_Hamster import hamster_upload_single_image
 
 
 async def process_files():
@@ -31,7 +32,7 @@ async def process_files():
         create_mediainfo = config["create_mediainfo"]
         create_hf_template = config["create_hf_template"]
 
-        # Addition Configuraiton:
+        # Additional Configuration:
         directory = config["working_path"]
         manual_mode = config["manual_mode"]
         tpdb_performer_url = config["tpdb_performer_url"]
@@ -54,18 +55,23 @@ async def process_files():
         bad_words = config["bad_words"]
         use_title = config["use_title"]
         create_sub_folder = config["create_sub_folder"]
-        imgbox_upload_cover = config["imgbox_upload_cover"]
-        imgbox_upload_thumbnails = config["imgbox_upload_thumbnails"]
-        imgbb_upload_cover = config["imgbb_upload_cover"]
-        imgbb_upload_thumbnails = config["imgbb_upload_thumbnails"]
-        image_output_format = config["image_output_format"].lower()
         performer_image_output_format = config["performer_image_output_format"].lower()
         font_full_name = config["font_full_name"]
-        imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
-        imgbb_upload_previews = config["imgbb_upload_previews"]
         ignore_list = config["ignore_list"]
         filename_ignore_part_x = config["filename_ignore_part_x"]
         free_string_parse = config["free_string_parse"]
+
+        # Upload Configuration
+        imgbox_upload_cover = config["imgbox_upload_cover"]
+        imgbox_upload_thumbnails = config["imgbox_upload_thumbnails"]
+        imgbb_upload_cover = config["imgbb_upload_cover"]
+        imgbb_upload_previews = config["imgbb_upload_previews"]
+        imgbb_upload_thumbnails = config["imgbb_upload_thumbnails"]
+        imgbb_upload_headless_mode = config["imgbb_upload_headless_mode"]
+        hamster_upload_cover = config["hamster_upload_cover"]
+        hamster_upload_previews = config["hamster_upload_previews"]
+        hamster_upload_thumbnails = config["hamster_upload_thumbnails"]
+        image_output_format = config["image_output_format"].lower()
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -244,7 +250,7 @@ async def process_files():
             # Log which fields are None with explicit details
             none_fields = {key: value for key, value in critical_fields.items() if value is None}
             if none_fields:
-                logger.debug(f"Missing metadata for {file_full_name}: {', '.join([f'{k}=None' for k in none_fields.keys()])}")
+                logger.warning(f"Missing metadata for {file_full_name}: {', '.join([f'{k}=None' for k in none_fields.keys()])}")
 
             if all(value is None for value in critical_fields.values()):
                 logger.error(f"Failed to find a match via TPDB for file: {file_full_name}")
@@ -390,7 +396,12 @@ async def process_files():
         new_file_full_path = os.path.join(directory, new_full_filename)
 
         if str(file) != str(new_file_full_path):
-            await rename_file(str(file), new_full_filename)
+            rename_result, error_msg = await rename_file(str(file), new_full_filename)
+            if not rename_result:
+                logger.error(f"An error has occured while attempting to rename the file: {error_msg}")
+                logger.warning(f"End file: {file_full_name}")
+                failed_files.append(file_full_name)
+                continue  # Skip to the next file
 
         try:
             if not re_encode_hevc:
@@ -424,9 +435,11 @@ async def process_files():
             if not create_cover_image:
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
+                hamster_upload_cover = False
             if not create_thumbnails:
                 imgbox_upload_thumbnails = False
                 imgbb_upload_thumbnails = False
+                hamster_upload_thumbnails = False
 
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
@@ -435,8 +448,9 @@ async def process_files():
 
             imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt") if imgbox_upload_cover or imgbox_upload_thumbnails else ""
             imgbb_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbb.txt") if imgbb_upload_cover or imgbb_upload_thumbnails else ""
+            hamster_file_path = os.path.join(output_directory, f"{new_filename_base_name}_hamster.txt") if hamster_upload_cover or hamster_upload_thumbnails else ""
 
-            if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails:
+            if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails or hamster_upload_cover or hamster_upload_thumbnails:
                 fill_img_urls = True
                 # Check if the imgbox file exists and delete it
                 if os.path.exists(imgbox_file_path):
@@ -444,6 +458,9 @@ async def process_files():
                 # Check if the imgbb file exists and delete it
                 if os.path.exists(imgbb_file_path):
                     os.remove(imgbb_file_path)
+                # Check if the hamster file exists and delete it
+                if os.path.exists(hamster_file_path):
+                    os.remove(hamster_file_path)
             else:
                 fill_img_urls = False
 
@@ -454,17 +471,23 @@ async def process_files():
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
                 (re_encode_hevc, update_metadata, [new_file_full_path, new_title, f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"]),
 
-                (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory,
-                                                                           image_output_format]),
+                # Create Cover Image
+                (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, output_directory, image_output_format]),
                 (imgbox_upload_cover, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
                 (imgbb_upload_cover, imgbb_upload_single_image, [cover_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "cover"]),
+                (hamster_upload_cover, hamster_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
 
+                # Create Thumbnails Image
                 (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical]),
                 (imgbox_upload_thumbnails, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
                 (imgbb_upload_thumbnails, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
+                (hamster_upload_thumbnails, hamster_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
 
-                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, imgbb_upload_previews, imgbb_upload_headless_mode]),
+                # Create Preview Images
+                (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, imgbb_upload_previews, imgbb_upload_headless_mode,
+                                                               hamster_upload_previews]),
 
+                # Create Mediainfo File
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,

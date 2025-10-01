@@ -24,7 +24,7 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [x] Add an option to upload to imgbox(supported static format images only), this requires restructure.
 - [x] Add an option to upload to imgbb(webp)
 - [x] Add an option to use free string parsing for scene matching.
-- [ ] Add an option to upload to hamster(webp)
+- [x] Add an option to upload to hamster(webp)
 - [ ] Add an option to change output file naming format(select from list)
 - [x] Switch re-encoding progress bar from logger lines to tqdm.
 
@@ -77,7 +77,7 @@ This process requires matching scene via TPDB, it is not a standalone script.
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
    - Rename `Config_Thumbnails.json_example` to `Config_Thumbnails.json` and adjust the settings as needed.
    - Rename `Config_Video_Preview.json_example` to `Config_Video_Preview.json` and adjust the settings as needed.
-   - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials.
+   - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials and other credentials if needed.
 
 2. **Run the Main Script**:
 
@@ -116,6 +116,7 @@ File_Prepare_HF/
 └── Uploaders/                                  # Uploaders Integration
    ├── Upload_IMGBOX.py                         # IMGBOX code integration
    ├── Upload_IMGBB.py                          # IMGBB code integration
+   ├── Upload_Hamster.py                        # Hamster code integration
 ├── creds.secret_example                        # Example credentials file
 ├── Generate_Thumbnails.py.py                   # Thumbnails generation code
 ├── Generate_Video_Preview.py                   # Preview generation code

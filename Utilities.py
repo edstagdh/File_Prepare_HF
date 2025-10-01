@@ -411,20 +411,20 @@ async def rename_file(file_path, new_filename):
             os.rename(file_path, new_file_path)
 
         logger.info(f"Renamed file: {file_path} -> {new_file_path}")
-        return True
+        return True, None
 
-    except FileNotFoundError:
-        logger.error(f"File not found: {file_path}")
-        return False
-    except PermissionError:
-        logger.error(f"Permission denied to rename file: {file_path}")
-        return False
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {file_path}, Error: {e}")
+        return False, e
+    except PermissionError as e:
+        logger.error(f"Permission denied to rename file: {file_path}, Error: {e}")
+        return False, e
     except OSError as e:
         logger.error(f"OS error occurred while renaming file {file_path}: {e}")
-        return False
-    except Exception:
-        logger.exception(f"Unexpected error occurred while renaming file {file_path}")
-        return False
+        return False, e
+    except Exception as e:
+        logger.exception(f"Unexpected error occurred while renaming file {file_path}, Error: {e}")
+        return False, e
 
 
 async def generate_mediainfo_file(input_file_full_path, output_path):
