@@ -71,7 +71,7 @@ This process requires matching scene via TPDB, it is not a standalone script.
    or
    STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
    ```
-<br>
+
 1. **Configure Settings**:
 
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
