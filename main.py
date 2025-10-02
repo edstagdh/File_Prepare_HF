@@ -24,6 +24,9 @@ async def process_files():
     if not config:
         exit(exit_code)
     else:
+        # Working Mod, By default scenes is used
+        jav_api_mode = config.get("jav_api_mode")
+
         # Generate flags, Note - HF Template generation will not work if mediainfo file is set to not generate
         create_cover_image = config["create_cover_image"]
         create_thumbnails = config["create_thumbnails"]
@@ -192,6 +195,7 @@ async def process_files():
                     tpdb_scenes_url,
                     None,
                     create_hf_template,
+                    jav_api_mode,
                     mode=1
                 )
             else:
@@ -231,6 +235,7 @@ async def process_files():
                     tpdb_scenes_url,
                     part_match,
                     create_hf_template,
+                    jav_api_mode,
                     mode=2
                 )
 
@@ -398,7 +403,7 @@ async def process_files():
         if str(file) != str(new_file_full_path):
             rename_result, error_msg = await rename_file(str(file), new_full_filename)
             if not rename_result:
-                logger.error(f"An error has occured while attempting to rename the file: {error_msg}")
+                # logger.error(f"An error has occured while attempting to rename the file: {error_msg}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
                 continue  # Skip to the next file

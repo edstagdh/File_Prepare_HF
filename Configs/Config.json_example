@@ -1,4 +1,5 @@
 {
+  "jav_api_mode": false,
   "working_path": "G:\\temp8",
   "create_cover_image": false,
   "create_thumbnails": false,
@@ -22,7 +23,7 @@
   "posters_limit": 10,
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
-  "Code_Version": "8.4",
+  "Code_Version": "8.5",
   "bad_words": [".Hardcore"],
   "use_title": false,
   "create_sub_folder": false,

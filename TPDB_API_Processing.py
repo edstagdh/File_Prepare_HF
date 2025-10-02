@@ -10,11 +10,12 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, mode):
     max_retries = 3
     delay = 5
     try:
-        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=1)
+        work_mode = 4 if jav_api_mode else 1
+        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=work_mode)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None

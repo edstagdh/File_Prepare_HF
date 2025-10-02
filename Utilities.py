@@ -256,7 +256,7 @@ async def sanitize_site_filename_part(input_str):
         str: The sanitized string.
     """
     translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
-    sanitized = input_str.replace(":", "-").replace(".", " ")
+    sanitized = input_str.replace(":", "-").replace(".", " ").replace("/", "-")
     sanitized = sanitized.translate(translation_table)
     return sanitized
 
@@ -697,6 +697,8 @@ async def load_credentials(mode):
                 return secrets["api_auth"], secrets["api_performer_url"], None
             elif mode == 3:
                 return secrets["imgbox_u"], secrets["imgbox_u"], None
+            elif mode == 4:
+                return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
             else:
                 return None, None, None
 
