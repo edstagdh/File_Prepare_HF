@@ -25,7 +25,7 @@ async def process_files():
         exit(exit_code)
     else:
         # Working Mod, By default scenes is used
-        jav_api_mode = config.get("jav_api_mode")
+        jav_api_mode = config.get("jav_only_api_mode")
 
         # Generate flags, Note - HF Template generation will not work if mediainfo file is set to not generate
         create_cover_image = config["create_cover_image"]

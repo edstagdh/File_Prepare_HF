@@ -319,13 +319,13 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                     if upload_result:
                         logger.success(f"Preview WebP uploaded successfully: {output_webp}")
                     else:
-                        logger.warning(f"upload failed for file: {output_webp}")
+                        logger.error(f"Upload failed for file: {output_webp}")
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(output_webp, new_filename_base_name, "Preview WebP")
                     if upload_result:
                         logger.success(f"Preview WebP uploaded successfully: {output_webp}")
                     else:
-                        logger.warning(f"upload failed for file: {output_webp}")
+                        logger.error(f"Upload failed for file: {output_webp}")
             else:
                 logger.error(f"Failed to create WebP: {stderr}")
                 return False
@@ -368,13 +368,13 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                     if upload_result:
                         logger.success(f"Preview GIF uploaded successfully: {output_gif}")
                     else:
-                        logger.warning(f"Upload failed for file: {output_gif}")
+                        logger.error(f"Upload failed for file: {output_gif}")
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(output_gif, new_filename_base_name, "Preview GIF")
                     if upload_result:
                         logger.success(f"Preview GIF uploaded successfully: {output_gif}")
                     else:
-                        logger.warning(f"upload failed for file: {output_gif}")
+                        logger.error(f"Upload failed for file: {output_gif}")
             else:
                 logger.error(f"Failed to create GIF: {stderr}")
                 return False
@@ -916,13 +916,13 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                     if upload_result:
                         logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
                     else:
-                        logger.warning(f"Upload failed for file: {preview_sheet_webp}")
+                        logger.error(f"Upload failed for file: {preview_sheet_webp}")
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(preview_sheet_webp, new_filename_base_name, "Preview Sheet WebP")
                     if upload_result:
                         logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
                     else:
-                        logger.warning(f"Upload failed for file: {preview_sheet_webp}")
+                        logger.error(f"Upload failed for file: {preview_sheet_webp}")
 
         # WebM Preview
         if create_webm_preview_sheet:
@@ -952,13 +952,13 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                     if upload_result:
                         logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
                     else:
-                        logger.warning(f"Upload failed for file: {preview_sheet_gif}")
+                        logger.error(f"Upload failed for file: {preview_sheet_gif}")
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(preview_sheet_gif, new_filename_base_name, "Preview Sheet GIF")
                     if upload_result:
                         logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
                     else:
-                        logger.warning(f"Upload failed for file: {preview_sheet_gif}")
+                        logger.error(f"Upload failed for file: {preview_sheet_gif}")
 
         # logger.info("Thumbnail sheet generation completed successfully.")
         # logger.info(results)

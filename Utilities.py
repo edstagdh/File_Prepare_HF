@@ -699,6 +699,8 @@ async def load_credentials(mode):
                 return secrets["imgbox_u"], secrets["imgbox_u"], None
             elif mode == 4:
                 return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
+            elif mode == 5:
+                return secrets["hamster_album_id"], secrets["hamster_api_key"], None
             else:
                 return None, None, None
 

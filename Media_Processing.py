@@ -733,8 +733,10 @@ async def re_encode_to_hevc(file_path, is_vertical,
     process = subprocess.Popen(
         ffmpeg_cmd,
         stderr=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,  # ignore stdout
-        text=True
+        stdout=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace"  # so it won’t crash on bad bytes
     )
 
     time_pattern = re.compile(r"time=(\d+:\d+:\d+\.\d+)")

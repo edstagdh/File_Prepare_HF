@@ -1,28 +1,9 @@
-import asyncio
 import requests
 import json
 from loguru import logger
 import os
 import base64
-
-
-async def load_json_file(file_name):
-    try:
-        with open(file_name, 'r') as config_file:
-            json_data = json.load(config_file)
-            return json_data, 0  # Success
-    except FileNotFoundError:
-        logger.error(f"{file_name} file not found.")
-        return None, -1  # JSON file load error
-    except KeyError as e:
-        logger.error(f"Key {e} is missing in the {file_name} file.")
-        return None, -2  # Missing keys in JSON
-    except json.JSONDecodeError:
-        logger.error(f"Error parsing {file_name}. Ensure the JSON is formatted correctly.")
-        return None, -3  # JSON file load error
-    except Exception:
-        logger.exception(f"An unexpected error occurred while loading {file_name}.")
-        return None, -4  # Unknown exception
+from Utilities import load_credentials
 
 
 async def upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_title):
@@ -85,21 +66,13 @@ async def upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_tit
 
 
 async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
-    # Get project root
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
     key = f"{new_filename_base_name} - {mode}"
     txt_filename = f"{new_filename_base_name}_hamster.txt"
     txt_filepath = os.path.join(os.path.dirname(filepath), txt_filename)
     img_title = f"{new_filename_base_name}_{mode}"
 
-    # Load config file from project root
-    creds_path = os.path.join(project_root, "creds.secret")
-    creds, exit_code = await load_json_file(creds_path)
-    if not creds:
-        exit(exit_code)
-
-    hamster_album_id = creds.get("hamster_album_id")
-    hamster_api_key = creds.get("hamster_api_key")
+    hamster_album_id, hamster_api_key, _ = await load_credentials(5)
 
     if not hamster_api_key or not hamster_album_id:
         logger.error("Missing 'hamster_api_key' or 'hamster_album_id' in creds.secret.")
@@ -136,5 +109,5 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
                 # logger.debug(f"Created new result file with key '{key}': {txt_filepath}")
         return True
     else:
-        logger.error(f"Upload failed for image: {filepath}")
+        # logger.error(f"Upload failed for image: {filepath}")
         return False
