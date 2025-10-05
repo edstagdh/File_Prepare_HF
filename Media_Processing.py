@@ -686,6 +686,7 @@ async def re_encode_to_hevc(file_path, is_vertical,
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
     duration, fps = await get_video_duration(file_path)
+    duration = int(duration)
 
     keyint = int(fps * 2)  # every 2 seconds
 
@@ -830,18 +831,23 @@ async def is_video_hevc_or_av1(file_path: str) -> bool:
 
 
 async def get_video_duration(filepath):
-    """Returns duration of the video in seconds using OpenCV."""
+    """Returns duration of the video in seconds using OpenCV, rounded to 1 decimal place."""
     cap = cv2.VideoCapture(filepath)
     if not cap.isOpened():
         logger.error(f"Failed to open video file: {filepath}")
-        return 0
+        return 0.0, 0.0
+
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     cap.release()
+
     if fps == 0:
         logger.error(f"Invalid FPS value for file: {filepath}")
-        return 0
-    return int(frame_count // fps), fps
+        return 0.0, 0.0
+
+    duration = frame_count / fps  # float division
+    duration = round(duration, 1)  # round to 1 decimal place
+    return duration, fps
 
 
 async def get_video_fps(video_path: str) -> float:
@@ -951,17 +957,37 @@ async def generate_temp_filename(directory, original_name):
 
 
 async def get_video_codec(file_path):
-    """Return the codec name of the first video stream in a video file using ffprobe."""
-    command = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+    """Return 'avc', 'hevc', or 'av1' if the codec is supported; otherwise return None."""
+    command = (
+        f'ffprobe -v error -select_streams v:0 '
+        f'-show_entries stream=codec_name '
+        f'-of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+    )
 
     try:
         stdout, stderr, code = await run_command(command)
         codec_name = stdout.strip().lower()
-        return codec_name
+
+        # Map common codec names to the desired labels
+        codec_map = {
+            "h264": "avc",
+            "avc1": "avc",
+            "hevc": "hevc",
+            "h265": "hevc",
+            "hev1": "hevc",
+            "av01": "av1",
+        }
+
+        if codec_name in codec_map:
+            return codec_map[codec_name]
+        else:
+            logger.warning(f"Codec '{codec_name}' is not supported for {file_path}")
+            return None
 
     except Exception as e:
         logger.error(f"Error getting codec for {file_path}: {e}")
         return None
+
 
 
 async def update_metadata(input_file, title, description):
@@ -982,11 +1008,13 @@ async def update_metadata(input_file, title, description):
     try:
         # Load the MP4 file
         video = MP4(input_file)
+        # logger.debug(video)
 
         # Update metadata fields
         video["\xa9nam"] = title  # Title
         video["\xa9cmt"] = description  # Comment/Description
         video["\xa9cpy"] = [""]  # Copyright
+        video["cprt"] = [""]
         video["\xa9ART"] = [""]  # Author/Performer/Artist
 
         if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:

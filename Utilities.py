@@ -477,6 +477,7 @@ async def generate_template_video(
         fill_img_urls: bool,
         imgbox_file_path: str,
         imgbb_file_path: str,
+        hamster_file_path: str,
         suffix: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
@@ -503,10 +504,18 @@ async def generate_template_video(
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
     # Additional information
+    _, template_name = os.path.split(template_file_full_path)
+    template_base_name, _ = os.path.splitext(template_name)
     fps_icon_url = json_map[f"{fps}"]
     resolution_icon_url = json_map[f"{resolution}"]
     codec_icon_url = json_map[f"{codec}"]
     extension_icon_url = json_map[f"{extension.replace('.', '')}"]
+    desc_button_icon_url = json_map[f"desc_button"]
+    release_date_button_icon_url = json_map[f"release_date_button"]
+    performers_button_icon_url = json_map[f"performers_button"]
+    mediainfo_button_icon_url = json_map[f"mediainfo_button"]
+    screens_button_icon_url = json_map[f"screens_button"]
+    bg = json_map[f"bg"]
 
     # Default image paths
     cover_image = f"{new_filename_base_name}.{image_output_format}"
@@ -562,6 +571,33 @@ async def generate_template_video(
 
             except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
                 raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
+    elif hamster_file_path != "":
+        if fill_img_urls and os.path.isfile(hamster_file_path):
+            try:
+                with open(hamster_file_path, "r", encoding="utf-8") as f:
+                    hamster_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+                preview_sheet_key = f"{new_filename_base_name} - Preview Sheet WebP"
+
+                if thumbs_key in hamster_data and isinstance(hamster_data[thumbs_key], list):
+                    thumbs_entry = hamster_data[thumbs_key][0]
+                    if "image_url" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["image_url"]
+
+                if cover_key in hamster_data and isinstance(hamster_data[cover_key], list):
+                    cover_entry = hamster_data[cover_key][0]
+                    if "image_url" in cover_entry:
+                        cover_image = cover_entry["image_url"]
+
+                if preview_sheet_key in hamster_data and isinstance(hamster_data[preview_sheet_key], list):
+                    preview_sheet_entry = hamster_data[preview_sheet_key][0]
+                    if "image_url" in preview_sheet_entry:
+                        preview_sheet_image = preview_sheet_entry["image_url"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse hamster file or missing expected data: {e}")
 
     # Load JSON config
     performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")
@@ -623,7 +659,7 @@ async def generate_template_video(
     if suffix != "":
         processed_string += f" {suffix}"
     # Build output filename and path
-    tags_filename = f"{new_filename_base_name}_HF_tags.txt"
+    tags_filename = f"{new_filename_base_name}_{template_base_name}_tags.txt"
     tags_path = os.path.join(directory, tags_filename)
 
     # Write the string to the file
@@ -636,6 +672,12 @@ async def generate_template_video(
 
     # Create replacement dictionary
     replacements = {
+        "{BG}": bg,
+        "{DESC_BUTTON}": desc_button_icon_url,
+        "{RELEASE_DATE_BUTTON}": release_date_button_icon_url,
+        "{PERFORMERS_BUTTON}": performers_button_icon_url,
+        "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
+        "{SCREENS_BUTTON}": screens_button_icon_url,
         "{NEW_TITLE}": new_title,
         "{SCENE_PRETTY_DATE}": scene_pretty_date,
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
@@ -660,8 +702,10 @@ async def generate_template_video(
         # Make sure the target directory exists
         os.makedirs(directory, exist_ok=True)
 
+        # build template filename
+        output_filename = f"{new_filename_base_name}_{template_base_name}.txt"
+
         # Save the modified file
-        output_filename = f"{new_filename_base_name}_HF_template.txt"
         output_path = os.path.join(directory, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:

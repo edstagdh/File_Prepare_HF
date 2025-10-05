@@ -709,6 +709,7 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             char_break_line = 150
 
         duration, fps = await get_video_duration(input_video_full_path)
+        duration = int(duration)
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
         if not metadata_table or not original_fps:
             logger.error(f"failed to extract video file metadata required for thumbnails")

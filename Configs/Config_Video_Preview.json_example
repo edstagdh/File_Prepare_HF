@@ -1,8 +1,8 @@
 {
-  "CREATE_WEBP_PREVIEW": false,
+  "CREATE_WEBP_PREVIEW": true,
   "CREATE_WEBM_PREVIEW": false,
   "CREATE_GIF_PREVIEW": false,
-  "CREATE_WEBP_PREVIEW_SHEET": false,
+  "CREATE_WEBP_PREVIEW_SHEET": true,
   "CREATE_WEBM_PREVIEW_SHEET": false,
   "CREATE_GIF_PREVIEW_SHEET": false,
   "KEEP_TEMP_FILES": false,
@@ -12,7 +12,7 @@
   "TIMESTAMPS_MODE": 2,
   "GRID_WIDTH": 4,
   "NUM_OF_SEGMENTS": 16,
-  "SEGMENT_DURATION": 2,
+  "SEGMENT_DURATION": 1.5,
   "OVERWRITE_EXISTING": false,
   "PRINT_CUT_POINTS": false,
   "BLACKLISTED_CUT_POINTS": [],
@@ -21,5 +21,17 @@
   "CONFIRM_CUT_POINTS_REQUIRED": false,
   "LAST_CUT_POINT": 0,
   "add_file_info": true,
-  "FONT_NAME_FULL": "Gotham_Medium.otf"
+  "FONT_NAME_FULL": "Gotham_Medium.otf",
+  "available_transitions": [
+    "fade",
+    "fadeblack",
+    "wipeleft",
+    "wiperight",
+    "slideup",
+    "slidedown",
+    "circleopen",
+    "pixelize"
+  ],
+  "transition_mode": "fade",
+  "transition_duration": 0.3
 }

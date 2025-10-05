@@ -40,7 +40,7 @@ async def upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_tit
             data["album_id"] = hamster_album_id
 
         # Send POST request
-        logger.info(f"Uploading {filepath} as Base64...")
+        # logger.debug(f"Uploading {filepath} as Base64...")
         response = requests.post(url, headers=headers, data=data)
 
         # Try parsing JSON
@@ -66,7 +66,6 @@ async def upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_tit
 
 
 async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
-
     key = f"{new_filename_base_name} - {mode}"
     txt_filename = f"{new_filename_base_name}_hamster.txt"
     txt_filepath = os.path.join(os.path.dirname(filepath), txt_filename)
@@ -79,9 +78,12 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
         exit(-99)
 
     result = await upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_title)
+    result_json = {
+        "image_url": result
+    }
 
     if result:
-        logger.success(f"Upload completed for image: {filepath} → {result}")
+        # logger.debug(f"Upload completed for image: {filepath} → {result}")
         if os.path.exists(txt_filepath):
             with open(txt_filepath, "r+", encoding="utf-8") as f:
                 contents = f.read()
@@ -93,7 +95,7 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
                 # Add the result under the specific key
                 if key not in data:
                     data[key] = []
-                data[key].append(result)
+                data[key].append(result_json)
 
                 # Write the updated contents back to the file
                 f.seek(0)
@@ -103,7 +105,7 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
 
         else:
             # If the file doesn't exist, create a new one and add the key with result
-            data = {key: [result]}
+            data = {key: [result_json]}
             with open(txt_filepath, "w", encoding="utf-8") as f:
                 f.write(json.dumps(data, indent=2))
                 # logger.debug(f"Created new result file with key '{key}': {txt_filepath}")

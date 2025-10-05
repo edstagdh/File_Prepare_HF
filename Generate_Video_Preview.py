@@ -1,3 +1,4 @@
+import asyncio
 import json
 import hashlib
 import os
@@ -9,6 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 from time import sleep
 from loguru import logger
 from Utilities import load_json_file, run_command
+from pymediainfo import MediaInfo
+from Media_Processing import get_video_duration
 from Uploaders.Upload_IMGBB import imgbb_upload_single_image
 from Uploaders.Upload_Hamster import hamster_upload_single_image
 
@@ -42,6 +45,9 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         last_cut_point = config["LAST_CUT_POINT"]
         font_full_name = config["FONT_NAME_FULL"]
         add_file_info = config["add_file_info"]
+        transition_mode = config["transition_mode"].lower()
+        available_transitions = config["available_transitions"]
+        transition_duration = config["transition_duration"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -61,7 +67,8 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
-                                  new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews)
+                                  new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
+                                  transition_mode, available_transitions, transition_duration)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -113,10 +120,148 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
         return False
 
 
+async def concat_video_segments(concat_list_file, output_file, transition_mode, available_transitions, duration):
+    """
+    Concatenate video files with optional transitions (video only).
+
+    concat_list_file: path to a text file containing lines like:
+        file 'path/to/video1.mp4'
+        file 'path/to/video2.mp4'
+    output_file: path to save the final video
+    transition_mode: 'none', 'random', or transition name
+    available_transitions: list of transition names for 'random' mode
+    duration: duration of each transition in seconds
+    """
+
+    if not os.path.exists(concat_list_file):
+        logger.error(f"Concat list file does not exist: {concat_list_file}")
+        return False, None
+
+    # Determine temp file path (same folder as concat_list_file)
+    temp_folder = os.path.dirname(concat_list_file)
+
+    # Read the file paths from the concat list
+    with open(concat_list_file, "r", encoding="utf-8") as f:
+        segment_files = [
+            line.strip()[6:-1]  # strip "file '" at start and "'" at end
+            for line in f.readlines() if line.strip()
+        ]
+
+    if not segment_files:
+        logger.error(f"No videos found in concat list: {concat_list_file}")
+        return False, None
+
+    # Only one video, just copy
+    if len(segment_files) == 1:
+        cmd = f'ffmpeg -i "{segment_files[0]}" -c copy "{output_file}" -y'
+        stdout, stderr, code = await run_command(cmd)
+        return (code == 0 and os.path.exists(output_file)), output_file if code == 0 else None
+
+    # Mode: none → simple concat
+    if transition_mode == "none":
+        cmd = f'ffmpeg -hide_banner -f concat -safe 0 -i "{concat_list_file}" -c copy "{output_file}" -y'
+        stdout, stderr, code = await run_command(cmd)
+        if code != 0 or not os.path.exists(output_file):
+            logger.error(f"Simple concat failed: {stderr}")
+            return False, None
+        return True, output_file
+
+    # Mode: random or fixed transition
+    elif transition_mode == "random":
+        num_transitions = len(segment_files) - 1
+        if len(available_transitions) < num_transitions:
+            transitions = random.choices(available_transitions, k=num_transitions)
+        else:
+            transitions = random.sample(available_transitions, num_transitions)
+
+        # Randomize the order of the transitions
+        random.shuffle(transitions)
+    else:
+        transitions = [transition_mode] * (len(segment_files) - 1)
+
+    # logger.debug(f"Using transitions: {transitions}")
+
+    if transition_mode in ["fade", "fadeblack"]:
+        temp_first_fade = os.path.join(temp_folder, "first_fade.mp4")
+        fade_duration = duration  # or a separate value if you want
+
+        cmd_fade_in = (
+            f'ffmpeg -hide_banner -i "{segment_files[0]}" '
+            f'-vf "fade=t=in:st=0:d={fade_duration}" '
+            f'-c:a copy -y "{temp_first_fade}"'
+        )
+        stdout, stderr, code = await run_command(cmd_fade_in)
+        if code != 0 or not os.path.exists(temp_first_fade):
+            logger.error(f"Fade-in failed for {segment_files[0]}: {stderr}")
+            return False, None
+
+        prev_clip = temp_first_fade
+    else:
+        prev_clip = segment_files[0]
+
+    temp_file_before = os.path.join(temp_folder, "before_concat.mp4")
+    temp_file_after = os.path.join(temp_folder, "after_concat.mp4")
+
+    # os.rename(old_path, new_path)
+    for i, next_clip in enumerate(segment_files[1:]):
+        transition = transitions[i]
+
+        prev_duration, _ = await get_video_duration(prev_clip)
+
+        # Offset: transition happens at the end of the previous clip
+        offset = max(prev_duration - duration, 0)
+
+        # Run ffmpeg to concat prev_clip and next_clip into temp_file
+        cmd = (
+            f'ffmpeg -hide_banner -i "{prev_clip}" -i "{next_clip}" '
+            f'-filter_complex "[0:v][1:v]xfade=transition={transition}:duration={duration}:offset={offset}[v]" '
+            f'-map "[v]" -y "{temp_file_after}"'
+        )
+
+        stdout, stderr, code = await run_command(cmd)
+        if code != 0 or not os.path.exists(temp_file_after):
+            logger.error(f"Concat failed between {prev_clip} and {next_clip}: {stderr}")
+            return False, None
+
+        # Rename after concat
+        await asyncio.sleep(0.1)
+        if os.path.exists(temp_file_after):
+            os.replace(temp_file_after, temp_file_before)
+        await asyncio.sleep(0.1)
+
+        # For the next iteration, use the same temp_file as prev_clip
+        prev_clip = temp_file_before
+
+    # Rename after finish
+    await asyncio.sleep(0.1)
+    if os.path.exists(temp_file_before):
+        os.replace(temp_file_before, output_file)
+    await asyncio.sleep(0.1)
+
+    if transition_mode in ["fade", "fadeblack"]:
+        temp_final_fade = os.path.join(temp_folder, "final_fade.mp4")
+        final_duration, _ = await get_video_duration(output_file)
+
+        cmd_fade_out = (
+            f'ffmpeg -hide_banner  -i "{output_file}" '
+            f'-vf "fade=t=out:st={final_duration - fade_duration}:d={fade_duration}" '
+            f'-c:a copy -y "{temp_final_fade}"'
+        )
+        stdout, stderr, code = await run_command(cmd_fade_out)
+        if code != 0 or not os.path.exists(temp_final_fade):
+            logger.error(f"Fade-out failed for {output_file}: {stderr}")
+            return False, None
+
+        os.replace(temp_final_fade, output_file)
+
+    return True, output_file
+
+
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
-                        last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews):
+                        last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
+                        available_transitions, transition_duration):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -287,12 +432,14 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         else:
             concat_list_preview_gif = concat_list_preview
 
+        # Concat the videos into 1 before continuing
         concat_output_file = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile.mp4")
-        concat_command = f"ffmpeg -f concat -safe 0 -i \"{concat_list_preview}\" -c copy \"{concat_output_file}\" -y"
-        stdout, stderr, exit_code = await run_command(concat_command)
-        if exit_code != 0 or not os.path.exists(concat_output_file):
-            logger.error(f"Failed to concatenate video segments concat file for WebP: {stderr}")
+
+        concat_result, concat_result_path = await concat_video_segments(concat_list_preview, concat_output_file, transition_mode, available_transitions, transition_duration)
+        if not concat_result or not concat_result_path:
+            logger.error(f"Failed to concatenate video segments concat file")
             return False
+
         if is_vertical:
             if not black_bars:
                 scale_option = "scale=-2:480"
@@ -305,13 +452,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create Preview WebP
         if create_webp_preview:
             webp_command = (
-                f"ffmpeg -y -i \"{concat_output_file}\" "
+                f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-vf \"fps=24,{scale_option}:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
             )
-
             stdout, stderr, exit_code = await run_command(webp_command)
-
             if exit_code == 0 and os.path.exists(output_webp):
                 logger.success(f"Preview WebP created successfully: {output_webp}")
                 if upload_previews_imgbb:
@@ -332,12 +477,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create Preview WebM
         if create_webm_preview:
             webm_command = (
-                f"ffmpeg -y -i \"{concat_output_file}\" "
+                f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
                 f"-crf 20 -deadline good -cpu-used 4 \"{output_webm}\""
             )
             stdout, stderr, exit_code = await run_command(webm_command)
-
             if exit_code == 0 and os.path.exists(output_webm):
                 logger.success(f"Preview WebM created successfully: {output_webm}")
             else:
@@ -346,21 +490,18 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create concat video file for gif if create_gif_preview is true
         if create_gif_preview:
             concat_output_file_gif = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile_gif.mp4")
-            concat_command_gif = f"ffmpeg -f concat -safe 0 -i \"{concat_list_preview_gif}\" -c copy \"{concat_output_file_gif}\" -y"
-            stdout, stderr, exit_code = await run_command(concat_command_gif)
-            if exit_code != 0 or not os.path.exists(concat_output_file_gif):
-                logger.error(f"Failed to concatenate video segments concat file for GIF: {stderr}")
+            concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview, concat_output_file_gif, transition_mode, available_transitions,
+                                                                                    transition_duration)
+            if not concat_result_gif or not concat_result_gif_path:
+                logger.error(f"Failed to concatenate video segments concat file")
                 return False
-        else:
-            concat_output_file_gif = None
         # Create the preview gif if the concat output file has been created and its set to create gif
-        if create_gif_preview and concat_output_file_gif:
+        if create_gif_preview and concat_result_gif_path:
             gif_command = (
-                f"ffmpeg -y -i \"{concat_output_file_gif}\" -vf \"fps={gif_preview_fps},{scale_option}:flags=lanczos,"
+                f"ffmpeg -hide_banner -y -i \"{concat_result_gif_path}\" -vf \"fps={gif_preview_fps},{scale_option}:flags=lanczos,"
                 f"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{output_gif}\""
             )
             stdout, stderr, exit_code = await run_command(gif_command)
-
             if exit_code == 0 and os.path.exists(output_gif):
                 logger.success(f"Preview GIF created successfully: {output_gif}")
                 if upload_previews_imgbb:
@@ -394,7 +535,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             # logger.debug("Temporary files removed")
             pass
 
-        logger.success(f"Finished processing file: {video_path}")
+        # logger.debug(f"Finished processing file: {video_path}")
         sleep(0.5)
         return True
     else:
@@ -575,7 +716,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
                 vf_filter = "scale=480:270"
 
             ffmpeg_segment_command = (
-                f"ffmpeg -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset slow "
+                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset slow "
                 f"-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} "
                 f"-vf \"{vf_filter}\" \"{temp_file}\" -y"
             )
@@ -688,7 +829,7 @@ async def overlay_timestamp(temp_folder, video_path, font_path):
         vf_filters = ",".join(drawtext_filters)
 
         ffmpeg_cmd = (
-            f"ffmpeg -i \"{full_video_path}\" "
+            f"ffmpeg -hide_banner -i \"{full_video_path}\" "
             f"-vf \"{vf_filters}\" "
             f"-c:v libx264 -preset fast -c:a copy \"{full_output_path}\" -y"
         )
@@ -827,12 +968,14 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         else:
             grid == 0
 
-        metadata_table, filename, original_fps = await get_video_metadata(file_path, char_break_line)
+        duration, fps = await get_video_duration(file_path)
+        duration = int(duration)
+        metadata_table, original_fps = await get_video_metadata(file_path, char_break_line, duration)
         if add_file_info:
-            info_image_path = await create_info_image(metadata_table, temp_folder, filename, grid, is_vertical, add_black_bars, font_path)
+            info_image_path = await create_info_image(metadata_table, temp_folder, new_filename_base_name, grid, is_vertical, add_black_bars, font_path)
 
             # Create the video from the info image (same resolution as image)
-            final_image_video_path = os.path.join(temp_folder, filename + '_image_video.mp4')
+            final_image_video_path = os.path.join(temp_folder, new_filename_base_name + '_image_video.mp4')
             await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
 
         # Process each group of videos and stack them horizontally
@@ -846,7 +989,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             elif grid == 4:
                 filter_complex = "[0:v][1:v][2:v][3:v]hstack=inputs=4[v]"
 
-            command = f"ffmpeg {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}\""
+            command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}\""
             stdout, stderr, exit_code = await run_command(command)
             if exit_code != 0:
                 logger.error(f"Error running ffmpeg command for stacked video {index + 1}: {stdout}\n{stderr}\nCommand: {command}")
@@ -871,7 +1014,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         input_files_str = ' '.join(input_files_list)
         filter_complex_str = ''.join(filter_inputs) + f"vstack=inputs={len(filter_inputs)}[v]"
 
-        command = f"ffmpeg {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}\""
+        command = f"ffmpeg -hide_banner {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}\""
         stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
             logger.error(f"Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}")
@@ -903,7 +1046,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # WebP Preview
         if create_webp_preview_sheet:
             webp_command = (
-                f"ffmpeg -y -i \"{final_output}\" -vf \"fps=24,scale=iw:ih:flags=lanczos\" "
+                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"fps=24,scale=iw:ih:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
@@ -927,7 +1070,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # WebM Preview
         if create_webm_preview_sheet:
             webm_command = (
-                f"ffmpeg -y -i \"{final_output}\" -c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
+                f"ffmpeg -hide_banner -y -i \"{final_output}\" -c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
                 f"-crf 20 -deadline good -cpu-used 4 \"{preview_sheet_webm}\""
             )
             stdout, stderr, exit_code = await run_command(webm_command)
@@ -939,7 +1082,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # GIF Preview
         if create_gif_preview_sheet:
             gif_command = (
-                f"ffmpeg -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos,fps={gif_preview_fps}\" "
+                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos,fps={gif_preview_fps}\" "
                 f"\"{preview_sheet_gif}\""
             )
             stdout, stderr, exit_code = await run_command(gif_command)
@@ -960,106 +1103,186 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                     else:
                         logger.error(f"Upload failed for file: {preview_sheet_gif}")
 
-        # logger.info("Thumbnail sheet generation completed successfully.")
-        # logger.info(results)
+        logger.info("Thumbnail sheet generation completed successfully.")
+        logger.info(results)
 
     except Exception as e:
         logger.exception(f"Exception occurred in generate_and_run_ffmpeg_commands: {str(e)}")
 
 
-async def get_video_metadata(file_path, char_break_line):
-    """Extract video metadata using ffprobe."""
+async def get_video_metadata(file_path, char_break_line, duration):
+    """Extract video metadata using pymediainfo."""
     filename = os.path.basename(file_path)
-    base_filename = os.path.splitext(filename)[0]
     file_dir = os.path.dirname(file_path)
+    add_lines = 0
 
     try:
-
-        # Get video metadata
-        cmd = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,profile,width,height,r_frame_rate,bit_rate -of json \"{file_path}\"'
-        video_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,bit_rate,profile -of json \"{file_path}\"'
-        audio_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -show_entries format=duration,size:format_tags=title -of json \"{file_path}\"'
-        format_info_json, stderr, exit_code = await run_command(cmd)
-
-        # Parse JSON outputs
-        video_info = json.loads(video_info_json).get("streams", [{}])[0]
-        audio_info = json.loads(audio_info_json).get("streams", [{}])[0]
-        format_info = json.loads(format_info_json).get("format", {})
-        fps = video_info.get("r_frame_rate", "N/A")
-        try:
-            num, denom = map(int, fps.split("/"))
-            fps = round(num / denom, 2)
-        except Exception as e:
-            fps = "N/A"
-
+        media_info = MediaInfo.parse(file_path)
     except Exception as e:
-        logger.error(f"Error extracting metadata: {e}")
+        logger.error(f"Error parsing media info for {file_path}: {e}")
         return [], file_dir, None
 
-    # Extract and format video information
-    video_codec = video_info.get('codec_name', 'N/A').upper()
-    video_profile = video_info.get('profile', 'N/A')
-    video_bitrate = round(int(video_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in video_info else 0
-    video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps"
+    # Initialize tracks
+    video_track = None
+    audio_track = None
+    general_track = None
 
-    # Extract and format audio information
-    audio_codec = audio_info.get('codec_name', 'N/A').upper()
-    audio_channels = audio_info.get('channels', 'N/A')
-    audio_bitrate = round(int(audio_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in audio_info else 0
+    try:
+        for track in media_info.tracks:
+            ttype = getattr(track, "track_type", "").lower()
+            # logger.debug(f"Found track: id={getattr(track,'track_id',None)}, type={ttype}")
+            if ttype == "video" and video_track is None:
+                video_track = track
+            elif ttype == "audio" and audio_track is None:
+                # Ensure it has meaningful properties
+                if getattr(track, "format", None) or getattr(track, "channel_s", None):
+                    audio_track = track
+            elif ttype == "general" and general_track is None:
+                general_track = track
+    except Exception as e:
+        logger.error(f"Error iterating tracks for {file_path}: {e}")
+        return [], file_dir, None
 
-    if audio_codec == "AAC" and "LC" in audio_info.get('profile', '').upper():
-        audio_codec += " (LC)"
+    # Video properties
+    try:
+        video_codec = (video_track.format or "N/A").upper() if video_track else "N/A"
+        video_profile = getattr(video_track, "format_profile", "N/A") if video_track else "N/A"
+        video_bitrate = round(int(video_track.bit_rate or 0) / 1000) if video_track and video_track.bit_rate else 0
+        width = video_track.width if video_track and video_track.width else "N/A"
+        height = video_track.height if video_track and video_track.height else "N/A"
+        resolution = f"{width}x{height}"
 
-    audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
-    add_lines = 0
-    # Extract other metadata
-    title = format_info.get("tags", {}).get("title", "N/A")
-    if len(title) > char_break_line:
-        title = await break_string_at_char(title, " ", char_break_line)
-        add_lines += 1
-    if len(filename) > char_break_line:
-        filename = await break_string_at_char(filename, ".", char_break_line) or \
-                   await break_string_at_char(filename, " ", char_break_line) or \
-                   await break_string_at_char(filename, "-", char_break_line)
-        add_lines += 1
-    duration = await format_duration(format_info.get('duration', '0'))
-    size_bytes = int(format_info.get('size', '0'))
-    size_mb = size_bytes / (1024 * 1024)
-    size_gb = size_bytes / (1024 * 1024 * 1024)
-    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+        # FPS
+        try:
+            fps = round(float(video_track.frame_rate), 2) if video_track and video_track.frame_rate else "N/A"
+        except Exception as e:
+            logger.error(f"Error parsing FPS: {e}")
+            fps = "N/A"
 
-    # Extract resolution and FPS
-    width = video_info.get("width", "N/A")
-    height = video_info.get("height", "N/A")
-    resolution = f"{width}x{height}"
+        # CRF
+        crf_value = "N/A"
+        encoding_settings = getattr(video_track, "encoding_settings", "") if video_track else ""
+        if encoding_settings and "crf=" in encoding_settings:
+            try:
+                crf_raw = encoding_settings.split("crf=")[1].split(" ")[0].replace("/", "").strip()
+                crf_value = str(int(round(float(crf_raw))))
+            except Exception as e:
+                logger.error(f"Error parsing CRF: {e}")
 
-    # Calculate MD5 checksum
+        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}"
+    except Exception as e:
+        logger.error(f"Error extracting video properties: {e}")
+        video_details = "N/A"
+        resolution = "N/A"
+        fps = None
+
+    # Audio properties
+    try:
+        if audio_track:
+            # logger.debug(f"Audio track raw data: {audio_track}")
+
+            # Format / codec
+            audio_codec = getattr(audio_track, "format", None)
+            if audio_codec:
+                audio_codec = str(audio_codec).upper()
+            else:
+                audio_codec = "N/A"
+
+            # Channels
+            audio_channels = getattr(audio_track, "channel_s", None)
+            if audio_channels is None:
+                audio_channels = "N/A"
+            else:
+                audio_channels = str(audio_channels)
+
+            # Bitrate
+            bit_rate = getattr(audio_track, "bit_rate", None)
+            if bit_rate is None:
+                audio_bitrate = 0
+            else:
+                try:
+                    audio_bitrate = round(int(bit_rate) / 1000)
+                except Exception as e:
+                    logger.error(f"Error converting audio bit_rate '{bit_rate}' to int: {e}")
+                    audio_bitrate = 0
+
+            # Profile
+            profile = getattr(audio_track, "format_profile", None)
+            if profile:
+                profile = str(profile)
+                if audio_codec == "AAC" and "LC" in profile.upper():
+                    audio_codec += " (LC)"
+
+        else:
+            audio_codec = "N/A"
+            audio_channels = "N/A"
+            audio_bitrate = 0
+
+        audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
+
+    except Exception as e:
+        logger.error(f"Error extracting audio properties: {e}")
+        audio_details = "N/A"
+
+    # General metadata
+    try:
+        title = getattr(general_track, "title", "N/A") if general_track else "N/A"
+        if len(title) > char_break_line:
+            title = await break_string_at_char(title, " ", char_break_line)
+            add_lines += 1
+
+        if len(filename) > char_break_line:
+            filename = await break_string_at_char(filename, ".", char_break_line) or \
+                       await break_string_at_char(filename, " ", char_break_line) or \
+                       await break_string_at_char(filename, "-", char_break_line)
+            add_lines += 1
+
+        size_bytes = int(getattr(general_track, "file_size", 0)) if general_track else 0
+        size_mb = size_bytes / (1024 * 1024)
+        size_gb = size_bytes / (1024 * 1024 * 1024)
+        file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+    except Exception as e:
+        logger.error(f"Error extracting general metadata: {e}")
+        file_size = "N/A"
+
+    # Duration formatting
+    try:
+        hours, remainder = divmod(int(duration), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    except Exception as e:
+        logger.error(f"Error formatting duration: {e}")
+        timestamp_str = "N/A"
+
+    # MD5 checksum
     try:
         hash_md5 = hashlib.md5()
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_md5.update(chunk)
-        md5_hash = hash_md5.hexdigest().upper()
+        md5_hash = hash_md5.hexdigest()
     except Exception as e:
         logger.error(f"Error computing MD5 hash: {e}")
         md5_hash = "N/A"
 
-    info_table = [
-        ["File Name", filename],
-        ["Title", title],
-        ["File Size", file_size],
-        ["Duration", duration],
-        ["V/A", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
-        ["MD5", md5_hash.upper()]
-    ]
-    if add_lines != 0:
-        for i in range(add_lines):
-            info_table.append([" ", " "])  # Append an empty row with two empty strings to avoid overwriting last values in image
-    return info_table, base_filename, fps
+    # Build info table
+    try:
+        info_table = [
+            ["File Name", filename],
+            ["Title", title],
+            ["File Size", file_size],
+            ["Duration", timestamp_str],
+            ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+            ["MD5", md5_hash.upper()]
+        ]
+        if add_lines != 0:
+            for _ in range(add_lines):
+                info_table.append([" ", " "])
+    except Exception as e:
+        logger.error(f"Error building info table: {e}")
+        return [], fps
+
+    return info_table, fps
 
 
 async def break_string_at_char(s, break_char, char_break_line):
@@ -1157,6 +1380,7 @@ async def create_video_from_image(image_path, output_path, fps, duration=1):
         # Get the resolution of the image (width x height)
         command = [
             "ffmpeg",
+            "-hide_banner",
             "-i", image_path,
             "-vframes", "1",
             "-f", "image2pipe",
@@ -1173,6 +1397,7 @@ async def create_video_from_image(image_path, output_path, fps, duration=1):
         # Use FFmpeg to create the video from the image
         ffmpeg_command = [
             "ffmpeg",
+            "-hide_banner",
             "-loop", "1",  # Loop the image
             "-framerate", str(fps),  # Set the frame rate
             "-t", str(duration),  # Set the duration of the video
