@@ -7,7 +7,6 @@ import re
 import shutil
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
-from time import sleep
 from loguru import logger
 from Utilities import load_json_file, run_command
 from pymediainfo import MediaInfo
@@ -158,7 +157,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
         return (code == 0 and os.path.exists(output_file)), output_file if code == 0 else None
 
     # Mode: none → simple concat
-    if transition_mode == "none":
+    if transition_mode in ["none", "", None]:
         cmd = f'ffmpeg -hide_banner -f concat -safe 0 -i "{concat_list_file}" -c copy "{output_file}" -y'
         stdout, stderr, code = await run_command(cmd)
         if code != 0 or not os.path.exists(output_file):
@@ -294,7 +293,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         'webm_sheet': create_webm_preview_sheet
     }
 
-    sleep(0.5)
+    await asyncio.sleep(0.5)
 
     # Prompt for user input and update `should_create`
     for idx, (filepath, should_create) in enumerate(file_checks):
@@ -315,7 +314,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                     updated_create_flags['gif_sheet'] = False
                 elif filepath == preview_sheet_webm:
                     updated_create_flags['webm_sheet'] = False
-            sleep(0.5)
+            await asyncio.sleep(0.5)
 
     # After the loop, you can now use the updated flags in your processing logic
     create_webp_preview = updated_create_flags['webp']
@@ -536,7 +535,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             pass
 
         # logger.debug(f"Finished processing file: {video_path}")
-        sleep(0.5)
+        await asyncio.sleep(0.5)
         return True
     else:
         logger.info("Nothing to create in preview tool")
@@ -635,7 +634,7 @@ async def generate_cut_points(
                 time_in_seconds = pct * duration
                 formatted_time = await format_duration(time_in_seconds)
                 logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}")
-            sleep(0.5)
+            await asyncio.sleep(0.5)
             confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
             if confirmation != "yes":
                 logger.debug("Regenerating cut points...\n")

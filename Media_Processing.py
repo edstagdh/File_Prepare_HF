@@ -838,6 +838,10 @@ async def get_video_duration(filepath):
         return 0.0, 0.0
 
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        logger.error(f"Invalid FPS value for file: {filepath}")
+        return 0.0, 0.0
+
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     cap.release()
 
@@ -989,43 +993,31 @@ async def get_video_codec(file_path):
         return None
 
 
-
 async def update_metadata(input_file, title, description):
     """
-    Updates the metadata of an MP4 video file with the specified title, description.
-
-    Args:
-        input_file (str): Path to the video file.
-        title (str): Title to set for the video.
-        description (str): Description to set for the video.
-
-    Returns:
-        bool: True if the metadata update was successful, False otherwise.
-        :param description:
-        :param title:
-        :param input_file:
+    Updates the metadata of an MP4 video file with the specified title and description,
+    and removes unwanted fields completely.
     """
     try:
-        # Load the MP4 file
         video = MP4(input_file)
-        # logger.debug(video)
 
-        # Update metadata fields
-        video["\xa9nam"] = title  # Title
-        video["\xa9cmt"] = description  # Comment/Description
-        video["\xa9cpy"] = [""]  # Copyright
-        video["cprt"] = [""]
-        video["\xa9ART"] = [""]  # Author/Performer/Artist
+        # --- Keep ---
+        video["\xa9nam"] = [title]          # Title
+        video["\xa9cmt"] = [description]    # Comment/Description
 
+        # --- Remove unwanted ---
+        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+            if key in video:
+                del video[key]
+
+        # Clear encoder info (if not set by your tool)
         if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-            # logger.debug(video.get("\xa9too"))  # logs the list or an empty list
-            video["\xa9too"] = [""]  # clear the encoder field
+            if "\xa9too" in video:
+                del video["\xa9too"]
 
-        # Save changes
         video.save()
-
-        # logger.info(f"Metadata updated successfully for: {input_file}")
         return True
+
     except Exception as e:
         logger.error(f"Failed to update metadata for {input_file}: {e}")
         return False
