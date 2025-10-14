@@ -692,16 +692,26 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
     temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters)
 
+    # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
-        # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
-        return True
+        # logger.debug(f"The file is already encoded with HEVC/AV1: {file_path}")
+        if contains_unwanted_metadata:
+            # logger.debug(f"The file requires metadata stripping due to unwanted metadata: {file_path}")
+            remove_metadata_result = await reset_all_metadata(file_path)
+            if remove_metadata_result:
+                return True
+            else:
+                return False
+        else:
+            return True
 
+    # Return False if the re encoding failed
     if temp_output is False:
         logger.error(f"processing failed for {file_path}")
         return False

@@ -445,18 +445,18 @@ async def process_files():
                 continue  # Skip to the next file
 
         try:
+            contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
             if not re_encode_hevc:
                 # Check existing metadata
                 existing_title = await get_existing_title(new_file_full_path)
                 existing_description = await get_existing_description(new_file_full_path)
-                check_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
                 description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
-                if existing_title == new_title and existing_description == description and not check_unwanted_metadata:
+                if existing_title == new_title and existing_description == description and not contains_unwanted_metadata:
                     # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
                     pass
                 else:
                     # logger.debug(f"File: {file.name} - Title and Description already exist and are identical")
-                    if check_unwanted_metadata:
+                    if contains_unwanted_metadata:
                         remove_metadata_result = await reset_all_metadata(new_file_full_path)
                         if not remove_metadata_result:
                             logger.error(f"Failed to modify file: {new_full_filename}")
@@ -515,7 +515,8 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters]),
+                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters,
+                                                   contains_unwanted_metadata]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
                 (re_encode_hevc, update_metadata, [new_file_full_path, new_title, f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"]),
@@ -528,7 +529,8 @@ async def process_files():
                 (hamster_upload_cover, hamster_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
 
                 # Create Thumbnails Image
-                (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical, create_sub_folder]),
+                (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical, create_sub_folder,
+                                                         contains_unwanted_metadata]),
 
                 (imgbox_upload_thumbnails, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
                 (imgbb_upload_thumbnails, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),

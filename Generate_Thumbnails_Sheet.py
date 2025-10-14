@@ -630,10 +630,16 @@ async def output_file_exists(input_video_file_name,
     # MODE: FORCE REGENERATE
     # ==============================================================
     if regeneration_mode.lower() == "force regenerate":
+        seen = set()
         for existing_file in filter(None, [existing_input, existing_original]):
+            if existing_file in seen:
+                continue  # avoid duplicate deletions
+            seen.add(existing_file)
             try:
                 os.remove(existing_file)
                 logger.info(f"[Force Regenerate] mode, Removed existing file: {existing_file}")
+            except FileNotFoundError:
+                logger.warning(f"[Force Regenerate] mode, File already removed or missing: {existing_file}")
             except Exception as e:
                 logger.error(f"Failed to remove {existing_file}: {e}")
         return False  # Always regenerate
@@ -727,7 +733,8 @@ async def process_thumbnails(input_video_file_name,
                              output_path,
                              image_output_format,
                              is_vertical,
-                             use_sub_folder):
+                             use_sub_folder,
+                             contains_unwanted_metadata):
     """
     Main function to process the video, generate thumbnails, and create a Thumbnails Sheet.
     """
@@ -748,7 +755,7 @@ async def process_thumbnails(input_video_file_name,
         add_file_info = config["add_file_info"]
         font_full_name = config["font_full_name"]
         fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
-        regeneration_mode = config["regeneration_mode"]
+        regeneration_mode = config["regeneration_mode"] if not contains_unwanted_metadata else "force regenerate"
         alternate_layout = config["alternate_layout"]
 
         # Check if output file already exists
