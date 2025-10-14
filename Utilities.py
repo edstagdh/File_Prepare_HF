@@ -609,7 +609,9 @@ async def generate_template_video(
         name_blocks = formatted_names.replace(", ", "\n").splitlines()
 
         processed_blocks = []
-        mapped_names = []
+        mapped_names_list = []
+
+        all_in_images = all(block.strip() in performers_images for block in name_blocks)
 
         for block in name_blocks:
             full_name = block.strip()
@@ -622,17 +624,35 @@ async def generate_template_video(
             else:
                 processed_blocks.append(full_name)
 
-            # Step 2b: Map full name to image URL or fallback to name
-            if full_name in performers_images:
-                mapped_names.append(f"[img]{performers_images[full_name]}[/img]")
+            # Step 2b: Only add [img] if *all* performers are in performers_images
+            if all_in_images:
+                mapped_names_list.append(f"[img]{performers_images[full_name]}[/img]")
             else:
-                mapped_names.append(f"[img]{full_name}[/img]")
+                mapped_names_list.append(full_name)
     else:
-        processed_blocks = ""
-        mapped_names = []
+        processed_blocks = []
+        mapped_names_list = []
 
+    # Join the processed names (always space-separated)
     processed_string = " ".join(processed_blocks)
-    mapped_names = " ".join(mapped_names)
+
+    # Join mapped names:
+    # - if using [img], separate by a single space
+    # - if not using [img], separate by ", "
+    if formatted_names:
+        if all_in_images:
+            # ✅ 3 per row: insert a newline after every 3 images
+            mapped_names = ""
+            for i, img_tag in enumerate(mapped_names_list, start=1):
+                mapped_names += img_tag + " "
+                if i % 3 == 0 and i != len(mapped_names_list):
+                    mapped_names += "\n"  # new line after every 3
+            mapped_names = mapped_names.strip()
+        else:
+            # Normal comma-separated text for names
+            mapped_names = ", ".join(mapped_names_list)
+    else:
+        mapped_names = ""
 
     for tag in studio_tags:
         cleaned_tag = tag.replace("'", "")
@@ -655,6 +675,9 @@ async def generate_template_video(
         processed_string += f" {codec} h265"
     else:
         processed_string += f" {codec}"
+    # remove consecutive dots
+    while ".." in processed_string:
+        processed_string = processed_string.replace("..", ".")
     processed_string += f" {extension.replace('.', '')}"
     if suffix != "":
         processed_string += f" {suffix}"
@@ -745,6 +768,8 @@ async def load_credentials(mode):
                 return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
             elif mode == 5:
                 return secrets["hamster_album_id"], secrets["hamster_api_key"], None
+            elif mode == 6:
+                return secrets["tracker_u"], secrets["tracker_p"], secrets["tracker_ann_url"]
             else:
                 return None, None, None
 

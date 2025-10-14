@@ -75,12 +75,16 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             site = site.replace("FansDB: ", "")
             site = site.replace(" (manyvids)", "")
             site = "ManyVids-" + site
+
         site_parent = selected_entry.get("site", {}).get("parent")
+
         if site_parent:
             site_parent_uuid = site_parent.get("uuid")
             site_owner = await fetch_api_site_data(api_sites_url, api_auth, site_parent_uuid, max_retries, delay)
         else:
             site_owner = site
+        if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
+            site_owner = None
         if not manual_mode:
             female_performers = await extract_female_performers(selected_entry)
         else:
@@ -438,19 +442,18 @@ async def extract_performer_posters(performer_data: dict, posters_limit: int) ->
 
 async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
     try:
-        scene_tags = []
         if not scene_data:
             return None
 
+        scene_tags = []
         scene_data_tags = scene_data.get("tags", [])
         for tag in scene_data_tags:
             name = tag.get("name", "")
 
             # Remove anything inside brackets and the brackets themselves
             name = re.sub(r"\(.*?\)", "", name)
-            # Remove trailing space
-            if name.endswith(" "):
-                name = name[:-1]
+            # Remove leading/trailing spaces
+            name = name.strip()
             # Replace remaining spaces with dots
             name = name.replace(" ", ".")
             # Remove all special characters except dots
@@ -458,9 +461,13 @@ async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
             # Convert to lowercase
             name = name.lower()
 
+            # remove consecutive dots
+            while ".." in name:
+                name = name.replace("..", ".")
+
             scene_tags.append(name)
 
-        return scene_tags
+        return scene_tags or None
 
     except Exception:
         logger.exception("Error extracting scene tags")

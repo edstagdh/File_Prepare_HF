@@ -27,6 +27,18 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [x] Add an option to upload to hamster(webp)
 - [ ] Add an option to change output file naming format(select from list)
 - [x] Switch re-encoding progress bar from logger lines to tqdm.
+- [x] support for cover image and thumbnails content regeneration flag:
+<br>
+See `Config.json` for `cover_regeneration_mode` and `Config_Thumbnails.json` for `regeneration_mode`
+<br>
+Available modes are [`user input`, `force regenerate`, `force keep`]
+- [x] support for tracker semi-automatic uploading using selenium for python package, see `Config_Tracker.json`.
+<br>
+requires `create_template_file` to be set as True and currently only supported using hamster img host.
+- [x] support for automatic torrent creation using torf package.
+- [x] support for transitions for previews, see `Config_Video_Preview.json`
+
+
 
 
 ## Installation

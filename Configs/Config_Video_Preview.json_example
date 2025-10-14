@@ -12,7 +12,7 @@
   "TIMESTAMPS_MODE": 2,
   "GRID_WIDTH": 4,
   "NUM_OF_SEGMENTS": 16,
-  "SEGMENT_DURATION": 1.5,
+  "SEGMENT_DURATION": 1.1,
   "OVERWRITE_EXISTING": false,
   "PRINT_CUT_POINTS": false,
   "BLACKLISTED_CUT_POINTS": [],
@@ -20,7 +20,7 @@
   "CUSTOM_OUTPUT_PATH": "",
   "CONFIRM_CUT_POINTS_REQUIRED": false,
   "LAST_CUT_POINT": 0,
-  "add_file_info": true,
+  "add_file_info": false,
   "FONT_NAME_FULL": "Gotham_Medium.otf",
   "available_transitions": [
     "fade",
@@ -33,5 +33,5 @@
     "pixelize"
   ],
   "transition_mode": "fade",
-  "transition_duration": 0.3
+  "transition_duration": 0.25
 }

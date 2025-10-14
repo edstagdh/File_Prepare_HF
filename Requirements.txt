@@ -12,3 +12,4 @@ beautifulsoup4
 pymediainfo~=7.0.1
 selenium~=4.31.0
 tqdm~=4.67.1
+torf~=4.3.0

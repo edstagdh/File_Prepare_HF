@@ -11,8 +11,8 @@ from loguru import logger
 from Utilities import load_json_file, run_command
 from pymediainfo import MediaInfo
 from Media_Processing import get_video_duration
-from Uploaders.Upload_IMGBB import imgbb_upload_single_image
-from Uploaders.Upload_Hamster import hamster_upload_single_image
+from Image_Uploaders.Upload_IMGBB import imgbb_upload_single_image
+from Image_Uploaders.Upload_Hamster import hamster_upload_single_image
 
 
 async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode, hamster_upload_previews):
