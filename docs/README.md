@@ -88,6 +88,7 @@ requires `create_template_file` to be set as True and currently only supported u
 
    - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
    - Rename `Config_Thumbnails.json_example` to `Config_Thumbnails.json` and adjust the settings as needed.
+   - Rename `Config_Tracker.json_example` to `Config_Tracker.json` and adjust the settings as needed.
    - Rename `Config_Video_Preview.json_example` to `Config_Video_Preview.json` and adjust the settings as needed.
    - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials and other credentials if needed.
 
@@ -102,7 +103,8 @@ requires `create_template_file` to be set as True and currently only supported u
 ## Configuration
 
 - **`Config.json`**: Contains settings for media processing, such as input/output directories, preview options, and other parameters.
-- **`Config_Thumbnails.json`**: Contains settings thumbnails processing
+- **`Config_Thumbnails.json`**: Contains settings for thumbnails processing
+- **`Config_Ttracker.json`**: Contains settings for tracker upload integration
 - **`Config_Video_Preview.json`**: Contains settings preview processing
 - **`creds.secret`**: Stores sensitive information like TPDB API keys. Ensure this file is kept secure and is not shared publicly.
 
@@ -114,10 +116,15 @@ File_Prepare_HF/
 └── Configs/                                    # Config files
    ├── Config.json_example                      # Example configuration file
    ├── Config_Thumbnails.json_example           # Example Thumbnails configuration file
+   ├── Config_Tracker.json_example              # Example Tracker configuration file
    ├── Config_Video_Preview.json_example        # Example Preview configuration file
 └── docs/                                       # Documentation files
    ├── exit_codes.json                          # Common exit codes for the application
    ├── README.md                                # README file
+└── Image Uploaders/                            # Image Uploaders Integration
+   ├── Upload_IMGBOX.py                         # IMGBOX code integration
+   ├── Upload_IMGBB.py                          # IMGBB code integration
+   ├── Upload_Hamster.py                        # Hamster code integration
 └── Logs/                                       # Log files
 └── Resources/                                  # Resource files used in code
    ├── BBCode_Images.json                       # Icons mapping for images URLs
@@ -125,18 +132,16 @@ File_Prepare_HF/
    ├── HF_Template.txt                          # Example template file with placeholders for HF uploading
    ├── Performers_Images.json_Example           # Contains mapped performer face images to auto insert in template
    ├── Sort_Performers_Images.py                # Helper script to sort the performer images json.
-└── Uploaders/                                  # Uploaders Integration
-   ├── Upload_IMGBOX.py                         # IMGBOX code integration
-   ├── Upload_IMGBB.py                          # IMGBB code integration
-   ├── Upload_Hamster.py                        # Hamster code integration
 ├── creds.secret_example                        # Example credentials file
-├── Generate_Thumbnails.py.py                   # Thumbnails generation code
+├── Generate_Thumbnails_Sheet.py                   # Thumbnails generation code
+├── Generate_Torrent_File.py                    # Torrent generation code
 ├── Generate_Video_Preview.py                   # Preview generation code
 ├── LICENSE                                     # License file
 ├── main.py                                     # Main Application code for processing files
 ├── Media_Processing.py                         # Handles media file processing
 ├── Requirements.txt                            # Python dependencies requirements file
 ├── TPDB_API_Processing.py                      # TPDB API code
+├── Tracker_Uploader.py                         # Tracker Selenium Upload code integration
 ├── Utilities.py                                # Utility functions for processing
 
 ```
