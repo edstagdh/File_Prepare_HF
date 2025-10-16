@@ -663,7 +663,7 @@ async def output_file_exists(input_video_file_name,
                 safe_move(final_path, sub_folder_path)
             return True  # Keep and skip regeneration
         else:
-            logger.info("[Force Keep] mode, No existing file found — proceeding to regenerate.")
+            logger.info("[Force Keep] mode, No existing file found — Generating")
             return False  # Nothing to keep → regenerate
 
     # ==============================================================

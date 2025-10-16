@@ -137,7 +137,8 @@ async def init_browser(config):
         raise
 
 
-async def process_upload_to_tracker(new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files, re_encode_hevc, resolution):
+async def process_upload_to_tracker(new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files, re_encode_hevc,
+                                    resolution, codec):
     driver = None
     try:
         # Load Config_Tracker.json
@@ -234,7 +235,7 @@ async def process_upload_to_tracker(new_filename_base_name, output_dir, template
         form_url = config["tracker_upload_url"]
         driver.get(form_url)
         logger.info(f"Navigated to form page: {form_url}")
-        updated_title = f"{new_title} - HEVC - {resolution}" if re_encode_hevc else f"{new_title} - {resolution}"
+        updated_title = f"{new_title} - {codec.upper()} - {resolution}" if re_encode_hevc else f"{new_title} - {resolution}"
 
         # --- Fill form fields ---
         for field in config.get("form_fields", []):

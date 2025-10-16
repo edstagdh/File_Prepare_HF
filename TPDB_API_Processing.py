@@ -74,7 +74,11 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if "manyvids" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (manyvids)", "")
-            site = "ManyVids-" + site
+            site = "Manyvids-" + site
+        if "fansly" in site.lower() and "fansdb" in site.lower():
+            site = site.replace("FansDB: ", "")
+            site = site.replace(" (fansly)", "")
+            site = "Fansly-" + site
 
         site_parent = selected_entry.get("site", {}).get("parent")
 

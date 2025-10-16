@@ -66,6 +66,7 @@ async def process_files():
         free_string_parse = config["free_string_parse"]
         create_sub_folder = config["create_sub_folder"]
         cover_regeneration_mode = config["cover_regeneration_mode"]
+        force_regen_thumbs = False
 
         # Tracker Upload Configuration
         upload_mode = config["upload_mode"]
@@ -446,29 +447,46 @@ async def process_files():
 
         try:
             contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
+            description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
+
+            # Always check metadata — but only *apply* it now if not re-encoding
+            existing_title = await get_existing_title(new_file_full_path)
+            existing_description = await get_existing_description(new_file_full_path)
+
+            metadata_mismatch = (
+                    existing_title != new_title or
+                    existing_description != description or
+                    contains_unwanted_metadata
+            )
+
             if not re_encode_hevc:
-                # Check existing metadata
-                existing_title = await get_existing_title(new_file_full_path)
-                existing_description = await get_existing_description(new_file_full_path)
-                description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
-                if existing_title == new_title and existing_description == description and not contains_unwanted_metadata:
-                    # logger.debug(f"File: {file.name} - Title and Description already exist and are identical, no need to rename")
+                if not metadata_mismatch:
+                    # logger.debug(f"File: {file.name} - Metadata is up to date.")
                     pass
                 else:
-                    # logger.debug(f"File: {file.name} - Title and Description already exist and are identical")
+                    # logger.debug(f"File: {file.name} - Metadata differs or unwanted metadata detected.")
                     if contains_unwanted_metadata:
                         remove_metadata_result = await reset_all_metadata(new_file_full_path)
                         if not remove_metadata_result:
-                            logger.error(f"Failed to modify file: {new_full_filename}")
-                            logger.warning(f"End file: {file_full_name}")
+                            logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
                             failed_files.append(new_file_full_path)
-                            continue  # Skip to the next file
+                            continue
                     results_metadata = await update_metadata(new_file_full_path, new_title, description)
                     if not results_metadata:
-                        logger.error(f"Failed to modify file: {new_full_filename}")
-                        logger.warning(f"End file: {file_full_name}")
+                        logger.error(f"Failed to update metadata for: {new_full_filename}")
                         failed_files.append(new_file_full_path)
-                        continue  # Skip to the next file
+                        continue
+                    force_regen_thumbs = True
+            else:
+                # If we will re-encode, just log if metadata mismatch exists (for debugging)
+                if metadata_mismatch:
+                    # logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description)
+                    if not results_metadata:
+                        logger.error(f"Failed to update metadata for: {new_full_filename}")
+                        failed_files.append(new_file_full_path)
+                        continue
+                    force_regen_thumbs = True
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
             fps = await get_video_fps(new_file_full_path)
@@ -519,7 +537,7 @@ async def process_files():
                                                    contains_unwanted_metadata]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"]),
+                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,
@@ -530,7 +548,7 @@ async def process_files():
 
                 # Create Thumbnails Image
                 (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical, create_sub_folder,
-                                                         contains_unwanted_metadata]),
+                                                         force_regen_thumbs]),
 
                 (imgbox_upload_thumbnails, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
                 (imgbb_upload_thumbnails, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
@@ -593,7 +611,7 @@ async def process_files():
             if upload_to_tracker:
                 try:
                     tracker_result = await process_upload_to_tracker(new_filename_base_name, output_directory, template_file_full_path, new_title, hamster_file_path, directory,
-                                                                     remove_e_files, re_encode_hevc, resolution)
+                                                                     remove_e_files, re_encode_hevc, resolution, codec)
                     if not tracker_result:
                         raise
                 except Exception as e:

@@ -145,7 +145,7 @@ async def cover_image_output_file_exists(input_video_file_name,
                 if use_sub_folder and sub_folder_path:
                     safe_move(final_path, sub_folder_path)
                 return True
-        logger.info("[Force Keep] mode, No existing file found — proceeding to regenerate.")
+        logger.info("[Force Keep] mode, No existing file found — Generating")
         return False
 
     # --- USER INPUT MODE (default behavior) ---
@@ -274,7 +274,7 @@ async def cover_image_download_and_conversion(image_url: str,
 
         final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
         shutil.move(temp_image_path, final_image_path)
-        logger.info(f"Image saved to {final_image_path}")
+        logger.success(f"Image saved to {final_image_path}")
 
         if use_sub_folder and sub_folder_path:
             os.makedirs(sub_folder_path, exist_ok=True)
@@ -1160,7 +1160,7 @@ async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> 
 
         # Overwrite original file
         shutil.move(tmp_file, file_path)
-        logger.info(f"File recreated without metadata: {file_path}")
+        logger.info(f"File recreated without unwanted metadata: {file_path}")
         return True
 
     except Exception as e:
