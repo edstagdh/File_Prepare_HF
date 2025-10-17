@@ -70,6 +70,7 @@ async def process_files():
 
         # Tracker Upload Configuration
         upload_mode = config["upload_mode"]
+        tracker_mode = config["tracker_mode"]
         upload_to_tracker = config["upload_to_tracker"]
         remove_e_files = config["remove_extra_files_after_tracker_upload"]
 
@@ -603,22 +604,22 @@ async def process_files():
                     continue  # Skip to the next file
 
             if scene_description == "Scene description not found" and create_template_file:
-                partial_files.append(file_full_name)
                 logger.warning("Scene description not found, please update manually in template")
-                logger.info(f"End file: {new_file_full_path}")
-                processed_files += 1
-                continue
             if upload_to_tracker:
-                try:
-                    tracker_result = await process_upload_to_tracker(new_filename_base_name, output_directory, template_file_full_path, new_title, hamster_file_path, directory,
-                                                                     remove_e_files, re_encode_hevc, resolution, codec)
-                    if not tracker_result:
-                        raise
-                except Exception as e:
-                    logger.error(f"Error uploading to tracker {e}")
-                    logger.warning(f"End file: {new_file_full_path}")
-                    failed_files.append(file_full_name)
-                    continue  # Skip to the next file
+                for tracker_name in tracker_mode:
+                    try:
+                        if not (isinstance(tracker_name, str) and tracker_name.strip()):
+                            logger.error(f"Invalid tracker name: {tracker_name}")
+                            raise
+                        tracker_result = await process_upload_to_tracker(tracker_name, new_filename_base_name, output_directory, template_file_full_path, new_title,
+                                                                         hamster_file_path, directory, remove_e_files, resolution, codec)
+                        if not tracker_result:
+                            raise
+                    except Exception as e:
+                        logger.error(f"Error uploading to tracker {e}")
+                        logger.warning(f"End file: {new_file_full_path}")
+                        failed_files.append(file_full_name)
+                        continue  # Skip to the next file
             processed_files += 1
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)

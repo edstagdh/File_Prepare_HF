@@ -769,7 +769,7 @@ async def load_credentials(mode):
             elif mode == 5:
                 return secrets["hamster_album_id"], secrets["hamster_api_key"], None
             elif mode == 6:
-                return secrets["tracker_u"], secrets["tracker_p"], secrets["tracker_ann_url"]
+                return secrets["trackers"], None, None
             else:
                 return None, None, None
 

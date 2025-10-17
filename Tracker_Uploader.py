@@ -137,7 +137,7 @@ async def init_browser(config):
         raise
 
 
-async def process_upload_to_tracker(new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files, re_encode_hevc,
+async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files,
                                     resolution, codec):
     driver = None
     try:
@@ -148,7 +148,10 @@ async def process_upload_to_tracker(new_filename_base_name, output_dir, template
             return False
 
         # Load credentials
-        username, password, p_ann_url = await load_credentials(6)
+        trackers, _, _ = await load_credentials(6)
+        username = trackers[f"{tracker_mode}_tracker_u"]
+        password = trackers[f"{tracker_mode}_tracker_p"]
+        p_ann_url = trackers[f"{tracker_mode}_tracker_ann_url"]
         if not username or not password or not p_ann_url:
             logger.error("Credentials missing or invalid.")
             return False
@@ -189,7 +192,7 @@ async def process_upload_to_tracker(new_filename_base_name, output_dir, template
         driver, wait = await init_browser(config)
 
         # --- Login ---
-        login_url = config["tracker_login_url"]
+        login_url = config["trackers_urls"][f"{tracker_mode}_tracker_upload_url"]
         driver.get(login_url)
         logger.info(f"Opened login page: {login_url}")
 
@@ -232,10 +235,11 @@ async def process_upload_to_tracker(new_filename_base_name, output_dir, template
             return False
 
         # --- Navigate to form page ---
-        form_url = config["tracker_upload_url"]
+        form_url = config["trackers_urls"][f"{tracker_mode}_tracker_upload_url"]
         driver.get(form_url)
         logger.info(f"Navigated to form page: {form_url}")
-        updated_title = f"{new_title} - {codec.upper()} - {resolution}" if re_encode_hevc else f"{new_title} - {resolution}"
+        custom_codecs = ["av1", "hevc"]
+        updated_title = f"{new_title} - {codec.upper()} - {resolution}" if codec in custom_codecs else f"{new_title} - {resolution}"
 
         # --- Fill form fields ---
         for field in config.get("form_fields", []):

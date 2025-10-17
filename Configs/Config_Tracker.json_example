@@ -3,8 +3,12 @@
     "single": "This must be used with create_sub_folder=True, otherwise the process will be disabled, treats the created folder as the files required for the single release torrent creation."
   },
   "create_torrent_file": true,
-  "tracker_login_url": "https://www.SITE.com/login",
-  "tracker_upload_url": "https://www.SITE.com/upload.php",
+  "trackers_urls": {
+    "hf_tracker_login_url": "https://www.SITE.org/login",
+    "hf_tracker_upload_url": "https://www.SITE.org/upload.php",
+    "emp_tracker_login_url": "https://www.SITE.is/login",
+    "emp_tracker_upload_url": "https://www.SITE.is/upload.php"
+  },
   "browser": "firefox",
   "firefox_profile_path": "C:\\Users\\USER\\AppData\\Local\\Mozilla\\Firefox\\Profiles\\PROFILE1",
   "firefox_driver_path": "C:\\temp\\geckodriver.exe",
