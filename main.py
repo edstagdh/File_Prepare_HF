@@ -66,7 +66,6 @@ async def process_files():
         free_string_parse = config["free_string_parse"]
         create_sub_folder = config["create_sub_folder"]
         cover_regeneration_mode = config["cover_regeneration_mode"]
-        force_regen_thumbs = False
 
         # Tracker Upload Configuration
         upload_mode = config["upload_mode"]
@@ -167,6 +166,7 @@ async def process_files():
     ]
     mp4_files = sorted(mp4_files, key=lambda f: f.name.lower())
     for file in mp4_files:
+        force_regen_thumbs = False
         await asyncio.sleep(0.1)
         file_full_name = str(file.name)  # Get the full file_full_name (with extension)
         file_base_name = str(file.stem)  # Get the file_full_name without extension
