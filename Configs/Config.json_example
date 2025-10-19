@@ -34,7 +34,7 @@
   "imgbb_upload_previews": false,
   "hamster_upload_cover": false,
   "hamster_upload_thumbnails": false,
-  "hamster_upload_previews": false
+  "hamster_upload_previews": false,
   "image_output_format": "webp",
   "performer_image_output_format": "webp",
   "font_full_name": "Gotham_Medium.otf",
