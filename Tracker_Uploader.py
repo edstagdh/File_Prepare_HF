@@ -311,7 +311,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
 
                 return False
 
-            message_text = WebDriverWait(driver, 10, poll_frequency=0.5).until(get_dupe_message)
+            message_text = WebDriverWait(driver, 60, poll_frequency=0.5).until(get_dupe_message)
 
             # Analyze message
             msg_lower = message_text.lower()
