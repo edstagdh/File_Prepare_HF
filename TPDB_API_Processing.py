@@ -5,17 +5,17 @@ import requests
 from num2words import num2words
 import time
 from loguru import logger
-from time import sleep
 from datetime import datetime
 from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, mode):
     max_retries = 3
     delay = 5
     try:
-        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=1)
+        work_mode = 4 if jav_api_mode else 1
+        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=work_mode)
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None
@@ -74,17 +74,25 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if "manyvids" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (manyvids)", "")
-            site = "ManyVids-" + site
+            site = "Manyvids-" + site
+        if "fansly" in site.lower() and "fansdb" in site.lower():
+            site = site.replace("FansDB: ", "")
+            site = site.replace(" (fansly)", "")
+            site = "Fansly-" + site
+
         site_parent = selected_entry.get("site", {}).get("parent")
+
         if site_parent:
             site_parent_uuid = site_parent.get("uuid")
             site_owner = await fetch_api_site_data(api_sites_url, api_auth, site_parent_uuid, max_retries, delay)
         else:
             site_owner = site
+        if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
+            site_owner = None
         if not manual_mode:
             female_performers = await extract_female_performers(selected_entry)
         else:
-            sleep(0.5)
+            await asyncio.sleep(0.5)
             female_performers = []
             while True:
                 logger.info("Enter Performers Manually")
@@ -129,7 +137,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
             logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
@@ -140,17 +148,22 @@ async def filter_entries_by_user_choice(valid_entries):
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
         for index, item in enumerate(valid_entries, start=1):
-
+            duration = item['duration']
+            formatted_duration = (
+                time.strftime('%H:%M:%S', time.gmtime(duration))
+                if duration is not None else None
+            )
             try:
-                logger.info(f"{index}. {item['title']} | {item['site']['name']} | {item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | Duration: {formatted_duration}\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
         logger.info("0. None of the results are good")
+        await asyncio.sleep(0.5)
 
         while True:
             try:
-                choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): "))
+                choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): \n"))
                 if 0 <= choice <= len(valid_entries):
                     break
                 else:
@@ -232,7 +245,7 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
             logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
@@ -403,7 +416,7 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
 
             except Exception:
                 logger.exception(f"Error occurred while requesting data for performer: {performer_name}")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
 
         logger.error(f"Failed to retrieve profile picture data after {max_retries} attempts for: {performer_name}")
         return None, None
@@ -433,19 +446,18 @@ async def extract_performer_posters(performer_data: dict, posters_limit: int) ->
 
 async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
     try:
-        scene_tags = []
         if not scene_data:
             return None
 
+        scene_tags = []
         scene_data_tags = scene_data.get("tags", [])
         for tag in scene_data_tags:
             name = tag.get("name", "")
 
             # Remove anything inside brackets and the brackets themselves
             name = re.sub(r"\(.*?\)", "", name)
-            # Remove trailing space
-            if name.endswith(" "):
-                name = name[:-1]
+            # Remove leading/trailing spaces
+            name = name.strip()
             # Replace remaining spaces with dots
             name = name.replace(" ", ".")
             # Remove all special characters except dots
@@ -453,9 +465,13 @@ async def extract_scene_tags(scene_data: dict) -> Optional[list[str]]:
             # Convert to lowercase
             name = name.lower()
 
+            # remove consecutive dots
+            while ".." in name:
+                name = name.replace("..", ".")
+
             scene_tags.append(name)
 
-        return scene_tags
+        return scene_tags or None
 
     except Exception:
         logger.exception("Error extracting scene tags")

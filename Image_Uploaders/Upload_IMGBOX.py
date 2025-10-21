@@ -2,7 +2,6 @@ from loguru import logger
 import pyimgbox
 import os
 import json
-import asyncio
 
 
 async def imgbox_upload_single_image(filepath, new_filename_base_name, mode):
@@ -66,8 +65,3 @@ async def imgbox_upload_single_image(filepath, new_filename_base_name, mode):
     except Exception as e:
         logger.error(f"Exception during upload: {e}")
         return False
-
-
-# Example usage
-# if __name__ == "__main__":
-#     asyncio.run(upload_single_image(r"path\file_name.extension", "file_base_name"))

@@ -1,14 +1,13 @@
 import hashlib
-import json
 import os
-import tempfile
+import shutil
+import asyncio
+import random
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 from Utilities import run_command, load_json_file
 from Media_Processing import get_video_duration
-import asyncio
-import random
-import time
+from pymediainfo import MediaInfo
 
 
 async def generate_random_timestamps(duration, count, preferred_min_gap=60, absolute_min_gap=5):
@@ -154,18 +153,18 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
         raise
 
 
-async def generate_contact_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps,
+async def generate_thumbnails_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps,
                                  info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows,
                                  alternate_layout=False):
     """
-    Generates a contact sheet from the extracted frames and saves it as an image.
+    Generates a Thumbnails Sheet from the extracted frames and saves it as an image.
 
     Args:
         image_dir (str): Directory containing the extracted frames.
         thumb_width (int): Width of each thumbnail.
-        columns (int): Number of columns in the contact sheet.
+        columns (int): Number of columns in the Thumbnails Sheet.
         padding (int): Padding between the thumbnails.
-        output_path (str): Path to save the generated contact sheet.
+        output_path (str): Path to save the generated Thumbnails Sheet.
         timestamps (list): List of timestamps to add to the frames.
         info_image_path (str): Path of image with information.
         font_full_name: name of font to use
@@ -235,8 +234,8 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
         sheet_width = columns * thumb_width + (columns + 1) * padding
         sheet_height = info_image.height + padding + rows * (thumb_height + padding)
 
-        contact_sheet = Image.new('RGB', (sheet_width, sheet_height), color=(0, 0, 0))
-        contact_sheet.paste(info_image, (padding, padding))
+        thumbnails_sheet = Image.new('RGB', (sheet_width, sheet_height), color=(0, 0, 0))
+        thumbnails_sheet.paste(info_image, (padding, padding))
 
         y_offset = info_image.height + 2 * padding
 
@@ -249,7 +248,7 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
                     large_width = 2 * thumb_width + padding
                     large_height = 2 * thumb_height + padding
                     large_img_resized = large_img.resize((large_width, large_height))
-                    contact_sheet.paste(large_img_resized, (padding, y_offset))
+                    thumbnails_sheet.paste(large_img_resized, (padding, y_offset))
                     index += 1
                     continue
 
@@ -261,14 +260,14 @@ async def generate_contact_sheet(image_dir, thumb_width, columns, padding, outpu
 
                 x = col * (thumb_width + padding) + padding
                 y = y_offset + row * (thumb_height + padding)
-                contact_sheet.paste(thumbs[index], (x, y))
+                thumbnails_sheet.paste(thumbs[index], (x, y))
                 index += 1
 
-        contact_sheet.save(output_path)
-        logger.success(f"Contact sheet saved to: {output_path}")
+        thumbnails_sheet.save(output_path)
+        logger.success(f"Thumbnails Sheet saved to: {output_path}")
 
     except Exception as e:
-        logger.error(f"Error generating contact sheet: {e}")
+        logger.error(f"Error generating Thumbnails Sheet: {e}")
 
 
 async def convert_image_format(input_file_path: str, output_file_path: str, output_format: str):
@@ -406,80 +405,150 @@ async def break_string_at_char(s, break_char, char_break_line):
 
 
 async def get_video_metadata(file_path, char_break_line, duration):
-    """Extract video metadata using ffprobe."""
+    """Extract video metadata using pymediainfo."""
     filename = os.path.basename(file_path)
     file_dir = os.path.dirname(file_path)
+    add_lines = 0
 
     try:
-
-        # Get video metadata
-        cmd = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,profile,width,height,r_frame_rate,bit_rate -of json \"{file_path}\"'
-        video_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,channels,bit_rate,profile -of json \"{file_path}\"'
-        audio_info_json, stderr, exit_code = await run_command(cmd)
-
-        cmd = f'ffprobe -v error -show_entries format=duration,size:format_tags=title -of json \"{file_path}\"'
-        format_info_json, stderr, exit_code = await run_command(cmd)
-
-        # Parse JSON outputs
-        video_info = json.loads(video_info_json).get("streams", [{}])[0]
-        audio_info = json.loads(audio_info_json).get("streams", [{}])[0]
-        format_info = json.loads(format_info_json).get("format", {})
-        fps = video_info.get("r_frame_rate", "N/A")
-        try:
-            num, denom = map(int, fps.split("/"))
-            fps = round(num / denom, 2)
-        except Exception as e:
-            fps = "N/A"
-
+        media_info = MediaInfo.parse(file_path)
     except Exception as e:
-        logger.error(f"Error extracting metadata: {e}")
+        logger.error(f"Error parsing media info for {file_path}: {e}")
         return [], file_dir, None
 
-    # Extract and format video information
-    video_codec = video_info.get('codec_name', 'N/A').upper()
-    video_profile = video_info.get('profile', 'N/A')
-    video_bitrate = round(int(video_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in video_info else 0
-    video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps"
+    # Initialize tracks
+    video_track = None
+    audio_track = None
+    general_track = None
 
-    # Extract and format audio information
-    audio_codec = audio_info.get('codec_name', 'N/A').upper()
-    audio_channels = audio_info.get('channels', 'N/A')
-    audio_bitrate = round(int(audio_info.get('bit_rate', 0)) / 1000) if 'bit_rate' in audio_info else 0
+    try:
+        for track in media_info.tracks:
+            ttype = getattr(track, "track_type", "").lower()
+            # logger.debug(f"Found track: id={getattr(track,'track_id',None)}, type={ttype}")
+            if ttype == "video" and video_track is None:
+                video_track = track
+            elif ttype == "audio" and audio_track is None:
+                # Ensure it has meaningful properties
+                if getattr(track, "format", None) or getattr(track, "channel_s", None):
+                    audio_track = track
+            elif ttype == "general" and general_track is None:
+                general_track = track
+    except Exception as e:
+        logger.error(f"Error iterating tracks for {file_path}: {e}")
+        return [], file_dir, None
 
-    if audio_codec == "AAC" and "LC" in audio_info.get('profile', '').upper():
-        audio_codec += " (LC)"
+    # Video properties
+    try:
+        video_codec = (video_track.format or "N/A").upper() if video_track else "N/A"
+        video_profile = getattr(video_track, "format_profile", "N/A") if video_track else "N/A"
+        video_bitrate = round(int(video_track.bit_rate or 0) / 1000) if video_track and video_track.bit_rate else 0
+        width = video_track.width if video_track and video_track.width else "N/A"
+        height = video_track.height if video_track and video_track.height else "N/A"
+        resolution = f"{width}x{height}"
 
-    audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
-    add_lines = 0
-    # Extract other metadata
-    title = format_info.get("tags", {}).get("title", "N/A")
-    if len(title) > char_break_line:
-        title = await break_string_at_char(title, " ", char_break_line)
-        add_lines += 1
-    if len(filename) > char_break_line:
-        filename = await break_string_at_char(filename, ".", char_break_line) or \
-                   await break_string_at_char(filename, " ", char_break_line) or \
-                   await break_string_at_char(filename, "-", char_break_line)
-        add_lines += 1
+        # FPS
+        try:
+            fps = round(float(video_track.frame_rate), 2) if video_track and video_track.frame_rate else "N/A"
+        except Exception as e:
+            logger.error(f"Error parsing FPS: {e}")
+            fps = "N/A"
 
-    size_bytes = int(format_info.get('size', '0'))
-    size_mb = size_bytes / (1024 * 1024)
-    size_gb = size_bytes / (1024 * 1024 * 1024)
-    file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+        # CRF
+        crf_value = "N/A"
+        encoding_settings = getattr(video_track, "encoding_settings", "") if video_track else ""
+        if encoding_settings and "crf=" in encoding_settings:
+            try:
+                crf_raw = encoding_settings.split("crf=")[1].split(" ")[0].replace("/", "").strip()
+                crf_value = str(int(round(float(crf_raw))))
+            except Exception as e:
+                logger.error(f"Error parsing CRF: {e}")
 
-    # Extract resolution and FPS
-    width = video_info.get("width", "N/A")
-    height = video_info.get("height", "N/A")
-    resolution = f"{width}x{height}"
+        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}"
+    except Exception as e:
+        logger.error(f"Error extracting video properties: {e}")
+        video_details = "N/A"
+        resolution = "N/A"
+        fps = None
 
-    # Convert timestamp to HH:MM:SS format
-    hours, remainder = divmod(int(duration), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    # Audio properties
+    try:
+        if audio_track:
+            # logger.debug(f"Audio track raw data: {audio_track}")
 
-    # Calculate MD5 checksum
+            # Format / codec
+            audio_codec = getattr(audio_track, "format", None)
+            if audio_codec:
+                audio_codec = str(audio_codec).upper()
+            else:
+                audio_codec = "N/A"
+
+            # Channels
+            audio_channels = getattr(audio_track, "channel_s", None)
+            if audio_channels is None:
+                audio_channels = "N/A"
+            else:
+                audio_channels = str(audio_channels)
+
+            # Bitrate
+            bit_rate = getattr(audio_track, "bit_rate", None)
+            if bit_rate is None:
+                audio_bitrate = 0
+            else:
+                try:
+                    audio_bitrate = round(int(bit_rate) / 1000)
+                except Exception as e:
+                    logger.error(f"Error converting audio bit_rate '{bit_rate}' to int: {e}")
+                    audio_bitrate = 0
+
+            # Profile
+            profile = getattr(audio_track, "format_profile", None)
+            if profile:
+                profile = str(profile)
+                if audio_codec == "AAC" and "LC" in profile.upper():
+                    audio_codec += " (LC)"
+
+        else:
+            audio_codec = "N/A"
+            audio_channels = "N/A"
+            audio_bitrate = 0
+
+        audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
+
+    except Exception as e:
+        logger.error(f"Error extracting audio properties: {e}")
+        audio_details = "N/A"
+
+    # General metadata
+    try:
+        title = getattr(general_track, "title", "N/A") if general_track else "N/A"
+        if len(title) > char_break_line:
+            title = await break_string_at_char(title, " ", char_break_line)
+            add_lines += 1
+
+        if len(filename) > char_break_line:
+            filename = await break_string_at_char(filename, ".", char_break_line) or \
+                       await break_string_at_char(filename, " ", char_break_line) or \
+                       await break_string_at_char(filename, "-", char_break_line)
+            add_lines += 1
+
+        size_bytes = int(getattr(general_track, "file_size", 0)) if general_track else 0
+        size_mb = size_bytes / (1024 * 1024)
+        size_gb = size_bytes / (1024 * 1024 * 1024)
+        file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+    except Exception as e:
+        logger.error(f"Error extracting general metadata: {e}")
+        file_size = "N/A"
+
+    # Duration formatting
+    try:
+        hours, remainder = divmod(int(duration), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    except Exception as e:
+        logger.error(f"Error formatting duration: {e}")
+        timestamp_str = "N/A"
+
+    # MD5 checksum
     try:
         hash_md5 = hashlib.md5()
         with open(file_path, "rb") as f:
@@ -490,102 +559,184 @@ async def get_video_metadata(file_path, char_break_line, duration):
         logger.error(f"Error computing MD5 hash: {e}")
         md5_hash = "N/A"
 
-    info_table = [
-        ["File Name", filename],
-        ["Title", title],
-        ["File Size", file_size],
-        ["Duration", timestamp_str],
-        ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
-        ["MD5", md5_hash.upper()]
-    ]
-    if add_lines != 0:
-        for i in range(add_lines):
-            info_table.append([" ", " "])  # Append an empty row with two empty strings to avoid overwriting last values in image
+    # Build info table
+    try:
+        info_table = [
+            ["File Name", filename],
+            ["Title", title],
+            ["File Size", file_size],
+            ["Duration", timestamp_str],
+            ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+            ["MD5", md5_hash.upper()]
+        ]
+        if add_lines != 0:
+            for _ in range(add_lines):
+                info_table.append([" ", " "])
+    except Exception as e:
+        logger.error(f"Error building info table: {e}")
+        return [], fps
+
     return info_table, fps
 
 
-async def output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format):
+async def output_file_exists(input_video_file_name,
+                             original_video_file_name,
+                             output_path,
+                             output_file_name_suffix,
+                             image_output_format,
+                             use_sub_folder,
+                             sub_folder_path,
+                             regeneration_mode):
     """
-    Check if an output file already exists for the input or original video, and handle user input if both exist.
+    Check if an output file already exists for the input or original video,
+    and handle behavior depending on regeneration_mode:
+        - "user input": prompt user interactively (default)
+        - "force regenerate": delete any existing files and regenerate
+        - "force keep": keep existing files and skip regeneration
     """
     input_base_name, _ = os.path.splitext(input_video_file_name)
     original_base_name, _ = os.path.splitext(original_video_file_name)
 
-    # Construct file paths for both original and input video files
     expected_input_output_file = os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}")
     expected_original_output_file = os.path.join(output_path, f"{original_base_name}_{output_file_name_suffix}.{image_output_format}")
 
-    # Check if the original file exists
-    original_exists = os.path.exists(expected_original_output_file)
-    input_exists = os.path.exists(expected_input_output_file)
+    sub_input_file = os.path.join(sub_folder_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}") if use_sub_folder and sub_folder_path else None
+    sub_original_file = os.path.join(sub_folder_path, f"{original_base_name}_{output_file_name_suffix}.{image_output_format}") if use_sub_folder and sub_folder_path else None
 
-    if original_exists and input_exists and input_video_file_name.lower() != original_video_file_name.lower():
-        # Ask user for input on how to handle both existing files
-        logger.info(f"Both files '{expected_original_output_file}' and '{expected_input_output_file}' exist.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep one of existing files or (R)egenerate? [K/R]: ").lower()
+    def find_existing_file(*paths):
+        for p in paths:
+            if p and os.path.exists(p):
+                return p
+        return None
+
+    def safe_move(src, dst_dir):
+        if not src or not os.path.exists(src):
+            return
+        os.makedirs(dst_dir, exist_ok=True)
+        base_name = os.path.basename(src)
+        dst = os.path.join(dst_dir, base_name)
+        name, ext = os.path.splitext(dst)
+        counter = 1
+        while os.path.exists(dst):
+            dst = f"{name} ({counter}){ext}"
+            counter += 1
+        shutil.move(src, dst)
+        logger.info(f"Moved existing file to subfolder: {dst}")
+
+    existing_input = find_existing_file(expected_input_output_file, sub_input_file)
+    existing_original = find_existing_file(expected_original_output_file, sub_original_file)
+
+    # ==============================================================
+    # MODE: FORCE REGENERATE
+    # ==============================================================
+    if regeneration_mode.lower() == "force regenerate":
+        seen = set()
+        for existing_file in filter(None, [existing_input, existing_original]):
+            if existing_file in seen:
+                continue  # avoid duplicate deletions
+            seen.add(existing_file)
+            try:
+                os.remove(existing_file)
+                logger.info(f"[Force Regenerate] mode, Removed existing file: {existing_file}")
+            except FileNotFoundError:
+                logger.warning(f"[Force Regenerate] mode, File already removed or missing: {existing_file}")
+            except Exception as e:
+                logger.error(f"Failed to remove {existing_file}: {e}")
+        return False  # Always regenerate
+
+    # ==============================================================
+    # MODE: FORCE KEEP
+    # ==============================================================
+    if regeneration_mode.lower() == "force keep":
+        kept_file = existing_input or existing_original
+        if kept_file:
+            logger.info(f"[Force Keep] mode, Keeping existing file: {kept_file}")
+            final_path = os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}")
+            if os.path.exists(final_path):
+                # logger.debug(f"File already correctly named: {final_path}")
+                pass
+            else:
+                os.rename(kept_file, final_path)
+                logger.info(f"Renamed existing file to: {final_path}")
+
+            if use_sub_folder and sub_folder_path:
+                safe_move(final_path, sub_folder_path)
+            return True  # Keep and skip regeneration
+        else:
+            logger.info("[Force Keep] mode, No existing file found — Generating")
+            return False  # Nothing to keep → regenerate
+
+    # ==============================================================
+    # MODE: USER INPUT
+    # ==============================================================
+    if existing_original and existing_input and input_video_file_name.lower() != original_video_file_name.lower():
+        logger.info(f"Both files '{existing_original}' and '{existing_input}' exist.")
+        await asyncio.sleep(0.5)
+        user_choice = input(f"Would you like to (K)eep one or (R)egenerate? [K/R]: ").lower()
 
         if user_choice == "k":
-            logger.info("User selected to keep one of the files, Which file would you like to keep? ")
-            time.sleep(0.5)
-            keep_file = input(f"(O)riginal '{expected_original_output_file}' or (I)nput '{expected_input_output_file}': ").lower()
+            await asyncio.sleep(0.5)
+            keep_file = input(f"(O)riginal '{existing_original}' or (I)nput '{existing_input}': ").lower()
             if keep_file == "o":
-                os.remove(expected_input_output_file)
-                os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}"))
-                return True  # Renamed and kept the original
+                os.remove(existing_input)
+                kept_path = existing_original
             elif keep_file == "i":
-                os.remove(expected_original_output_file)
-                os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}"))
-                return True  # Renamed and kept the input
+                os.remove(existing_original)
+                kept_path = existing_input
             else:
                 logger.error("Invalid choice! Skipping file processing.")
                 return False
+
+            final_path = os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}")
+            os.rename(kept_path, final_path)
+            logger.info(f"Kept and renamed file: {final_path}")
+
+            if use_sub_folder and sub_folder_path:
+                safe_move(final_path, sub_folder_path)
+            return True
+
         elif user_choice == "r":
-            logger.info("User selected to regenerate the file.")
-            # Regenerate output file
-            return False  # Indicates regeneration needed
+            logger.info("User selected to regenerate.")
+            return False
         else:
-            logger.error("Invalid choice! Skipping file processing.")
+            logger.error("Invalid choice! Skipping.")
             return False
 
-    elif original_exists:
-        # If only the original file exists, ask user whether to keep or regenerate
-        logger.info(f"File '{expected_original_output_file}' exists.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep it or (R)egenerate? [K/R]: ").lower()
-        if user_choice == "k":
-            os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}"))
-            return True  # Renamed and kept the original
-        elif user_choice == "r":
-            os.remove(expected_original_output_file)
-            logger.info("User selected to regenerate the file.")
-            return False  # Regenerate the file
-        else:
-            logger.error("Invalid choice! Skipping file processing.")
-            return False
+    for existing_file in [existing_original, existing_input]:
+        if existing_file:
+            logger.info(f"File '{existing_file}' exists.")
+            await asyncio.sleep(0.5)
+            user_choice = input(f"Would you like to (K)eep or (R)egenerate? [K/R]: ").lower()
 
-    elif input_exists:
-        # If only the input file exists, ask user whether to keep or regenerate
-        logger.info(f"File '{expected_input_output_file}' exists.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep it or (R)egenerate? [K/R]: ").lower()
-        if user_choice == "k":
-            os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}"))
-            return True  # Renamed and kept the input
-        elif user_choice == "r":
-            os.remove(expected_input_output_file)
-            logger.info("User selected to regenerate the file.")
-            return False  # Regenerate the file
-        else:
-            logger.error("Invalid choice! Skipping file processing.")
-            return False
+            if user_choice == "k":
+                final_path = os.path.join(output_path, f"{input_base_name}_{output_file_name_suffix}.{image_output_format}")
+                os.rename(existing_file, final_path)
+                logger.info(f"Kept and renamed file: {final_path}")
 
-    return False  # Neither file exists, so no issues to resolve
+                if use_sub_folder and sub_folder_path:
+                    safe_move(final_path, sub_folder_path)
+                return True
+            elif user_choice == "r":
+                os.remove(existing_file)
+                logger.info("User selected to regenerate file.")
+                return False
+            else:
+                logger.error("Invalid choice! Skipping.")
+                return False
+
+    return False
 
 
-async def process_thumbnails(input_video_file_name, input_video_file_path, original_video_file_name, output_path, image_output_format, is_vertical):
+async def process_thumbnails(input_video_file_name,
+                             input_video_file_path,
+                             original_video_file_name,
+                             output_path,
+                             image_output_format,
+                             is_vertical,
+                             use_sub_folder,
+                             contains_unwanted_metadata):
     """
-    Main function to process the video, generate thumbnails, and create a contact sheet.
+    Main function to process the video, generate thumbnails, and create a Thumbnails Sheet.
     """
     try:
         input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
@@ -595,36 +746,52 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
         if not config:
             logger.error("Processing failed due to invalid configuration")
             return False
-        else:
-            num_thumbs = config["num_thumbs"]
-            thumb_width = config["thumb_width"]  # This times columns must match 1890 for ideal screen size
-            columns = config["columns"]
-            padding = config["padding"]
-            output_file_name_suffix = config["output_file_name_suffix"]
-            add_file_info = config["add_file_info"]
-            font_full_name = config["font_full_name"]
-            fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
-            force_regenerate = config["force_regenerate"]
-            alternate_layout = config["alternate_layout"]  # Only works in 4 by 4 grid: num_thumbs=16 and columns=4
 
-        # Check if the output file already exists
-        if await output_file_exists(input_video_file_name, original_video_file_name, output_path, output_file_name_suffix, image_output_format) and not force_regenerate:
-            # logger.warning("Output file already exists. Skipping processing.")
+        num_thumbs = config["num_thumbs"]
+        thumb_width = config["thumb_width"]
+        columns = config["columns"]
+        padding = config["padding"]
+        output_file_name_suffix = config["output_file_name_suffix"]
+        add_file_info = config["add_file_info"]
+        font_full_name = config["font_full_name"]
+        fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
+        regeneration_mode = config["regeneration_mode"] if not contains_unwanted_metadata else "force regenerate"
+        alternate_layout = config["alternate_layout"]
+
+        # Check if output file already exists
+        exists = await output_file_exists(
+            input_video_file_name,
+            original_video_file_name,
+            input_video_file_path,
+            output_file_name_suffix,
+            image_output_format,
+            use_sub_folder,
+            output_path,
+            regeneration_mode
+        )
+
+        # 🔹 If file exists and mode is "force keep" or user kept it, skip regeneration
+        if exists and regeneration_mode.lower() != "force regenerate":
             return True
 
         output_file_name_full = f"{input_video_file_base_name}_{output_file_name_suffix}.{image_output_format}"
         output_image_full_path = os.path.join(output_path, output_file_name_full)
 
+        if use_sub_folder and output_path:
+            os.makedirs(output_path, exist_ok=True)
+            output_image_full_path = os.path.join(output_path, output_file_name_full)
+
         check_valid_numbers = await is_valid_integer_division(num_thumbs, columns)
         if not check_valid_numbers:
-            logger.error("Processing failed due to invalid configuration: Number of thumbnails must be divisible by columns and greater than zero to avoid black thumbnails")
+            logger.error("Invalid configuration: num_thumbs must be divisible by columns.")
             return False
 
-        # Vertical Adjustments
+        # Adjust layout for vertical videos
         if is_vertical and fit_thumbs_in_less_rows and num_thumbs >= 6:
             num_thumbs = int(num_thumbs * 2)
             columns = int(columns * 2)
             thumb_width = int(thumb_width / 2)
+
         char_break_line = 180
         if columns == 3:
             char_break_line = 130
@@ -632,10 +799,16 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
             char_break_line = 150
 
         duration, fps = await get_video_duration(input_video_full_path)
+        duration = int(duration)
         metadata_table, original_fps = await get_video_metadata(input_video_full_path, char_break_line, duration)
+        if not metadata_table or not original_fps:
+            logger.error("Failed to extract video file metadata for thumbnails.")
+            return False
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
-        font_path = f"Resources\{font_full_name}"
+        font_path = f"Resources\\{font_full_name}"
+
+        import tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:
                 sheet_width = int((columns * thumb_width) + ((columns + 1) * padding))
@@ -644,16 +817,15 @@ async def process_thumbnails(input_video_file_name, input_video_file_path, origi
                 info_image_path = None
 
             await extract_frame_at_timestamps(input_video_full_path, timestamps, temp_dir)
-            await generate_contact_sheet(temp_dir, thumb_width, columns, padding, output_image_full_path, timestamps, info_image_path, font_path, is_vertical,
-                                         fit_thumbs_in_less_rows, alternate_layout)
+            await generate_thumbnails_sheet(
+                temp_dir, thumb_width, columns, padding, output_image_full_path,
+                timestamps, info_image_path, font_path, is_vertical,
+                fit_thumbs_in_less_rows, alternate_layout
+            )
 
+        logger.info(f"Thumbnail sheet created at: {output_image_full_path}")
         return True
 
     except Exception as e:
-        logger.exception(f"An error occurred during the video processing: {e}")
+        logger.exception(f"An error occurred during thumbnail processing: {e}")
         return False
-
-
-# Example usage
-if __name__ == "__main__":
-    asyncio.run(process_thumbnails("file_name.extension", r"path", "file_name.extension", r"path", "extension"))

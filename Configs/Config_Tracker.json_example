@@ -1,0 +1,35 @@
+{
+  "upload_modes_available": {
+    "single": "This must be used with create_sub_folder=True, otherwise the process will be disabled, treats the created folder as the files required for the single release torrent creation."
+  },
+  "create_torrent_file": true,
+  "trackers_urls": {
+    "hf_tracker_login_url": "https://www.SITE.org/login",
+    "hf_tracker_upload_url": "https://www.SITE.org/upload.php",
+    "emp_tracker_login_url": "https://www.SITE.is/login",
+    "emp_tracker_upload_url": "https://www.SITE.is/upload.php"
+  },
+  "browser": "firefox",
+  "firefox_profile_path": "C:\\Users\\USER\\AppData\\Local\\Mozilla\\Firefox\\Profiles\\PROFILE1",
+  "firefox_driver_path": "C:\\temp\\geckodriver.exe",
+  "chrome_profile_path": "C:\\Users\\USER\\AppData\\Local\\Google\\Chrome\\User Data\\Default",
+  "chromedriver_path": "C:\\temp\\chromedriver.exe",
+  "login_selectors": {
+  "username": { "by": "name", "value": "username" },
+  "password": { "by": "name", "value": "password" },
+  "submit":   { "by": "id", "value": "login_button" }
+  },
+  "login_success": {
+  "by": "css",
+  "value": "ul#userinfo_username a.username"
+  },
+  "form_fields": [
+  { "by": "id", "value": "category", "input": ""},
+  { "by": "id", "value": "title", "input": "" },
+  { "by": "id", "value": "taginput", "input": "" },
+  { "by": "id", "value": "image", "input": "" },
+  { "by": "id", "value": "desc", "input": "" }
+  ],
+  "torrent_field": { "by": "id", "value": "file"},
+  "form_submit": { "by": "id", "value": "post" }
+}

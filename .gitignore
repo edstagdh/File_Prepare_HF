@@ -48,6 +48,7 @@ dist/
 Configs/Config.json
 Configs/Config_Thumbnails.json
 Configs/Config_Video_Preview.json
+Configs/Config_Tracker.json
 
 # Resources Files
 Resources.json

@@ -4,30 +4,102 @@ import re
 import subprocess
 import sys
 import tempfile
+import asyncio
 from datetime import datetime
 from loguru import logger
 from pymediainfo import MediaInfo
+from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
+RUN_DEBUG_MODE = False
 
 
-async def run_command(command):
-    """Execute a shell command and return stdout, stderr, and exit code."""
+async def run_command(command: Union[str, Sequence[str]]) -> Tuple[str, str, int]:
+    """
+    Execute a command and return (stdout, stderr, code).
+    - Accepts either a list/tuple (recommended) or a string.
+    - Tries asyncio subprocess APIs first (non-blocking). If they are unsupported
+      on the current event loop (Windows selectors), falls back to running the
+      blocking subprocess in a thread to avoid blocking the loop.
+    - Returns rc == 0 as 0, non-zero as 22, exceptions as 99 (to match your existing codes).
+    """
+
+    # Normalize & choose shell mode
+    is_sequence = isinstance(command, (list, tuple))
+    use_shell = not is_sequence  # string -> shell, list -> exec
+    cmd_for_log = ' '.join(command) if is_sequence else command
+
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            errors='ignore'  # Silently ignore decode errors
-        )
-        stdout = result.stdout.strip() if result.stdout else ''
-        stderr = result.stderr.strip() if result.stderr else ''
-        return stdout, stderr, result.returncode if result.returncode == 0 else 22  # 22 = Command Failed
+        if RUN_DEBUG_MODE:
+            logger.debug(f"run_command using asyncio subprocess: {cmd_for_log!r}")
+        if use_shell:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-    except Exception as e:
-        logger.exception(f"Command failed: {command}")
-        return '', str(e), 99  # 99 = Unknown exception
+        stdout_bytes, stderr_bytes = await proc.communicate()
+
+        stdout = stdout_bytes.decode(errors='ignore').strip() if stdout_bytes else ''
+        stderr = stderr_bytes.decode(errors='ignore').strip() if stderr_bytes else ''
+
+        rc = proc.returncode
+        if rc == 0:
+            return stdout, stderr, 0
+        else:
+            return stdout, stderr, 22
+
+    except Exception as exc:
+        # Often on Windows you'll see NotImplementedError / RuntimeError for selector loops.
+        if RUN_DEBUG_MODE:
+            logger.debug(f"async subprocess failed ({exc!r}), falling back to threaded subprocess.run")
+
+        try:
+            def sync_run():
+                if is_sequence:
+                    # safer: pass list with shell=False
+                    return subprocess.run(
+                        list(command),
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                        errors='ignore'
+                    )
+                else:
+                    # string -> run in shell (user asked for string)
+                    return subprocess.run(
+                        command,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        errors='ignore'
+                    )
+
+            # Python 3.9+: use asyncio.to_thread, otherwise run_in_executor
+            try:
+                result = await asyncio.to_thread(sync_run)
+            except AttributeError:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, sync_run)
+
+            stdout = result.stdout.strip() if result.stdout else ''
+            stderr = result.stderr.strip() if result.stderr else ''
+            rc = result.returncode
+            if rc == 0:
+                return stdout, stderr, 0
+            else:
+                return stdout, stderr, 22
+
+        except Exception as exc2:
+            logger.exception(f"Fallback subprocess.run failed for command: {cmd_for_log!r}")
+            return '', str(exc2), 99
 
 
 async def verify_ffmpeg_and_ffprobe():
@@ -44,49 +116,59 @@ async def verify_ffmpeg_and_ffprobe():
                 return False, 22  # Command failed
 
             version_ok = False
-            date_ok = False
+            date_ok = True  # assume OK unless proven otherwise
 
-            # Extract version info
-            version_match = re.search(rf"{tool_name} version (\d+)\.(\d+)\.(\d+)", stdout)
+            # ---- Version Check ----
+            output = stdout + '\n' + stderr
+            if RUN_DEBUG_MODE:
+                logger.debug(output)
+
+            # ---- Version Check ----
+            # Only accept semantic versions like 4.4.2
+            version_match = re.search(r"version\s+(\d+)\.(\d+)\.(\d+)", output)
+
+            # ---- Build Date Check ----
+            # Match YYYY-MM-DD anywhere, including Git/Windows builds
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", output)
+
             if version_match:
                 tool_version = tuple(map(int, version_match.groups()))
                 if tool_version >= MIN_FFMPEG_VERSION:
                     version_ok = True
                 else:
                     logger.error(
-                        f"{tool_name} version {tool_version[0]}.{tool_version[1]}.{tool_version[2]} "
-                        f"is too old. Minimum required version is {MIN_FFMPEG_VERSION[0]}."
-                        f"{MIN_FFMPEG_VERSION[1]}.{MIN_FFMPEG_VERSION[2]}."
+                        f"{tool_name} version {'.'.join(map(str, tool_version))} is too old. "
+                        f"Minimum required: {'.'.join(map(str, MIN_FFMPEG_VERSION))}."
                     )
             else:
-                # logger.warning(f"Could not parse {tool_name} version number.")
-                pass
+                if RUN_DEBUG_MODE:
+                    logger.debug(f"Could not parse {tool_name} version from output.")
+                version_ok = False
 
-            # Extract build date
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", stdout)
+            # ---- Build Date Check ----
             if date_match:
-                tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
-                if tool_date >= MIN_FFMPEG_DATE:
-                    date_ok = True
-                else:
-                    logger.error(
-                        f"{tool_name} build date {tool_date.strftime('%Y-%m-%d')} is too old. "
-                        f"Minimum required build date is {MIN_FFMPEG_DATE.strftime('%Y-%m-%d')}."
-                    )
-            else:
-                # logger.warning(f"Could not parse {tool_name} build date.")
-                pass
+                try:
+                    tool_date = datetime.strptime(date_match.group(1), "%Y-%m-%d")
+                    if tool_date < MIN_FFMPEG_DATE:
+                        date_ok = False
+                        logger.error(
+                            f"{tool_name} build date {tool_date.strftime('%Y-%m-%d')} is too old. "
+                            f"Minimum required build date is {MIN_FFMPEG_DATE.strftime('%Y-%m-%d')}."
+                        )
+                except ValueError:
+                    logger.warning(f"Invalid date format detected for {tool_name}: {date_match.group(1)}")
 
+            # ---- Final Decision ----
+            # Pass if either semantic version OR date meets the minimum
             if version_ok or date_ok:
-                # logger.debug(f"{tool_name} passed check (version_ok={version_ok}, date_ok={date_ok}).")
                 return True, 0
             else:
-                logger.error(f"{tool_name} did not meet version or build date requirements.")
-                return False, 33  # Neither version nor date are acceptable
+                logger.error(f"{tool_name} did not meet version/date requirements.")
+                return False, 33  # Requirement failure
 
         except Exception:
-            logger.exception(f"An exception occurred while verifying {tool_name} installation.")
-            return False, 98  # Exception during check
+            logger.exception(f"An exception occurred while verifying {tool_name}.")
+            return False, 98
 
     # Run both checks
     ffmpeg_ok, ffmpeg_code = await check_ffmpeg_or_ffprobe(["ffmpeg", "-version"], "ffmpeg")
@@ -135,6 +217,7 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
         base_name = re.sub(re.escape("H265_"), "", base_name, flags=re.IGNORECASE)
         # base_name = await replace_episode_tag(base_name)
         base_name = re.sub(re.escape(".Xxx.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
+        base_name = re.sub(re.escape(".Xxx.repack.1080p.Hevc.X265.Prt"), "", base_name, flags=re.IGNORECASE)
         base_name = re.sub(re.escape(".Xxx.1080p.Mp4-ktr"), "", base_name, flags=re.IGNORECASE)
         for word in bad_words:
             base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
@@ -151,6 +234,9 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
     elif mode == 2:
         # Remove unwanted characters
         clean_title = input_string.replace(", ", ".")
+        clean_title = clean_title.replace("-", " ")
+        clean_title = clean_title.replace("  ", " ")
+        clean_title = clean_title.replace("  ", " ")
         clean_title = clean_title.replace(" ", ".")
         clean_title = clean_title.translate(str.maketrans("", "", CLEAN_CHARS))
         clean_title = clean_title.replace("..", ".")
@@ -170,7 +256,7 @@ async def sanitize_site_filename_part(input_str):
         str: The sanitized string.
     """
     translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
-    sanitized = input_str.replace(":", "-").replace(".", " ")
+    sanitized = input_str.replace(":", "-").replace(".", " ").replace("/", "-")
     sanitized = sanitized.translate(translation_table)
     return sanitized
 
@@ -325,20 +411,20 @@ async def rename_file(file_path, new_filename):
             os.rename(file_path, new_file_path)
 
         logger.info(f"Renamed file: {file_path} -> {new_file_path}")
-        return True
+        return True, None
 
-    except FileNotFoundError:
-        logger.error(f"File not found: {file_path}")
-        return False
-    except PermissionError:
-        logger.error(f"Permission denied to rename file: {file_path}")
-        return False
+    except FileNotFoundError as e:
+        logger.error(f"File not found: {file_path}, Error: {e}")
+        return False, e
+    except PermissionError as e:
+        logger.error(f"Permission denied to rename file: {file_path}, Error: {e}")
+        return False, e
     except OSError as e:
         logger.error(f"OS error occurred while renaming file {file_path}: {e}")
-        return False
-    except Exception:
-        logger.exception(f"Unexpected error occurred while renaming file {file_path}")
-        return False
+        return False, e
+    except Exception as e:
+        logger.exception(f"Unexpected error occurred while renaming file {file_path}, Error: {e}")
+        return False, e
 
 
 async def generate_mediainfo_file(input_file_full_path, output_path):
@@ -391,6 +477,7 @@ async def generate_template_video(
         fill_img_urls: bool,
         imgbox_file_path: str,
         imgbb_file_path: str,
+        hamster_file_path: str,
         suffix: str
 ) -> bool:
     media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
@@ -417,10 +504,18 @@ async def generate_template_video(
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
     # Additional information
+    _, template_name = os.path.split(template_file_full_path)
+    template_base_name, _ = os.path.splitext(template_name)
     fps_icon_url = json_map[f"{fps}"]
     resolution_icon_url = json_map[f"{resolution}"]
     codec_icon_url = json_map[f"{codec}"]
     extension_icon_url = json_map[f"{extension.replace('.', '')}"]
+    desc_button_icon_url = json_map[f"desc_button"]
+    release_date_button_icon_url = json_map[f"release_date_button"]
+    performers_button_icon_url = json_map[f"performers_button"]
+    mediainfo_button_icon_url = json_map[f"mediainfo_button"]
+    screens_button_icon_url = json_map[f"screens_button"]
+    bg = json_map[f"bg"]
 
     # Default image paths
     cover_image = f"{new_filename_base_name}.{image_output_format}"
@@ -476,6 +571,33 @@ async def generate_template_video(
 
             except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
                 raise ValueError(f"Failed to parse imgbox file or missing expected data: {e}")
+    elif hamster_file_path != "":
+        if fill_img_urls and os.path.isfile(hamster_file_path):
+            try:
+                with open(hamster_file_path, "r", encoding="utf-8") as f:
+                    hamster_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+                preview_sheet_key = f"{new_filename_base_name} - Preview Sheet WebP"
+
+                if thumbs_key in hamster_data and isinstance(hamster_data[thumbs_key], list):
+                    thumbs_entry = hamster_data[thumbs_key][0]
+                    if "image_url" in thumbs_entry:
+                        thumbnails_image = thumbs_entry["image_url"]
+
+                if cover_key in hamster_data and isinstance(hamster_data[cover_key], list):
+                    cover_entry = hamster_data[cover_key][0]
+                    if "image_url" in cover_entry:
+                        cover_image = cover_entry["image_url"]
+
+                if preview_sheet_key in hamster_data and isinstance(hamster_data[preview_sheet_key], list):
+                    preview_sheet_entry = hamster_data[preview_sheet_key][0]
+                    if "image_url" in preview_sheet_entry:
+                        preview_sheet_image = preview_sheet_entry["image_url"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse hamster file or missing expected data: {e}")
 
     # Load JSON config
     performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")
@@ -487,7 +609,9 @@ async def generate_template_video(
         name_blocks = formatted_names.replace(", ", "\n").splitlines()
 
         processed_blocks = []
-        mapped_names = []
+        mapped_names_list = []
+
+        all_in_images = all(block.strip() in performers_images for block in name_blocks)
 
         for block in name_blocks:
             full_name = block.strip()
@@ -500,17 +624,35 @@ async def generate_template_video(
             else:
                 processed_blocks.append(full_name)
 
-            # Step 2b: Map full name to image URL or fallback to name
-            if full_name in performers_images:
-                mapped_names.append(f"[img]{performers_images[full_name]}[/img]")
+            # Step 2b: Only add [img] if *all* performers are in performers_images
+            if all_in_images:
+                mapped_names_list.append(f"[img]{performers_images[full_name]}[/img]")
             else:
-                mapped_names.append(f"[img]{full_name}[/img]")
+                mapped_names_list.append(full_name)
     else:
-        processed_blocks = ""
-        mapped_names = []
+        processed_blocks = []
+        mapped_names_list = []
 
+    # Join the processed names (always space-separated)
     processed_string = " ".join(processed_blocks)
-    mapped_names = " ".join(mapped_names)
+
+    # Join mapped names:
+    # - if using [img], separate by a single space
+    # - if not using [img], separate by ", "
+    if formatted_names:
+        if all_in_images:
+            # ✅ 3 per row: insert a newline after every 3 images
+            mapped_names = ""
+            for i, img_tag in enumerate(mapped_names_list, start=1):
+                mapped_names += img_tag + " "
+                if i % 3 == 0 and i != len(mapped_names_list):
+                    mapped_names += "\n"  # new line after every 3
+            mapped_names = mapped_names.strip()
+        else:
+            # Normal comma-separated text for names
+            mapped_names = ", ".join(mapped_names_list)
+    else:
+        mapped_names = ""
 
     for tag in studio_tags:
         cleaned_tag = tag.replace("'", "")
@@ -533,11 +675,14 @@ async def generate_template_video(
         processed_string += f" {codec} h265"
     else:
         processed_string += f" {codec}"
+    # remove consecutive dots
+    while ".." in processed_string:
+        processed_string = processed_string.replace("..", ".")
     processed_string += f" {extension.replace('.', '')}"
     if suffix != "":
         processed_string += f" {suffix}"
     # Build output filename and path
-    tags_filename = f"{new_filename_base_name}_HF_tags.txt"
+    tags_filename = f"{new_filename_base_name}_{template_base_name}_tags.txt"
     tags_path = os.path.join(directory, tags_filename)
 
     # Write the string to the file
@@ -550,6 +695,12 @@ async def generate_template_video(
 
     # Create replacement dictionary
     replacements = {
+        "{BG}": bg,
+        "{DESC_BUTTON}": desc_button_icon_url,
+        "{RELEASE_DATE_BUTTON}": release_date_button_icon_url,
+        "{PERFORMERS_BUTTON}": performers_button_icon_url,
+        "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
+        "{SCREENS_BUTTON}": screens_button_icon_url,
         "{NEW_TITLE}": new_title,
         "{SCENE_PRETTY_DATE}": scene_pretty_date,
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
@@ -574,8 +725,10 @@ async def generate_template_video(
         # Make sure the target directory exists
         os.makedirs(directory, exist_ok=True)
 
+        # build template filename
+        output_filename = f"{new_filename_base_name}_{template_base_name}.txt"
+
         # Save the modified file
-        output_filename = f"{new_filename_base_name}_HF_template.txt"
         output_path = os.path.join(directory, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
@@ -611,6 +764,12 @@ async def load_credentials(mode):
                 return secrets["api_auth"], secrets["api_performer_url"], None
             elif mode == 3:
                 return secrets["imgbox_u"], secrets["imgbox_u"], None
+            elif mode == 4:
+                return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
+            elif mode == 5:
+                return secrets["hamster_album_id"], secrets["hamster_api_key"], None
+            elif mode == 6:
+                return secrets["trackers"], None, None
             else:
                 return None, None, None
 

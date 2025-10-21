@@ -7,7 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.chrome.options import Options  # Import ChromeOptions
 from loguru import logger
-import time
+import asyncio
 
 
 async def load_json_file(file_name):
@@ -83,7 +83,7 @@ async def upload_to_imgbb(headless_mode, imgbb_username, imgbb_password, imgbb_a
             EC.presence_of_element_located((By.XPATH, "//input[@type='file']"))
         )
         file_input.send_keys(str(filepath))  # Send the string representation of the Path object
-        time.sleep(0.5)  # Keeping the sleep might be helpful for the page to process
+        await asyncio.sleep(0.5)  # Keeping the sleep might be helpful for the page to process
 
         # Wait for the album select dropdown to be visible
         album_select = WebDriverWait(driver, 20).until(

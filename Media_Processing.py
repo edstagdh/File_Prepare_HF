@@ -1,4 +1,5 @@
 import math
+import sys
 import cv2
 import json
 import numpy as np
@@ -9,12 +10,28 @@ import shutil
 import subprocess
 import textwrap
 import time
+import asyncio
 from io import BytesIO
 from loguru import logger
 from mutagen.mp4 import MP4
+from pymediainfo import MediaInfo
 from Utilities import run_command, load_json_file
 from TPDB_API_Processing import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
+from tqdm import tqdm
+
+
+async def has_unwanted_metadata(file_path) -> bool:
+    try:
+        media_info = MediaInfo.parse(file_path)
+        for track in media_info.tracks:
+            if track.track_type.lower() in ["video", "audio"]:
+                if getattr(track, "title", None):
+                    return True
+        return False
+    except Exception as e:
+        logger.error(f"Error reading metadata: {e}")
+        return False
 
 
 async def get_existing_title(input_file):
@@ -59,83 +76,138 @@ async def get_existing_description(input_file):
         return None
 
 
-async def cover_image_output_file_exists(input_video_file_name, original_video_file_name, output_path, image_output_format):
+async def cover_image_output_file_exists(input_video_file_name,
+                                         original_video_file_name,
+                                         output_path,
+                                         image_output_format,
+                                         cover_regeneration_mode,
+                                         use_sub_folder=False,
+                                         sub_folder_path=None):
     """
-    Check if an output file already exists for the input or original video, and handle user input if both exist.
+    Check if an output file already exists for the input or original video,
+    and handle it according to the cover_regeneration_mode:
+      - 'user input': prompt user
+      - 'force regenerate': always regenerate
+      - 'force keep': always keep existing file(s)
     """
     input_base_name, _ = os.path.splitext(input_video_file_name)
     original_base_name, _ = os.path.splitext(original_video_file_name)
 
-    # Construct file paths for both original and input video files
     expected_input_output_file = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
     expected_original_output_file = os.path.join(output_path, f"{original_base_name}.{image_output_format}")
 
-    # Check if the original file exists
-    original_exists = os.path.exists(expected_original_output_file)
-    input_exists = os.path.exists(expected_input_output_file)
+    # Also check subfolder if enabled
+    sub_input_file = os.path.join(sub_folder_path, f"{input_base_name}.{image_output_format}") if use_sub_folder and sub_folder_path else None
+    sub_original_file = os.path.join(sub_folder_path, f"{original_base_name}.{image_output_format}") if use_sub_folder and sub_folder_path else None
 
-    if original_exists and input_exists and input_video_file_name.lower() != original_video_file_name.lower():
-        # Ask user for input on how to handle both existing files
-        logger.info(f"Both files '{expected_original_output_file}' and '{expected_input_output_file}' exist.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep one of existing files or (R)e-download? [K/R]: ").lower()
+    def find_existing_file(*paths):
+        for p in paths:
+            if p and os.path.exists(p):
+                return p
+        return None
 
-        if user_choice == "k":
-            logger.info("User selected to keep one of the files, Which file would you like to keep? ")
-            time.sleep(0.5)
-            keep_file = input(f"(O)riginal '{expected_original_output_file}' or (I)nput '{expected_input_output_file}': ").lower()
-            if keep_file == "o":
-                os.remove(expected_input_output_file)
-                os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
-                return True  # Renamed and kept the original
-            elif keep_file == "i":
-                os.remove(expected_original_output_file)
-                os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
-                return True  # Renamed and kept the input
+    existing_input = find_existing_file(expected_input_output_file, sub_input_file)
+    existing_original = find_existing_file(expected_original_output_file, sub_original_file)
+
+    def safe_move(src, dst_dir):
+        """Safely move file to dst_dir, renaming if necessary."""
+        if not src or not os.path.exists(src):
+            return
+        os.makedirs(dst_dir, exist_ok=True)
+        base_name = os.path.basename(src)
+        dst = os.path.join(dst_dir, base_name)
+        name, ext = os.path.splitext(dst)
+        counter = 1
+        while os.path.exists(dst):
+            dst = f"{name} ({counter}){ext}"
+            counter += 1
+        shutil.move(src, dst)
+        logger.info(f"Moved existing file to subfolder: {dst}")
+
+    # --- FORCE REGENERATE ---
+    if cover_regeneration_mode == "force regenerate":
+        # Delete any existing file(s)
+        for existing_file in [existing_original, existing_input]:
+            if existing_file and os.path.exists(existing_file):
+                os.remove(existing_file)
+                logger.info(f"[Force Regenerate] mode, Removed existing file:  {existing_file}")
+        return False  # Always regenerate
+
+    # --- FORCE KEEP ---
+    if cover_regeneration_mode == "force keep":
+        for existing_file in [existing_original, existing_input]:
+            if existing_file and os.path.exists(existing_file):
+                logger.info(f"[Force Keep] mode, Keeping existing file: '{existing_file}'")
+                final_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
+                if existing_file != final_path:
+                    os.rename(existing_file, final_path)
+                    logger.info(f"Renamed existing file to: {final_path}")
+                if use_sub_folder and sub_folder_path:
+                    safe_move(final_path, sub_folder_path)
+                return True
+        logger.info("[Force Keep] mode, No existing file found — Generating")
+        return False
+
+    # --- USER INPUT MODE (default behavior) ---
+    if cover_regeneration_mode == "user input":
+        if existing_original and existing_input and input_video_file_name.lower() != original_video_file_name.lower():
+            logger.info(f"Both files '{existing_original}' and '{existing_input}' exist.")
+            await asyncio.sleep(0.5)
+            user_choice = input(f"Would you like to (K)eep one of existing files or (R)e-download? [K/R]: ").lower()
+
+            if user_choice == "k":
+                await asyncio.sleep(0.5)
+                keep_file = input(f"(O)riginal '{existing_original}' or (I)nput '{existing_input}': ").lower()
+                if keep_file == "o":
+                    os.remove(existing_input)
+                    kept_path = existing_original
+                elif keep_file == "i":
+                    os.remove(existing_original)
+                    kept_path = existing_input
+                else:
+                    logger.error("Invalid choice! Skipping file processing.")
+                    return False
+
+                final_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
+                os.rename(kept_path, final_path)
+                logger.info(f"Kept and renamed file: {final_path}")
+
+                if use_sub_folder and sub_folder_path:
+                    safe_move(final_path, sub_folder_path)
+                return True
+
+            elif user_choice == "r":
+                logger.info("User selected to re-download file.")
+                return False
             else:
                 logger.error("Invalid choice! Skipping file processing.")
                 return False
-        elif user_choice == "r":
-            logger.info("User selected to re-download file.")
-            # Regenerate output file
-            return False  # Re-download the cover image
-        else:
-            logger.error("Invalid choice! Skipping file processing.")
-            return False
 
-    elif original_exists:
-        # If only the original file exists, ask user whether to keep or regenerate
-        logger.info(f"File '{expected_original_output_file}' exists.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep it or (R)e-download? [K/R]: ").lower()
-        if user_choice == "k":
-            os.rename(expected_original_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
-            return True  # Renamed and kept the original
-        elif user_choice == "r":
-            os.remove(expected_original_output_file)
-            logger.info("User selected to re-download the cover image.")
-            return False  # Re-download the cover image
-        else:
-            logger.error("Invalid choice! Skipping file processing.")
-            return False
+        # Handle only one existing file
+        for existing_file in [existing_original, existing_input]:
+            if existing_file:
+                logger.info(f"File '{existing_file}' exists.")
+                await asyncio.sleep(0.5)
+                user_choice = input(f"Would you like to (K)eep it or (R)e-download? [K/R]: ").lower()
 
-    elif input_exists:
-        # If only the input file exists, ask user whether to keep or regenerate
-        logger.info(f"File '{expected_input_output_file}' exists.")
-        time.sleep(0.5)
-        user_choice = input(f"Would you like to (K)eep it or (R)e-download? [K/R]: ").lower()
-        if user_choice == "k":
-            os.rename(expected_input_output_file, os.path.join(output_path, f"{input_base_name}.{image_output_format}"))
-            return True  # Renamed and kept the input
-        elif user_choice == "r":
-            os.remove(expected_input_output_file)
-            logger.info("User selected to re-download the cover image")
-            return False  # Re-download the cover image
-        else:
-            logger.error("Invalid choice! Skipping file processing.")
-            return False
+                if user_choice == "k":
+                    final_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
+                    os.rename(existing_file, final_path)
+                    logger.info(f"Kept and renamed file: {final_path}")
 
-    return False  # Neither file exists, so no issues to resolve
+                    if use_sub_folder and sub_folder_path:
+                        safe_move(final_path, sub_folder_path)
+                    return True
+                elif user_choice == "r":
+                    os.remove(existing_file)
+                    logger.info("User selected to re-download cover image.")
+                    return False
+                else:
+                    logger.error("Invalid choice! Skipping file processing.")
+                    return False
+
+    # No existing file found → regenerate
+    return False
 
 
 async def cover_image_download_and_conversion(image_url: str,
@@ -143,75 +215,72 @@ async def cover_image_download_and_conversion(image_url: str,
                                               input_video_file_name: str,
                                               original_video_file_name: str,
                                               output_path: str,
-                                              image_output_format: str) -> bool:
+                                              image_output_format: str,
+                                              use_sub_folder,
+                                              sub_folder_path,
+                                              cover_regeneration_mode) -> bool:
     try:
-        # Check if the output file already exists
         input_base_name, _ = os.path.splitext(input_video_file_name)
-        if await cover_image_output_file_exists(input_video_file_name, original_video_file_name, output_path, image_output_format):
-            # logger.warning("Output file already exists. Skipping processing.")
+
+        exists = await cover_image_output_file_exists(
+            input_video_file_name,
+            original_video_file_name,
+            output_path,
+            image_output_format,
+            cover_regeneration_mode,
+            use_sub_folder,
+            sub_folder_path
+        )
+
+        # If file exists and we’re not regenerating, skip download
+        if exists and cover_regeneration_mode != "force regenerate":
             return True
 
+        # Download helper
         def download_image(url):
             response = requests.get(url, timeout=10)
             response.raise_for_status()
-
-            content_type = response.headers.get('Content-Type', '')
-
-            if not content_type.startswith('image/'):
-                logger.warning(f"No or unexpected Content-Type for URL: {url} (Got: '{content_type}')")
-                # Try to validate by attempting to open as image
+            content_type = response.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
                 try:
                     img = Image.open(BytesIO(response.content))
-                    img.verify()  # Verifies it's an image but doesn't keep it open
-                    # logger.debug("Image verified via content inspection.")
+                    img.verify()
                 except Exception as e:
                     raise ValueError(f"URL does not contain a valid image: {url}") from e
-
             return response
 
-        response = None
+        # Try downloading
         try:
             response = download_image(image_url)
         except Exception as e:
             logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
-            try:
-                response = download_image(alt_image_url)
-            except Exception as e:
-                logger.error(f"Failed to download from alternative URL: {alt_image_url}, error: {e}")
-                return False
+            response = download_image(alt_image_url)
 
-        # Save the downloaded image to a temporary file
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
-        with open(temp_image_path, 'wb') as f:
+        with open(temp_image_path, "wb") as f:
             f.write(response.content)
-        # logger.debug(f"Image saved to {temp_image_path}")
 
-        # Check and downscale if the image exceeds 1080p resolution
+        # Downscale if too large
         try:
             with Image.open(temp_image_path) as img:
                 width, height = img.size
                 if width > 1920 or height > 1080:
-                    try:
-                        resample = Image.Resampling.LANCZOS  # Pillow >= 10
-                    except AttributeError:
-                        resample = Image.LANCZOS  # Pillow < 10
-
+                    resample = getattr(Image.Resampling, "LANCZOS", Image.LANCZOS)
                     img.thumbnail((1920, 1080), resample)
                     img.save(temp_image_path, format=image_output_format.upper())
                     logger.info(f"Image downscaled to fit within 1080p: {temp_image_path}")
         except Exception as e:
-            logger.error(f"Error while checking/downscaling image resolution: {e}")
+            logger.error(f"Error while checking/downscaling image: {e}")
 
         final_image_path = os.path.join(output_path, f"{input_base_name}.{image_output_format}")
-        # Check if the image format matches the desired format
-        if not temp_image_path.lower().endswith(f".{image_output_format}"):
-            # Convert the image format if needed
-            await convert_image_format(temp_image_path, final_image_path, image_output_format)
-            os.remove(temp_image_path)  # Remove the temporary file after conversion
-            logger.info(f"Converted image saved to {final_image_path}")
-        else:
-            shutil.move(temp_image_path, final_image_path)
-            logger.info(f"Image moved to final destination: {final_image_path}")
+        shutil.move(temp_image_path, final_image_path)
+        logger.success(f"Image saved to {final_image_path}")
+
+        if use_sub_folder and sub_folder_path:
+            os.makedirs(sub_folder_path, exist_ok=True)
+            sub_final_path = os.path.join(sub_folder_path, os.path.basename(final_image_path))
+            shutil.move(final_image_path, sub_final_path)
+            logger.info(f"Image moved to subfolder: {sub_final_path}")
 
         return True
 
@@ -623,16 +692,26 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
     temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters)
 
+    # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
-        # logger.debug(f"Already HEVC/AV1, skipping re-encode: {file_path}")
-        return True
+        # logger.debug(f"The file is already encoded with HEVC/AV1: {file_path}")
+        if contains_unwanted_metadata:
+            # logger.debug(f"The file requires metadata stripping due to unwanted metadata: {file_path}")
+            remove_metadata_result = await reset_all_metadata(file_path)
+            if remove_metadata_result:
+                return True
+            else:
+                return False
+        else:
+            return True
 
+    # Return False if the re encoding failed
     if temp_output is False:
         logger.error(f"processing failed for {file_path}")
         return False
@@ -648,6 +727,12 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
 
             final_output = os.path.join(directory, new_filename)
             shutil.move(temp_output, final_output)
+            encoder_change = await update_encoder_metadata(final_output)
+
+            if encoder_change is False:
+                logger.error(f"processing failed for {file_path}")
+                return False
+
             logger.info(f"Replaced original file with HEVC version: {final_output}")
             return True
         else:
@@ -657,25 +742,28 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters):
-    """Re-encode the given file to HEVC and show progress.
+async def re_encode_to_hevc(file_path, is_vertical,
+                            re_encode_downscale, limit_cpu_usage,
+                            remove_chapters):
+    """
+    Re-encode the given file to HEVC and show progress with a tqdm bar.
 
     Returns:
-        str: Path to the converted file if successful.
-        None: If already encoded in HEVC.
-        False: If encoding failed.
+        str  : Path to the converted file if successful
+        None : If already encoded in HEVC/AV1
+        False: If encoding failed
     """
     encode_results = await is_video_hevc_or_av1(file_path)
     if encode_results:  # Already encoded with HEVC/AV1
         return None
-    if encode_results is None:  # Could not determine encoding (fail)
+    if encode_results is None:
         return False
 
     width, height, bit_rate = await get_video_resolution(file_path)
-
     directory, filename = os.path.split(file_path)
     temp_output = await generate_temp_filename(directory, filename)
     duration, fps = await get_video_duration(file_path)
+    duration = int(duration)
 
     keyint = int(fps * 2)  # every 2 seconds
 
@@ -688,13 +776,12 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
     )
 
     if limit_cpu_usage:
-        # Calculate 75% of total CPU cores (round up, minimum 1)
-        threads = max(1, math.ceil(os.cpu_count() * 0.75))
-        # Add x265 pools option to limit encoding threads
+        threads = max(1, math.ceil(os.cpu_count() * 0.70))
         x265_params += f"pools={threads}:"
 
     ffmpeg_cmd = [
         "ffmpeg",
+        "-hide_banner",
         "-i", file_path,
         "-map", "0:v:0",
         "-map", "0:a",
@@ -706,17 +793,9 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         "-map_metadata", "-1",
     ]
 
-    if remove_chapters:
-        ffmpeg_cmd += ["-map_chapters", "-1"]
-    else:
-        ffmpeg_cmd += ["-map_chapters", "0"]
+    ffmpeg_cmd += ["-map_chapters", "-1" if remove_chapters else "0"]
+    ffmpeg_cmd += ["-dn", "-sn", ]
 
-    ffmpeg_cmd += [
-        "-dn",
-        "-sn"
-    ]
-
-    # Add scale filter if resolution is higher than 1080p and downscaling is enabled
     if re_encode_downscale and width and height:
         if not is_vertical and (width > 1920 or height > 1080):
             ffmpeg_cmd += ["-vf", "scale='min(1920,iw)':'min(1080,ih)'"]
@@ -725,56 +804,65 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
 
     ffmpeg_cmd.append(temp_output)
 
-    start_time = time.time()
-    last_update_time = 0
-
-    process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    # --- start ffmpeg process ---
+    process = subprocess.Popen(
+        ffmpeg_cmd,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace"  # so it won’t crash on bad bytes
+    )
 
     time_pattern = re.compile(r"time=(\d+:\d+:\d+\.\d+)")
     size_pattern = re.compile(r"size=\s*(\d+)KiB")
     speed_pattern = re.compile(r"speed=([\d\.x]+)")
 
+    start_time = time.time()
+    last_update = 0
+
+    # tqdm progress bar
+    pbar = tqdm(total=duration,
+                unit="s",
+                ncols=120,
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}s")
+
     for line in process.stderr:
         now = time.time()
-        if now - last_update_time >= 10:
-            time_match = time_pattern.search(line)
-            size_match = size_pattern.search(line)
-            speed_match = speed_pattern.search(line)
+        if now - last_update >= 3:  # update every 3 seconds
+            t_match = time_pattern.search(line)
+            s_match = size_pattern.search(line)
+            sp_match = speed_pattern.search(line)
 
-            if time_match and size_match:
-                encoded_time = parse_ffmpeg_time(time_match.group(1))
-                current_size_kib = int(size_match.group(1))
+            if t_match and s_match:
+                encoded_time = parse_ffmpeg_time(t_match.group(1))
+                current_size_kib = int(s_match.group(1))
+                speed = float(sp_match.group(1).replace('x', '')) if sp_match else 1.0
+
                 elapsed = now - start_time
-                elapsed_human = format_eta(elapsed)
-                speed = float(speed_match.group(1).replace('x', '')) if speed_match else 1.0
-
-                if encoded_time > 0:  # Only proceed if encoded_time is greater than zero
-                    if duration > 0 and speed > 0:
-                        est_total_time = duration / speed
-                        remaining = max(0, int(est_total_time) - int(elapsed))
-                        eta_human = format_eta(remaining)
-                        predicted_size_kib = (current_size_kib / encoded_time) * duration
-                        predicted_size = format_size(predicted_size_kib)
-                        estimated_bitrate = format_bitrate(current_size_kib, encoded_time)
-                        msg = ""
-                        msg += f"Encoded {encoded_time:.2f}s / {duration}s "
-                        msg += f"({(encoded_time / duration) * 100:.1f}%), "
-                        msg += f"Speed: {speed:.2f}x, "
-                        msg += f"Elapsed: {elapsed_human}, "
-                        msg += f"ETA: {eta_human}, "
-                        msg += f"Estimated Size: {predicted_size}, "
-                        msg += f"Estimated Bit rate: {estimated_bitrate}"
-                        logger.info(msg)
-                    else:
-                        logger.info(f"Progress: Encoded {encoded_time:.2f}s, Speed: {speed:.2f}x")
+                remaining = max(0, duration / speed - elapsed)
+                eta_human = format_eta(int(remaining))
+                if encoded_time > 0:
+                    predicted_size = format_size((current_size_kib / encoded_time) * duration)
                 else:
-                    logger.warning("Encoded time is zero, skipping bitrate prediction.")
+                    predicted_size = "estimating…"
+                bitrate = format_bitrate(current_size_kib, encoded_time)
 
-                last_update_time = now
+                msg = (f"Speed: {speed:.2f}x "
+                       f"ETA: {eta_human} "
+                       f"Est Size: {predicted_size} "
+                       f"Bitrate: {bitrate}")
+
+                pbar.update(encoded_time - pbar.n)  # jump to current second
+                pbar.set_description(msg)
+
+                last_update = now
 
     process.wait()
+    pbar.close()
+
     if process.returncode != 0 or not os.path.exists(temp_output):
-        logger.error(f"Re-encoding failed for {file_path}, return code: {process.returncode}")
+        sys.stderr.write(f"\n[ERROR] Re-encoding failed for {file_path} (code {process.returncode})\n")
         return False
 
     return temp_output
@@ -817,18 +905,27 @@ async def is_video_hevc_or_av1(file_path: str) -> bool:
 
 
 async def get_video_duration(filepath):
-    """Returns duration of the video in seconds using OpenCV."""
+    """Returns duration of the video in seconds using OpenCV, rounded to 1 decimal place."""
     cap = cv2.VideoCapture(filepath)
     if not cap.isOpened():
         logger.error(f"Failed to open video file: {filepath}")
-        return 0
+        return 0.0, 0.0
+
     fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    cap.release()
     if fps == 0:
         logger.error(f"Invalid FPS value for file: {filepath}")
-        return 0
-    return int(frame_count // fps), fps
+        return 0.0, 0.0
+
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+
+    if fps == 0:
+        logger.error(f"Invalid FPS value for file: {filepath}")
+        return 0.0, 0.0
+
+    duration = frame_count / fps  # float division
+    duration = round(duration, 1)  # round to 1 decimal place
+    return duration, fps
 
 
 async def get_video_fps(video_path: str) -> float:
@@ -938,13 +1035,32 @@ async def generate_temp_filename(directory, original_name):
 
 
 async def get_video_codec(file_path):
-    """Return the codec name of the first video stream in a video file using ffprobe."""
-    command = f'ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+    """Return 'avc', 'hevc', or 'av1' if the codec is supported; otherwise return None."""
+    command = (
+        f'ffprobe -v error -select_streams v:0 '
+        f'-show_entries stream=codec_name '
+        f'-of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+    )
 
     try:
         stdout, stderr, code = await run_command(command)
         codec_name = stdout.strip().lower()
-        return codec_name
+
+        # Map common codec names to the desired labels
+        codec_map = {
+            "h264": "avc",
+            "avc1": "avc",
+            "hevc": "hevc",
+            "h265": "hevc",
+            "hev1": "hevc",
+            "av01": "av1",
+        }
+
+        if codec_name in codec_map:
+            return codec_map[codec_name]
+        else:
+            logger.warning(f"Codec '{codec_name}' is not supported for {file_path}")
+            return None
 
     except Exception as e:
         logger.error(f"Error getting codec for {file_path}: {e}")
@@ -953,26 +1069,51 @@ async def get_video_codec(file_path):
 
 async def update_metadata(input_file, title, description):
     """
-    Updates the metadata of an MP4 video file with the specified title, description.
+    Updates the metadata of an MP4 video file with the specified title and description,
+    and removes unwanted fields completely.
+    """
+    try:
+        video = MP4(input_file)
+
+        # --- update scene data ---
+        video["\xa9nam"] = [title]  # Title
+        video["\xa9cmt"] = [description]  # Comment/Description
+
+        # --- Remove unwanted ---
+        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+            if key in video:
+                del video[key]
+
+        # Clear encoder info (if not set by your tool)
+        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
+            if "\xa9too" in video:
+                del video["\xa9too"]
+
+        video.save()
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to update metadata for {input_file}: {e}")
+        return False
+
+
+async def update_encoder_metadata(input_file):
+    """
+    Updates the metadata of an MP4 video file, Encoder
 
     Args:
         input_file (str): Path to the video file.
-        title (str): Title to set for the video.
-        description (str): Description to set for the video.
 
     Returns:
         bool: True if the metadata update was successful, False otherwise.
-        :param description:
-        :param title:
-        :param input_file:
+        param input_file:
     """
     try:
         # Load the MP4 file
         video = MP4(input_file)
 
         # Update metadata fields
-        video["\xa9nam"] = title  # Title
-        video["\xa9cmt"] = description  # Comment/Description
+        video["\xa9too"] = "File_Prepare_HF"  # Encoder
 
         # Save changes
         video.save()
@@ -981,4 +1122,47 @@ async def update_metadata(input_file, title, description):
         return True
     except Exception as e:
         logger.error(f"Failed to update metadata for {input_file}: {e}")
+        return False
+
+
+async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> bool:
+    """
+    Recreates the file without any metadata using FFmpeg.
+    Optionally preserves specific metadata passed in `preserve_metadata` dictionary.
+
+    :param file_path: Path to the MP4 file
+    :param preserve_metadata: Dictionary of metadata keys/values to reapply (e.g., {"title": "My Title"})
+    :return: True if successful, False otherwise
+    """
+    try:
+        tmp_file = file_path + ".tmp.mp4"
+
+        # --- Build ffmpeg command ---
+        ffmpeg_cmd = [
+            "ffmpeg", "-hide_banner", "-y",
+            "-i", file_path,
+            "-map", "0",  # include all streams
+            "-c", "copy",  # copy streams without re-encoding
+            "-map_metadata", "-1"  # remove all metadata
+        ]
+
+        # --- Reapply preserved metadata if provided ---
+        if preserve_metadata:
+            for key, value in preserve_metadata.items():
+                ffmpeg_cmd.extend(["-metadata", f"{key}={value}"])
+
+        ffmpeg_cmd.append(tmp_file)
+
+        stdout, stderr, returncode = await run_command(ffmpeg_cmd)
+        if returncode != 0:
+            logger.error(f"FFmpeg failed to recreate {file_path} without metadata:\n{stderr}")
+            return False
+
+        # Overwrite original file
+        shutil.move(tmp_file, file_path)
+        logger.info(f"File recreated without unwanted metadata: {file_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error recreating file without metadata {file_path}: {e}")
         return False
