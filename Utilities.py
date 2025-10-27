@@ -682,7 +682,7 @@ async def generate_template_video(
     if suffix != "":
         processed_string += f" {suffix}"
     # Build output filename and path
-    tags_filename = f"{new_filename_base_name}_{template_base_name}_tags.txt"
+    tags_filename = f"{new_filename_base_name}_tags.txt"
     tags_path = os.path.join(directory, tags_filename)
 
     # Write the string to the file
@@ -726,7 +726,7 @@ async def generate_template_video(
         os.makedirs(directory, exist_ok=True)
 
         # build template filename
-        output_filename = f"{new_filename_base_name}_{template_base_name}.txt"
+        output_filename = f"{new_filename_base_name}_template.txt"
 
         # Save the modified file
         output_path = os.path.join(directory, output_filename)

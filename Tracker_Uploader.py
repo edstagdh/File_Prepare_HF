@@ -161,10 +161,10 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         template_base_name, _ = os.path.splitext(template_name)
         torrent_prefix_name = template_base_name.replace("Template", "")
         # Load the tags content
-        tags_filename = os.path.join(output_dir, f"{new_filename_base_name}_{template_base_name}_tags.txt")
+        tags_filename = os.path.join(output_dir, f"{new_filename_base_name}_tags.txt")
         with open(tags_filename, "r", encoding="utf-8") as f:
             tags_content = f.read()
-        template_filename = os.path.join(output_dir, f"{new_filename_base_name}_{template_base_name}.txt")
+        template_filename = os.path.join(output_dir, f"{new_filename_base_name}_template.txt")
         with open(template_filename, "r", encoding="utf-8") as f:
             template_content = f.read()
 
@@ -265,8 +265,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         list_suffixes_ignore = [
             "_preview.webp", "_preview.webm", "_preview.gif", "_preview_sheet.webp",
             "_preview_sheet.webm", "_preview_sheet.gif", "_hamster.txt", "_imgbb.txt",
-            "_imgbox.txt", "_EMP_Template.txt", "_EMP_Template_tags.txt",
-            "_HF_Template.txt", "_HF_Template_tags.txt", "_mediainfo.txt"
+            "_imgbox.txt", f"_template.txt", f"_tags.txt", "_mediainfo.txt"
         ]
         torrent_file = await generate_torrent_process(output_dir, save_path, new_filename_base_name, p_ann_url, torrent_prefix_name, list_suffixes_ignore)
         # Insert Torrent File

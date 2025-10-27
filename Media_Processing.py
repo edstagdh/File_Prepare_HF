@@ -24,11 +24,25 @@ from tqdm import tqdm
 async def has_unwanted_metadata(file_path) -> bool:
     try:
         media_info = MediaInfo.parse(file_path)
+
         for track in media_info.tracks:
-            if track.track_type.lower() in ["video", "audio"]:
+            track_type = track.track_type.lower()
+
+            # Debug view tracks metadata fields
+            # for attr, value in track.__dict__.items():
+            #     logger.debug(f"{attr} = {value}")
+
+            # ✅ Check Encoded/Tagged date everywhere
+            if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
+                return True
+
+            # ✅ Only check title on audio/video tracks
+            if track_type in ["video", "audio"]:
                 if getattr(track, "title", None):
                     return True
+
         return False
+
     except Exception as e:
         logger.error(f"Error reading metadata: {e}")
         return False

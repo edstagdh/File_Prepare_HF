@@ -153,8 +153,10 @@ async def filter_entries_by_user_choice(valid_entries):
                 time.strftime('%H:%M:%S', time.gmtime(duration))
                 if duration is not None else None
             )
+            performers = ", ".join([p.get('name', 'Unknown') for p in item.get('performers', [])])
             try:
-                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | Duration: {formatted_duration}\n{item['url']} | {base_url}{item['slug']}")
+                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | Duration: {formatted_duration} | Performers: {performers}"
+                            f"\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
