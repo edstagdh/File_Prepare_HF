@@ -18,6 +18,7 @@ from pymediainfo import MediaInfo
 from Utilities import run_command, load_json_file
 from TPDB_API_Processing import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
 from tqdm import tqdm
 
 
@@ -27,18 +28,28 @@ async def has_unwanted_metadata(file_path) -> bool:
 
         for track in media_info.tracks:
             track_type = track.track_type.lower()
+            # logger.debug(track_type)
 
             # Debug view tracks metadata fields
             # for attr, value in track.__dict__.items():
             #     logger.debug(f"{attr} = {value}")
 
+            title = (track, "encoded_date", None)
             # ✅ Check Encoded/Tagged date everywhere
             if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
                 return True
 
-            # ✅ Only check title on audio/video tracks
-            if track_type in ["video", "audio"]:
+            # ✅ Custom logic for audio track
+            if track_type == "audio":
+                title = getattr(track, "title", None)
+                if title is not None and title != "Stereo":
+                    # Title exists and is not equal to "Stereo"
+                    return True
+
+            # ✅ Custom logic for video track
+            if track_type == "video":
                 if getattr(track, "title", None):
+                    # Video has any title attribute
                     return True
 
         return False
@@ -1149,15 +1160,17 @@ async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> 
     :return: True if successful, False otherwise
     """
     try:
-        tmp_file = file_path + ".tmp.mp4"
+        original = Path(file_path)
+        tmp_file = Path(str(file_path) + ".tmp.mp4")
+        backup_file = Path(str(file_path) + ".backup.mp4")
 
         # --- Build ffmpeg command ---
         ffmpeg_cmd = [
             "ffmpeg", "-hide_banner", "-y",
             "-i", file_path,
-            "-map", "0",  # include all streams
-            "-c", "copy",  # copy streams without re-encoding
-            "-map_metadata", "-1"  # remove all metadata
+            "-map", "0",           # include all streams
+            "-c", "copy",         # copy streams without re-encoding
+            "-map_metadata", "-1" # remove all metadata
         ]
 
         # --- Reapply preserved metadata if provided ---
@@ -1165,18 +1178,43 @@ async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> 
             for key, value in preserve_metadata.items():
                 ffmpeg_cmd.extend(["-metadata", f"{key}={value}"])
 
-        ffmpeg_cmd.append(tmp_file)
+        ffmpeg_cmd.append(str(tmp_file))
 
         stdout, stderr, returncode = await run_command(ffmpeg_cmd)
         if returncode != 0:
             logger.error(f"FFmpeg failed to recreate {file_path} without metadata:\n{stderr}")
+            # Ensure tmp file is removed if FFmpeg failed
+            if tmp_file.exists():
+                tmp_file.unlink()
             return False
 
-        # Overwrite original file
-        shutil.move(tmp_file, file_path)
-        logger.info(f"File recreated without unwanted metadata: {file_path}")
+        # --- Backup original file before replacement ---
+        if original.exists():
+            shutil.move(str(original), str(backup_file))
+
+        # --- Replace original file with temp file ---
+        shutil.move(str(tmp_file), str(original))
+        logger.info(f"File successfully recreated without unwanted metadata: {file_path}")
+
+        # --- Remove backup if everything went well ---
+        if backup_file.exists():
+            backup_file.unlink()
+
         return True
 
     except Exception as e:
         logger.error(f"Error recreating file without metadata {file_path}: {e}")
+
+        # Restore from backup if something went wrong
+        if backup_file.exists():
+            if original.exists():
+                original.unlink(missing_ok=True)
+            shutil.move(str(backup_file), str(original))
+            logger.warning(f"Original file restored from backup after failure: {file_path}")
+
+        # Cleanup temp file
+        if tmp_file.exists():
+            tmp_file.unlink()
+
         return False
+

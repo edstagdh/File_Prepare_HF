@@ -604,6 +604,9 @@ async def generate_template_video(
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
+    # Make a lowercase mapping of the JSON to support case-insensitive lookup
+    performers_images_lower = {k.lower(): v for k, v in performers_images.items()}
+
     if formatted_names:
         # Step 1: Replace ", " with a separator for easy splitting
         name_blocks = formatted_names.replace(", ", "\n").splitlines()
@@ -611,7 +614,8 @@ async def generate_template_video(
         processed_blocks = []
         mapped_names_list = []
 
-        all_in_images = all(block.strip() in performers_images for block in name_blocks)
+        # Step 2: Check if all names exist in the JSON (case-insensitive)
+        all_in_images = all(block.strip().lower() in performers_images_lower for block in name_blocks)
 
         for block in name_blocks:
             full_name = block.strip()
@@ -626,7 +630,8 @@ async def generate_template_video(
 
             # Step 2b: Only add [img] if *all* performers are in performers_images
             if all_in_images:
-                mapped_names_list.append(f"[img]{performers_images[full_name]}[/img]")
+                # Use lowercase key for lookup
+                mapped_names_list.append(f"[img]{performers_images_lower[full_name.lower()]}[/img]")
             else:
                 mapped_names_list.append(full_name)
     else:

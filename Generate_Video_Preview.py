@@ -47,6 +47,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         transition_mode = config["transition_mode"].lower()
         available_transitions = config["available_transitions"]
         transition_duration = config["transition_duration"]
+        fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -67,7 +68,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
-                                  transition_mode, available_transitions, transition_duration)
+                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -260,7 +261,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
-                        available_transitions, transition_duration):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -441,11 +442,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
         if is_vertical:
             if not black_bars:
-                scale_option = "scale=-2:480"
+                scale_option = "scale=-2:650"
             else:
-                scale_option = "scale=480:-2"
+                scale_option = "scale=650:-2"
         else:
-            scale_option = "scale=480:-2"
+            scale_option = "scale=650:-2"
 
         # Create Preview files if selected
         # Create Preview WebP
@@ -453,7 +454,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webp_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-vf \"fps=24,{scale_option}:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
+                f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
@@ -525,7 +526,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
                                                    preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path,
-                                                   hamster_upload_previews)
+                                                   hamster_upload_previews, num_of_segments, fit_thumbs_in_less_rows)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -708,14 +709,14 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
             # Choose FFmpeg command based on aspect ratio settings
             if is_vertical and black_bars:
-                vf_filter = "scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2"
+                vf_filter = "scale=650:366:force_original_aspect_ratio=decrease,pad=650:366:(ow-iw)/2:(oh-ih)/2"
             elif is_vertical:
-                vf_filter = "scale=270:480"
+                vf_filter = "scale=236:420"
             else:
-                vf_filter = "scale=480:270"
+                vf_filter = "scale=650:366"
 
             ffmpeg_segment_command = (
-                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset slow "
+                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset superfast "
                 f"-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} "
                 f"-vf \"{vf_filter}\" \"{temp_file}\" -y"
             )
@@ -731,7 +732,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -788,7 +789,7 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path, font_path):
+async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical):
     """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
     try:
         match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
@@ -812,15 +813,18 @@ async def overlay_timestamp(temp_folder, video_path, font_path):
                           (0, -2), (0, 2),
                           (2, -2), (2, 0), (2, 2)]
 
+        # define font size for vertical/horizontal videos
+        font_size = 30 if is_vertical else 60
+
         for dx, dy in shadow_offsets:
             drawtext_filters.append(
-                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize=32:"
+                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize={font_size}:"
                 f"x=(w-text_w)-10+{dx}:y=10+{dy}:"
                 f"alpha=1"
             )
 
         drawtext_filters.append(
-            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize=32:"
+            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize={font_size}:"
             f"x=(w-text_w)-10:y=10:"
             f"borderw=0:alpha=1"
         )
@@ -937,7 +941,8 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
-                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews):
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews,
+                                           num_of_segments, fit_thumbs_in_less_rows):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -949,9 +954,15 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
 
         # Group the video files in batches of 3 or 4
         if grid == 3:
-            video_groups = [video_files[i:i + 3] for i in range(0, len(video_files), 3)]
+            if is_vertical and fit_thumbs_in_less_rows and len(lines) >= 6:
+                video_groups = [video_files[i:i + 3*2] for i in range(0, len(video_files), 3*2)]
+            else:
+                video_groups = [video_files[i:i + 3] for i in range(0, len(video_files), 3)]
         elif grid == 4:
-            video_groups = [video_files[i:i + 4] for i in range(0, len(video_files), 4)]
+            if is_vertical and fit_thumbs_in_less_rows and len(lines) >= 8:
+                video_groups = [video_files[i:i + 4*2] for i in range(0, len(video_files), 4*2)]
+            else:
+                video_groups = [video_files[i:i + 4] for i in range(0, len(video_files), 4)]
         else:
             logger.error(f"Invalid grid value: {grid}. Only 3 or 4 are allowed.")
             return
@@ -983,10 +994,9 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             output_file = os.path.join(temp_folder, f"stacked_{index + 1}.mp4")
             intermediate_files.append(output_file)
 
-            if grid == 3:
-                filter_complex = "[0:v][1:v][2:v]hstack=inputs=3[v]"
-            elif grid == 4:
-                filter_complex = "[0:v][1:v][2:v][3:v]hstack=inputs=4[v]"
+            num_inputs = len(group)
+            inputs_tags = ''.join(f'[{i}:v]' for i in range(num_inputs))
+            filter_complex = f"{inputs_tags}hstack=inputs={num_inputs}[v]"
 
             command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}\""
             stdout, stderr, exit_code = await run_command(command)
@@ -1022,7 +1032,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # Add scale if grid is 4
         if grid == 4:
             if not is_vertical or (is_vertical and add_black_bars):
-                downscale_filter = "scale=1890:trunc(ih/2)*2"
+                downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
                 downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
                 # logger.debug(downscale_command)
                 stdout, stderr, exit_code = await run_command(downscale_command)

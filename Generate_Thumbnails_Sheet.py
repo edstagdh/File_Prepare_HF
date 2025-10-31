@@ -154,8 +154,8 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
 
 
 async def generate_thumbnails_sheet(image_dir, thumb_width, columns, padding, output_path, timestamps,
-                                 info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows,
-                                 alternate_layout=False):
+                                    info_image_path, font_full_name, is_vertical, fit_thumbs_in_less_rows,
+                                    alternate_layout=False):
     """
     Generates a Thumbnails Sheet from the extracted frames and saves it as an image.
 
