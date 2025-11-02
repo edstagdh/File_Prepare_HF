@@ -108,6 +108,8 @@ async def process_files():
             exit(41)
         elif not create_template_file:
             exit(42)
+        elif not hamster_upload_cover or not hamster_upload_thumbnails or not hamster_upload_previews:
+            exit(43)
 
     if create_template_file:
         if template_file_name != "":

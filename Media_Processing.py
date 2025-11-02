@@ -977,6 +977,8 @@ async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bo
     # Match only specific standard resolutions
     if height >= 2160:
         resolution = "2160p"
+    elif height >= 1440:
+        resolution = "1440p"
     elif height >= 1080:
         resolution = "1080p"
     elif height >= 720:

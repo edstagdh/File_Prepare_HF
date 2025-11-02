@@ -666,7 +666,8 @@ async def generate_template_video(
         if cleaned_tag != tag.replace(" ", "") and (cleaned_tag.replace(" ", "")) not in processed_string:
             processed_string += " " + cleaned_tag.replace(" ", "").lower()
 
-    processed_string += " " + " ".join(scene_tags)
+    if scene_tags:
+        processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
     if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
         processed_string += f" {resolution} FHD"
