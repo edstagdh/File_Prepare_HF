@@ -215,7 +215,7 @@ async def process_files():
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
-                new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
                     file_base_name,
                     None,
                     None,
@@ -256,7 +256,7 @@ async def process_files():
                 scene_api_date = f"{year_full}-{month}-{day}"
 
                 # Query scene data from API
-                new_title, performers, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
+                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags = await get_data_from_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
@@ -270,7 +270,7 @@ async def process_files():
             # Prepare critical fields dictionary
             critical_fields = {
                 "new_title": new_title,
-                "performers": performers,
+                "performers": performers_names,
                 "image_url": image_url,
                 "slug": slug,
                 "scene_url": scene_url,
@@ -339,12 +339,12 @@ async def process_files():
                 new_title = new_title[:-3]
 
             # Validate performers (only if not using title as fallback)
-            if (not performers or performers == "Invalid") and not use_title:
+            if (not performers_names or performers_names == "Invalid") and not use_title:
                 logger.error(f"{error_prefix} - missing or invalid performers")
                 raise ValueError(f"Unable to find valid performers for {file_full_name}")
 
         except Exception as e:
-            logger.exception(f"Error in API data for file: {file} - {str(e)}")
+            logger.error(f"Error in API data for file: {file} - {str(e)}")
             logger.warning(f"End file: {file_full_name}")
             failed_files.append(file_full_name)
             continue  # Skip to the next file
@@ -369,7 +369,7 @@ async def process_files():
             suffix = ""
 
         # Sanitize and format performers
-        formatted_filename_performers_names = await format_performers(performers, 2)
+        formatted_filename_performers_names = await format_performers(performers_names, 2)
 
         # Sanitize title
         safe_title = await clean_filename(new_title, bad_words, mode=2)
@@ -418,7 +418,10 @@ async def process_files():
             continue  # Skip to the next file
 
         # Format performer names for display/use
-        formatted_names = await format_performers(performers, mode=1)
+        formatted_names = await format_performers(performers_names, mode=1)
+
+        # Format performers names for images matching
+        performers_images_names = await format_performers(performers_names, mode=3)
 
         # Construct new title
         if tpdb_site != site_studio and site_studio:
@@ -565,9 +568,9 @@ async def process_files():
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
-                 [performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
+                 [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
-                 [new_title, scene_pretty_date, scene_description, formatted_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
+                 [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
                   template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
             ]
             failed = False
@@ -608,20 +611,37 @@ async def process_files():
             if scene_description == "Scene description not found" and create_template_file:
                 logger.warning("Scene description not found, please update manually in template")
             if upload_to_tracker:
-                for tracker_name in tracker_mode:
+                trackers_len = len(tracker_mode)
+                for i, tracker_name in enumerate(tracker_mode):
                     try:
                         if not (isinstance(tracker_name, str) and tracker_name.strip()):
                             logger.error(f"Invalid tracker name: {tracker_name}")
-                            raise
-                        tracker_result = await process_upload_to_tracker(tracker_name, new_filename_base_name, output_directory, template_file_full_path, new_title,
-                                                                         hamster_file_path, directory, remove_e_files, resolution, codec)
+                            raise ValueError("Invalid tracker name")
+
+                        is_last_tracker = (i == trackers_len - 1)  # ✅ True if this is the last tracker
+                        tracker_result = await process_upload_to_tracker(
+                            tracker_name,
+                            new_filename_base_name,
+                            output_directory,
+                            template_file_full_path,
+                            new_title,
+                            hamster_file_path,
+                            directory,
+                            remove_e_files,
+                            resolution,
+                            codec,
+                            is_last_tracker
+                        )
+
                         if not tracker_result:
-                            raise
+                            raise ValueError("Tracker upload failed")
+
                     except Exception as e:
-                        logger.error(f"Error uploading to tracker {e}")
+                        logger.error(f"Error uploading to tracker {tracker_name}: {e}")
                         logger.warning(f"End file: {new_file_full_path}")
                         failed_files.append(file_full_name)
-                        continue  # Skip to the next file
+                        break
+
             processed_files += 1
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)

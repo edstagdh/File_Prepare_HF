@@ -138,7 +138,7 @@ async def init_browser(config):
 
 
 async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files,
-                                    resolution, codec):
+                                    resolution, codec, is_last_tracker):
     driver = None
     try:
         # Load Config_Tracker.json
@@ -159,7 +159,6 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         # Additional information
         _, template_name = os.path.split(template_file_full_path)
         template_base_name, _ = os.path.splitext(template_name)
-        torrent_prefix_name = template_base_name.replace("Template", "")
         # Load the tags content
         tags_filename = os.path.join(output_dir, f"{new_filename_base_name}_tags.txt")
         with open(tags_filename, "r", encoding="utf-8") as f:
@@ -267,7 +266,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
             "_preview_sheet.webm", "_preview_sheet.gif", "_hamster.txt", "_imgbb.txt",
             "_imgbox.txt", f"_template.txt", f"_tags.txt", "_mediainfo.txt"
         ]
-        torrent_file = await generate_torrent_process(output_dir, save_path, new_filename_base_name, p_ann_url, torrent_prefix_name, list_suffixes_ignore)
+        torrent_file = await generate_torrent_process(output_dir, save_path, new_filename_base_name, p_ann_url, list_suffixes_ignore)
         # Insert Torrent File
         try:
             if not torrent_file:
@@ -310,14 +309,31 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
 
                 return False
 
+            def delete_torrent_file(torrent_file):
+                file_path = Path(torrent_file)
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                        logger.info(f"Deleted file: {file_path}")
+                        return True
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {file_path}: {e}")
+                        return False
+
             message_text = WebDriverWait(driver, 60, poll_frequency=0.5).until(get_dupe_message)
 
             # Analyze message
             msg_lower = message_text.lower()
             if "possible dupes" in msg_lower:
                 logger.warning(f"Duplicate detected: {message_text}")
+                torrent_file_cleanup = delete_torrent_file(torrent_file)
+                if not torrent_file_cleanup:
+                    logger.warning(f"failed to delete existing torrent file: {torrent_file}")
             elif "no exact size dupes" in msg_lower:
                 logger.success(f"No duplicates detected: {message_text}")
+                torrent_file_cleanup = delete_torrent_file(torrent_file)
+                if not torrent_file_cleanup:
+                    logger.warning(f"failed to delete existing torrent file: {torrent_file}")
             else:
                 logger.info(f"Dupe check completed: {message_text}")
 
@@ -337,7 +353,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
 
             if form_submit_result:
                 # Cleanup files regardless of form result
-                if remove_e_files:
+                if remove_e_files and is_last_tracker:
                     await delete_prefixed_files(output_dir, list_suffixes_ignore, new_filename_base_name)
                 logger.success("Form submitted successfully!")
                 return True

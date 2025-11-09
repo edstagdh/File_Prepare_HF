@@ -221,6 +221,7 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
         base_name = re.sub(re.escape(".Xxx.1080p.Mp4-ktr"), "", base_name, flags=re.IGNORECASE)
         for word in bad_words:
             base_name = re.sub(re.escape(word), "", base_name, flags=re.IGNORECASE)
+            logger.debug(base_name)
         # Remove unwanted characters
         base_name = base_name.translate(str.maketrans("", "", CLEAN_CHARS))
 
@@ -362,7 +363,7 @@ async def format_performers(performers, mode):
     unique_performers = sorted(set(p[0] for p in performers))
 
     if mode == 1:  # Title (allow spaces)
-        translation_table = str.maketrans("", "", "!@#$%^&*()_+='")
+        translation_table = str.maketrans("", "", "!@#$%^&*_+='")
         sanitized_performers = [
             p.translate(translation_table).replace(".", " ") for p in unique_performers
         ]
@@ -372,12 +373,27 @@ async def format_performers(performers, mode):
         translation_table = str.maketrans("", "", "!@#$%^&*()_+='")
         sanitized_performers = []
         for p in unique_performers:
+            # Remove anything inside parentheses and the parentheses themselves
+            p = re.sub(r"\s*\([^)]*\)", "", p)
+
+            # Replace spaces with dots and sanitize
             p = p.replace(" ", ".")
             p = p.translate(translation_table)
             p = re.sub(r"\.{2,}", ".", p)
             sanitized_performers.append(p)
 
         return ".and.".join(sanitized_performers)
+
+    elif mode == 3:  # Performers Images Json
+        translation_table = str.maketrans("", "", "!@#$%^&*()_+='")
+        sanitized_performers = []
+        for p in unique_performers:
+            # Remove anything inside parentheses and the parentheses themselves
+            p = re.sub(r"\s*\([^)]*\)", "", p)
+            p = p.translate(translation_table)
+            sanitized_performers.append(p)
+
+        return sanitized_performers
 
     else:
         logger.error("Error: Unrecognized mode passed to format_performers.")
@@ -461,7 +477,7 @@ async def generate_template_video(
         new_title: str,
         scene_pretty_date: str,
         scene_description: str,
-        formatted_names: str,
+        scene_performers: str,
         fps: float,
         resolution: str,
         is_vertical: bool,
@@ -607,20 +623,38 @@ async def generate_template_video(
     # Make a lowercase mapping of the JSON to support case-insensitive lookup
     performers_images_lower = {k.lower(): v for k, v in performers_images.items()}
 
-    if formatted_names:
-        # Step 1: Replace ", " with a separator for easy splitting
-        name_blocks = formatted_names.replace(", ", "\n").splitlines()
+    all_in_images = False
+
+    if scene_performers:
+        translation_table = str.maketrans("", "", "!@#$%^&*()_+='")
 
         processed_blocks = []
         mapped_names_list = []
+        aliases_list = []
 
-        # Step 2: Check if all names exist in the JSON (case-insensitive)
-        all_in_images = all(block.strip().lower() in performers_images_lower for block in name_blocks)
+        # Clean and normalize names
+        cleaned_names = []
 
-        for block in name_blocks:
-            full_name = block.strip()
+        for data in scene_performers:
+            performer_name = data[0]
+            # Extract alias if it exists inside parentheses
+            alias_match = re.search(r"\(([^)]*)\)", performer_name)
+            if alias_match:
+                alias = alias_match.group(1).strip()
+                aliases_list.append(alias)
+            else:
+                alias = None
 
-            # Step 2a: Prepare dot-joined name (e.g., "John Doe" -> "John.Doe")
+            # Remove anything inside parentheses and unwanted characters
+            p = re.sub(r"\s*\([^)]*\)", "", performer_name).strip()
+            p = p.translate(translation_table)
+            cleaned_names.append(p)
+
+        # Case-insensitive check if *all* names exist in performers_images_lower
+        all_in_images = all(p.lower() in performers_images_lower for p in cleaned_names)
+
+        # Process each cleaned name
+        for full_name in cleaned_names:
             names = full_name.split()
             if len(names) > 1:
                 joined = ".".join(names)
@@ -628,12 +662,27 @@ async def generate_template_video(
             else:
                 processed_blocks.append(full_name)
 
-            # Step 2b: Only add [img] if *all* performers are in performers_images
+            # Add [img] tag if all performers exist in performers_images_lower
             if all_in_images:
-                # Use lowercase key for lookup
-                mapped_names_list.append(f"[img]{performers_images_lower[full_name.lower()]}[/img]")
+                lower_name = full_name.lower()
+                if lower_name in performers_images_lower:
+                    mapped_names_list.append(f"[img]{performers_images_lower[lower_name]}[/img]")
+                else:
+                    mapped_names_list.append(full_name)
             else:
                 mapped_names_list.append(full_name)
+
+        for alias in aliases_list:
+            names = alias.split()
+            if len(names) > 1:
+                # If the second word starts with "id" followed by digits (case-insensitive)
+                if re.match(r"^id\d+$", names[1], re.IGNORECASE):
+                    joined = names[0]  # keep only the first word
+                else:
+                    joined = ".".join(names)
+                processed_blocks.append(joined)
+            else:
+                processed_blocks.append(alias)
     else:
         processed_blocks = []
         mapped_names_list = []
@@ -644,7 +693,7 @@ async def generate_template_video(
     # Join mapped names:
     # - if using [img], separate by a single space
     # - if not using [img], separate by ", "
-    if formatted_names:
+    if scene_performers:
         if all_in_images:
             # ✅ 3 per row: insert a newline after every 3 images
             mapped_names = ""

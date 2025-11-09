@@ -399,14 +399,20 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             if len(data) < 2:
                 logger.warning(f"Skipping invalid tuple: {data}")
                 continue
+            # Clean performer name if alias is included:
+            translation_table = str.maketrans("", "", "!@#$%^&*()_+='")
+            # Remove anything inside parentheses and the parentheses themselves
             performer_name = data[0]
+            p = re.sub(r"\s*\([^)]*\)", "", performer_name)
+            p = p.translate(translation_table)
+
             performer_id = data[1]
 
-            if performer_name in performers_images:
-                logger.debug(f"Performer {performer_name} already has mapped image in json file")
+            if p in performers_images:
+                logger.debug(f"Performer {p} already has mapped image in json file")
                 continue
-            logger.debug(f"Processing performer {performer_name}, ID: {performer_id}")
-            performer_posters, performer_slug = await get_performer_profile_picture(performer_name, performer_id, posters_limit)
+            logger.debug(f"Processing performer {p}, ID: {performer_id}")
+            performer_posters, performer_slug = await get_performer_profile_picture(p, performer_id, posters_limit)
             # performer_url = tpdb_performer_url + performer_slug if performer_slug else ""
             # logger.debug(f"Performer URL: {performer_url}")
             downloaded_files = await download_poster_images(performer_posters, faces_dir, performer_slug, posters_limit)
@@ -418,11 +424,11 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             text_color = (255, 255, 255)  # Text color (black)
             position_percentage = 0.8
             for file in downloaded_files:
-                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, performer_name, font_size, text_color, position_percentage, MTCNN,
+                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, p, font_size, text_color, position_percentage, MTCNN,
                                         performer_image_output_format, font_full_name)
 
         except Exception:
-            logger.exception(f"Error processing performer {performer_name}, ID: {performer_id}")
+            logger.exception(f"Error processing performer {p}, ID: {performer_id}")
             return False
     return True
 
@@ -809,7 +815,7 @@ async def re_encode_to_hevc(file_path, is_vertical,
         "-hide_banner",
         "-i", file_path,
         "-map", "0:v:0",
-        "-map", "0:a",
+        "-map", "0:a?",
         "-c:v", "libx265",
         "-vtag", "hvc1",
         "-x265-params", x265_params,
@@ -1152,13 +1158,11 @@ async def update_encoder_metadata(input_file):
         return False
 
 
-async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> bool:
+async def reset_all_metadata(file_path: str) -> bool:
     """
     Recreates the file without any metadata using FFmpeg.
     Optionally preserves specific metadata passed in `preserve_metadata` dictionary.
-
     :param file_path: Path to the MP4 file
-    :param preserve_metadata: Dictionary of metadata keys/values to reapply (e.g., {"title": "My Title"})
     :return: True if successful, False otherwise
     """
     try:
@@ -1168,19 +1172,17 @@ async def reset_all_metadata(file_path: str, preserve_metadata: dict = None) -> 
 
         # --- Build ffmpeg command ---
         ffmpeg_cmd = [
-            "ffmpeg", "-hide_banner", "-y",
-            "-i", file_path,
-            "-map", "0",           # include all streams
-            "-c", "copy",         # copy streams without re-encoding
-            "-map_metadata", "-1" # remove all metadata
-        ]
-
-        # --- Reapply preserved metadata if provided ---
-        if preserve_metadata:
-            for key, value in preserve_metadata.items():
-                ffmpeg_cmd.extend(["-metadata", f"{key}={value}"])
-
-        ffmpeg_cmd.append(str(tmp_file))
+            "ffmpeg",
+            "-hide_banner",
+            "-y",
+            "-i",
+            file_path,
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-c", "copy",
+            "-map_metadata", "-1",
+            str(tmp_file)
+                      ]
 
         stdout, stderr, returncode = await run_command(ffmpeg_cmd)
         if returncode != 0:

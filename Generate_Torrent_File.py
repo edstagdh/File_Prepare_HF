@@ -30,7 +30,6 @@ async def create_torrent_file(
     base_name: str,
     suffixes: list,
     tracker_private_ann_url: str,
-    torrent_prefix_name: str,
     debug_mode: bool
 ):
     logger.info(f"Starting torrent creation for content: {content_path}")
@@ -47,11 +46,19 @@ async def create_torrent_file(
         logger.debug(f"Exclude globs for Torf: {exclude_globs}")
 
     torrent_name = f"{os.path.basename(content_root_path)}"
-    torrent_file_path = os.path.join(save_path, f"{torrent_prefix_name}{torrent_name}.torrent")
+    torrent_file_path = os.path.join(save_path, f"{torrent_name}.torrent")
     Path(save_path).mkdir(parents=True, exist_ok=True)
 
     # Torf is blocking, so run in a thread
     def _create_torrent_blocking():
+        # --- Check if torrent already exists ---
+        if os.path.exists(torrent_file_path):
+            try:
+                os.remove(torrent_file_path)
+                logger.warning(f"Existing torrent file overwritten: {torrent_file_path}")
+            except Exception as e:
+                logger.error(f"Failed to remove existing torrent file: {torrent_file_path} ({e})")
+
         t = Torrent(
             path=content_root_path,
             trackers=[tracker_private_ann_url],
@@ -59,6 +66,7 @@ async def create_torrent_file(
             piece_size=256 * 1024,  # 256 KB pieces
             exclude_globs=exclude_globs
         )
+
         # Override the torrent name (what clients see)
         t.name = torrent_name
 
@@ -77,7 +85,7 @@ async def create_torrent_file(
         raise
 
 
-async def generate_torrent_process(files_path, save_path, base_name, p_ann_url, torrent_prefix_name, list_suffixes_ignore):
+async def generate_torrent_process(files_path, save_path, base_name, p_ann_url, list_suffixes_ignore):
     user_debug_flag = False  # Toggle debug logs
 
     logger.info("Starting main torrent processing routine.")
@@ -88,7 +96,6 @@ async def generate_torrent_process(files_path, save_path, base_name, p_ann_url, 
             base_name=base_name,
             suffixes=list_suffixes_ignore,
             tracker_private_ann_url=p_ann_url,
-            torrent_prefix_name=torrent_prefix_name,
             debug_mode=user_debug_flag
         )
         logger.success(f"Processing complete. File: {torrent_file}")

@@ -354,9 +354,18 @@ async def extract_female_performers(selected_entry):
                     (performer["parent"]["extras"].get("gender") == "Female" or performer["parent"]["extras"].get("gender") == "Transgender Female")
             ):
                 if performer.get("name") == performer["parent"].get("name"):
+                    # no alias used
                     female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
                 else:
-                    female_performers.append((performer["parent"].get("name", "Unknown"), performer["parent"].get("id", "")))
+                    # alias used
+                    full_alias = performer.get("name", "")
+                    # Remove any word that starts with ID followed by optional space and digits
+                    alias = re.sub(r"\bID\s*\d+\b", "", full_alias, flags=re.IGNORECASE).strip()
+                    # Remove extra spaces that may remain after deletion
+                    alias = re.sub(r"\s{2,}", " ", alias)
+
+                    p_name = f"{performer['parent'].get('name', 'Unknown')}({alias})"
+                    female_performers.append((p_name, performer["parent"].get("id", "")))
             elif (
                     performer.get("parent") and
                     performer["parent"].get("extras") and
