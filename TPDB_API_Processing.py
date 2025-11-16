@@ -10,7 +10,7 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, filename_ignore_performer_ID, mode):
     max_retries = 3
     delay = 5
     try:
@@ -90,7 +90,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry)
+            female_performers = await extract_female_performers(selected_entry, filename_ignore_performer_ID)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
@@ -344,7 +344,14 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
         return None
 
 
-async def extract_female_performers(selected_entry):
+async def extract_female_performers(selected_entry, filename_ignore_performer_ID):
+
+    def clean_name(name: str) -> str:
+        # Remove any word that starts with ID followed by optional space and digits
+        cleaned_name = re.sub(r"\bID\s*\d+\b", "", name, flags=re.IGNORECASE).strip()
+        # Remove extra spaces that may remain after deletion
+        cleaned_name = re.sub(r"\s{2,}", " ", cleaned_name)
+        return cleaned_name
     try:
         female_performers = []
         for performer in selected_entry.get("performers", []):  # Access the 'performers' list directly
@@ -355,16 +362,22 @@ async def extract_female_performers(selected_entry):
             ):
                 if performer.get("name") == performer["parent"].get("name"):
                     # no alias used
-                    female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
+                    if filename_ignore_performer_ID:
+                        performer_name = clean_name(performer.get("name", "Unknown"))
+                        if performer_name != "":
+                            female_performers.append((performer_name, performer["parent"].get("id", "")))
+                        else:
+                            female_performers.append(("Invalid Name", performer["parent"].get("id", "")))
+                    else:
+                        female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
                 else:
                     # alias used
-                    full_alias = performer.get("name", "")
-                    # Remove any word that starts with ID followed by optional space and digits
-                    alias = re.sub(r"\bID\s*\d+\b", "", full_alias, flags=re.IGNORECASE).strip()
-                    # Remove extra spaces that may remain after deletion
-                    alias = re.sub(r"\s{2,}", " ", alias)
-
-                    p_name = f"{performer['parent'].get('name', 'Unknown')}({alias})"
+                    alias = clean_name(performer.get("name", ""))
+                    if alias == "":
+                        logger.warning("No valid alias found for this performer.")
+                        p_name = f"{performer['parent'].get('name', 'Unknown')}"
+                    else:
+                        p_name = f"{performer['parent'].get('name', 'Unknown')}({alias})"
                     female_performers.append((p_name, performer["parent"].get("id", "")))
             elif (
                     performer.get("parent") and
@@ -373,8 +386,16 @@ async def extract_female_performers(selected_entry):
             ):
                 # Ask the user for input
                 user_input = input(f"Treat performer '{performer.get('name', 'Unknown')}' as Female? (yes/no): ").strip().lower()
+
                 if user_input in ("yes", "y"):
-                    female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
+                    if filename_ignore_performer_ID:
+                        performer_name = clean_name(performer.get("name", "Unknown"))
+                        if performer_name != "":
+                            female_performers.append((performer_name, performer["parent"].get("id", "")))
+                        else:
+                            female_performers.append(("Invalid Name", performer["parent"].get("id", "")))
+                    else:
+                        female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
 
         female_performers.sort()
         if female_performers:

@@ -63,6 +63,7 @@ async def process_files():
         font_full_name = config["font_full_name"]
         ignore_list = config["ignore_list"]
         filename_ignore_part_x = config["filename_ignore_part_x"]
+        filename_ignore_performer_ID = config["filename_ignore_performer_ID"]
         free_string_parse = config["free_string_parse"]
         create_sub_folder = config["create_sub_folder"]
         cover_regeneration_mode = config["cover_regeneration_mode"]
@@ -223,6 +224,7 @@ async def process_files():
                     None,
                     create_template_file,
                     jav_api_mode,
+                    filename_ignore_performer_ID,
                     mode=1
                 )
 
@@ -264,6 +266,7 @@ async def process_files():
                     part_match,
                     create_template_file,
                     jav_api_mode,
+                    filename_ignore_performer_ID,
                     mode=2
                 )
 
@@ -446,7 +449,7 @@ async def process_files():
         if str(file) != str(new_file_full_path):
             rename_result, error_msg = await rename_file(str(file), new_full_filename)
             if not rename_result:
-                # logger.error(f"An error has occured while attempting to rename the file: {error_msg}")
+                # logger.error(f"An error has occurred while attempting to rename the file: {error_msg}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
                 continue  # Skip to the next file
