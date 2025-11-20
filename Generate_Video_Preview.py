@@ -47,6 +47,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         available_transitions = config["available_transitions"]
         transition_duration = config["transition_duration"]
         fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
+        preview_quality_resolution = config["preview_quality_resolution"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -67,7 +68,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
-                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows)
+                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -260,7 +261,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
-                        available_transitions, transition_duration, fit_thumbs_in_less_rows):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -421,7 +422,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point, font_path)
+                                                       print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -585,24 +586,10 @@ async def ask_delete_file(file_path, ignore_existing):
 
 
 async def generate_cut_points(
-        num_of_segments,
-        blacklisted_cut_points,
-        confirm_cut_points_required,
-        duration,
-        segment_cut_duration,
-        temp_folder,
-        is_vertical,
-        black_bars,
-        timestamps_mode,
-        preview_sheet_required,
-        video_path,
-        filename_without_ext,
-        print_cut_points,
-        last_cut_point,
-        font_path
+        num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration, temp_folder, is_vertical, black_bars,
+        timestamps_mode, preview_sheet_required, video_path, filename_without_ext, print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution
 ):
     """Generate unique evenly spaced cut points with random variations."""
-
     temp_files_preview = None
     calc_failed_counter = 0
     max_failures = 500
@@ -704,14 +691,7 @@ async def generate_cut_points(
             video_path,
             filename_without_ext,
             cut_points_seconds,
-            segment_cut_duration,
-            duration,
-            temp_folder,
-            is_vertical,
-            black_bars,
-            timestamps_mode,
-            preview_sheet_required,
-            font_path
+            segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, font_path, width, height, preview_quality_resolution
         )
 
         if not temp_files_preview:
@@ -731,9 +711,29 @@ async def generate_cut_points(
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
-                                  preview_sheet_required, font_path):
+                                  preview_sheet_required, font_path, width, height, preview_quality_resolution):
     """Generates video segments from a given video and overlays timestamps on them."""
     temp_files_webp = []
+
+    if preview_quality_resolution == "720p" and height >= 720 and width >= 1280:
+        h_scale = "1280:720"
+    elif preview_quality_resolution == "1080p" and height >= 1080 and width >= 1920:
+        h_scale = "1920:1080"
+    else:
+        if height < 720 and width < 1280:
+            h_scale = f"{width}:{height}"
+        else:
+            h_scale = "1280:720"
+
+    if preview_quality_resolution == "720p" and height >= 1280 and width >= 720:
+        v_scale = "720:1280"
+    elif preview_quality_resolution == "1080p" and height >= 1920 and width >= 1080:
+        v_scale = "1080:1920"
+    else:
+        if height < 1280 and width < 720:
+            v_scale = f"{width}:{height}"
+        else:
+            v_scale = "720:1280"
 
     while len(temp_files_webp) < 15:
         for index, start in enumerate(cut_points, start=1):
@@ -749,11 +749,11 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
             # Choose FFmpeg command based on aspect ratio settings
             if is_vertical and black_bars:
-                vf_filter = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2"
+                vf_filter = f"scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2"
             elif is_vertical:
-                vf_filter = "scale=720:1280"
+                vf_filter = f"scale={v_scale}"
             else:
-                vf_filter = "scale=1280:720"
+                vf_filter = f"scale={h_scale}"
 
             ffmpeg_segment_command = (
                 f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset fast "
@@ -772,7 +772,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical, preview_quality_resolution)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -829,7 +829,7 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical):
+async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical, preview_quality_resolution):
     """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
     try:
         match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
@@ -854,7 +854,15 @@ async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical):
                           (2, -2), (2, 0), (2, 2)]
 
         # define font size for vertical/horizontal videos
-        font_size = 30 if is_vertical else 90
+        if is_vertical:
+            font_size = 60
+        else:
+            if preview_quality_resolution == "720p":
+                font_size = 120
+            elif preview_quality_resolution == "1080p":
+                font_size = 160
+            else:
+                font_size = 60
 
         for dx, dy in shadow_offsets:
             drawtext_filters.append(

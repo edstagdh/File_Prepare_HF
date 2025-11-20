@@ -121,7 +121,8 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
     }
-
+    # Debug
+    # logger.debug(f"Sending request to API: {url}")
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers)
@@ -132,15 +133,19 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
                     logger.info("Retry successful!")
                 # Debug
                 # logger.info(f"API data fetched successfully for file {string_parse}")
+                # logger.debug(response_data)
                 return response_data
+            return None
         except requests.RequestException as e:
             logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
                 await asyncio.sleep(delay)
+                return None
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
+    return None
 
 
 async def filter_entries_by_user_choice(valid_entries):

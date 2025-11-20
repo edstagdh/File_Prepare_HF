@@ -34,5 +34,8 @@
     "pixelize"
   ],
   "transition_mode": "fade",
-  "transition_duration": 0.25
+  "transition_duration": 0.25,
+  "preview_quality_resolution": "720p",
+  "preview_quality_resolutions_available": ["720p", "1080p"]
+
 }
