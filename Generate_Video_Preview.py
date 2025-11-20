@@ -1,5 +1,4 @@
 import asyncio
-import json
 import hashlib
 import os
 import random
@@ -326,6 +325,10 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
     create_webm_preview_sheet = updated_create_flags['webm_sheet']
 
     # logger.debug(f"Preview flags: {updated_create_flags}")
+    skip_video = False
+    codec_name = None
+    width = None
+    height = None
 
     if any([create_webp_preview, create_gif_preview, create_webp_preview_sheet, create_gif_preview_sheet, create_webm_preview, create_webm_preview_sheet]):
         # Verify video file information
@@ -359,24 +362,21 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and ffprobe_output.strip():
                 try:
-                    # Split by 'x' to get codec and resolution
-
                     parts = ffprobe_output.strip().split("x")
-
-                    # If the split parts have the expected length, continue
                     if len(parts) == 3:
-                        codec_name = parts[0]  # First part is codec
-                        width, height = map(int, parts[1:3])  # Second and third parts are resolution
-                        # Check if the codec is msmpeg4v3
+                        codec_name = parts[0]
+                        width, height = map(int, parts[1:3])
                         if codec_name == "msmpeg4v3":
                             logger.error(f"Video uses unsupported codec: {codec_name}. Requires full re-encoding.")
-                            return False
+                            skip_video = True
                     else:
-                        # If the output is not in the expected format
                         logger.error(f"Unexpected ffprobe output format: {ffprobe_output}")
-                        return False
+                        skip_video = True
                 except (ValueError, IndexError) as e:
                     logger.error(f"Could not determine codec for {video_path}: error: {e}")
+                    skip_video = True
+
+                if skip_video:
                     return False
             else:
                 logger.error(f"Could not determine codec for {video_path}")
@@ -490,7 +490,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create concat video file for gif if create_gif_preview is true
         if create_gif_preview:
             concat_output_file_gif = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile_gif.mp4")
-            concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview, concat_output_file_gif, transition_mode, available_transitions,
+            concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview_gif, concat_output_file_gif, transition_mode, available_transitions,
                                                                                     transition_duration)
             if not concat_result_gif or not concat_result_gif_path:
                 logger.error(f"Failed to concatenate video segments concat file")
@@ -602,59 +602,95 @@ async def generate_cut_points(
         font_path
 ):
     """Generate unique evenly spaced cut points with random variations."""
+
+    temp_files_preview = None
     calc_failed_counter = 0
+    max_failures = 500
+
     while True:
+        # Safety stop
+        if calc_failed_counter > max_failures:
+            logger.error("Too many failed attempts to generate valid cut points. Aborting.")
+            break
+
+        # Reduce duration step-by-step if failing
         if calc_failed_counter % 50 == 0 and calc_failed_counter > 0:
             if segment_cut_duration <= 0.1:
                 logger.error("Segment duration too short to reduce")
                 break
-            else:
-                segment_cut_duration = round(segment_cut_duration - 0.1, 2)
-                logger.debug(f"cut point generation has failed {calc_failed_counter} times, reducing segment cut duration by 0.1 to accommodate, updated value:"
-                             f" {segment_cut_duration}")
+            segment_cut_duration = round(segment_cut_duration - 0.1, 2)
+            logger.debug(
+                f"cut point generation has failed {calc_failed_counter} times, "
+                f"reducing segment cut duration by 0.1 to {segment_cut_duration}"
+            )
 
+        # Start / end percentages
         start_point = round(random.uniform(0.02, 0.08), 3)
-        if last_cut_point == 0:
-            end_point = round(random.uniform(0.975, 0.99), 3)
-        else:
-            end_point = last_cut_point / duration
-        cut_points = {start_point, end_point}
+        end_point = (
+            round(random.uniform(0.975, 0.99), 3)
+            if last_cut_point == 0
+            else last_cut_point / duration
+        )
+
+        # Validate bounds
+        if end_point <= start_point:
+            calc_failed_counter += 1
+            continue
+
         num_cuts = num_of_segments - 1
+        if num_cuts <= 0:
+            logger.error("num_of_segments must be >= 2")
+            break
+
         step = (end_point - start_point) / num_cuts
+
+        points = [start_point, end_point]
+
         for i in range(1, num_cuts):
             next_point = round(start_point + step * i + random.uniform(-0.02, 0.02), 3)
-            if start_point < next_point < end_point and next_point not in blacklisted_cut_points:
-                cut_points.add(next_point)
-        if len(cut_points) != num_of_segments:
-            logger.error(f'not enough cut points generated: {len(cut_points)}, cut points: {cut_points}')
-            continue
-        sorted_points = sorted(cut_points)
-        if confirm_cut_points_required:
-            logger.debug("Generated cut points with timestamp breakdown:")
-            for i, pct in enumerate(sorted_points, start=1):
-                time_in_seconds = pct * duration
-                formatted_time = await format_duration(time_in_seconds)
-                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}")
-            await asyncio.sleep(0.5)
-            confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
-            if confirmation != "yes":
-                logger.debug("Regenerating cut points...\n")
+
+            if not (start_point < next_point < end_point):
                 continue
-        elif print_cut_points:
+
+            # float-safe blacklist check
+            if any(abs(next_point - b) < 0.001 for b in blacklisted_cut_points):
+                continue
+
+            points.append(next_point)
+
+        # Uniqueness check AFTER generation
+        unique_points = sorted(set(points))
+
+        if len(unique_points) != num_of_segments:
+            logger.error(f'not enough cut points generated: {len(unique_points)}, cut points: {unique_points}')
+            calc_failed_counter += 1
+            continue
+
+        # Logging
+        if confirm_cut_points_required or print_cut_points:
             logger.debug("Generated cut points with timestamp breakdown:")
-            for i, pct in enumerate(sorted_points, start=1):
+            for i, pct in enumerate(unique_points, start=1):
                 time_in_seconds = pct * duration
                 formatted_time = await format_duration(time_in_seconds)
-                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}({time_in_seconds})")
+                logger.debug(
+                    f"Segment {i}: {pct:.2%} | Time: {formatted_time} ({time_in_seconds})"
+                )
 
-        # Convert percentages to absolute seconds
-        cut_points_seconds = [round(duration * pct) for pct in sorted_points]
+            if confirm_cut_points_required:
+                await asyncio.sleep(0.5)
+                confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
+                if confirmation != "yes":
+                    logger.debug("Regenerating cut points...\n")
+                    calc_failed_counter += 1
+                    continue
 
-        # Check for scene changes at each cut point
+        # Convert percentages to absolute seconds (float for accuracy)
+        cut_points_seconds = [duration * pct for pct in unique_points]
+
+        # Check scene changes
         scene_change_found = False
-        for i, ts in enumerate(cut_points_seconds, start=1):
-            scene_at_cut = await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration)
-            if scene_at_cut:
+        for ts in cut_points_seconds:
+            if await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration):
                 # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
                 scene_change_found = True
                 break
@@ -663,6 +699,7 @@ async def generate_cut_points(
             calc_failed_counter += 1
             continue
 
+        # Generate segments
         temp_files_preview = await generate_video_segments(
             video_path,
             filename_without_ext,
@@ -683,11 +720,14 @@ async def generate_cut_points(
                 file_path = os.path.join(temp_folder, filename)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
+            calc_failed_counter += 1
             continue
 
         return temp_files_preview
-    if not temp_files_preview:
-        logger.error("Failed to generate cut points")
+
+    logger.error("Failed to generate cut points")
+    return None
+
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
@@ -709,14 +749,14 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
             # Choose FFmpeg command based on aspect ratio settings
             if is_vertical and black_bars:
-                vf_filter = "scale=650:366:force_original_aspect_ratio=decrease,pad=650:366:(ow-iw)/2:(oh-ih)/2"
+                vf_filter = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2"
             elif is_vertical:
-                vf_filter = "scale=236:420"
+                vf_filter = "scale=720:1280"
             else:
-                vf_filter = "scale=650:366"
+                vf_filter = "scale=1280:720"
 
             ffmpeg_segment_command = (
-                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset superfast "
+                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset fast "
                 f"-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} "
                 f"-vf \"{vf_filter}\" \"{temp_file}\" -y"
             )
@@ -814,7 +854,7 @@ async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical):
                           (2, -2), (2, 0), (2, 2)]
 
         # define font size for vertical/horizontal videos
-        font_size = 30 if is_vertical else 60
+        font_size = 30 if is_vertical else 90
 
         for dx, dy in shadow_offsets:
             drawtext_filters.append(
