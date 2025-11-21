@@ -10,7 +10,8 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, filename_ignore_performer_ID, mode):
+async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+                            filename_ignore_performer_ID, send_notification, mode):
     max_retries = 3
     delay = 5
     try:
@@ -40,7 +41,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
 
         if response_data is None or not response_data.get('data'):
             return None, None, None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode)
+        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {string_parse}")
@@ -48,7 +49,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
-            selected_entry = await filter_entries_by_user_choice(valid_entries)
+            selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
         else:
             selected_entry = valid_entries[0]
         if selected_entry is None:
@@ -90,12 +91,17 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry, filename_ignore_performer_ID)
+            female_performers = await extract_female_performers(selected_entry, filename_ignore_performer_ID, send_notification)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
             while True:
                 logger.info("Enter Performers Manually")
+                if send_notification:
+                    result = await send_notification("User input required - Manual Performer Entry")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input("Enter a value (or type 'exit' to stop): ")
                 if user_input.lower() == 'exit':
                     break
@@ -148,7 +154,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
     return None
 
 
-async def filter_entries_by_user_choice(valid_entries):
+async def filter_entries_by_user_choice(valid_entries, send_notification):
     if len(valid_entries) > 1:
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
@@ -167,7 +173,11 @@ async def filter_entries_by_user_choice(valid_entries):
 
         logger.info("0. None of the results are good")
         await asyncio.sleep(0.5)
-
+        if send_notification:
+            result = await send_notification("User input required - Select Entry to Keep")
+            if not result:
+                logger.warning("Notifier failed to send user input request.")
+            await asyncio.sleep(0.5)
         while True:
             try:
                 choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): \n"))
@@ -253,12 +263,14 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
                 await asyncio.sleep(delay)
+                return None
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
+    return None
 
 
-async def get_user_input():
+async def get_user_input_performers(send_notification):
     """
     Asks the user for a yes/no response.
     If 'yes', prompts for text input and returns it.
@@ -268,6 +280,11 @@ async def get_user_input():
     temp_performers = []
     while True:
         try:
+            if send_notification:
+                result = await send_notification("User input required - Manual Performer Entry")
+                if not result:
+                    logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
             if response in ("yes", "y"):
                 while True:
@@ -286,7 +303,7 @@ async def get_user_input():
             return None
 
 
-async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode):
+async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode):
     try:
         valid_entries = []
         unmatched_entries = []
@@ -303,6 +320,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 # Check if title contains 'interview'
                 if "interview" in title:
                     await asyncio.sleep(0.5)
+                    if send_notification:
+                        result = await send_notification(f"User input required - Filter Entries by Date")
+                        if not result:
+                            logger.warning("Notifier failed to send user input request.")
+                        await asyncio.sleep(0.5)
                     user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
                         logger.info(f"Ignoring scene: {item.get('title')}")
@@ -316,6 +338,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 # Date range check (within ±1 to ±7 days)
                 elif abs((item_date - scene_date).days) in range(1, 7):
                     await asyncio.sleep(0.5)
+                    if send_notification:
+                        result = await send_notification("User input required - Filter Entries by Date")
+                        if not result:
+                            logger.warning("Notifier failed to send user input request.")
+                        await asyncio.sleep(0.5)
                     user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
                                        f"include it in the results? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
@@ -331,6 +358,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 for idx, (title, url, _, scene_date) in enumerate(unmatched_entries, 1):
                     logger.info(f"{idx}. {title} — {scene_date} — {url}")
                 await asyncio.sleep(0.5)
+                if send_notification:
+                    result = await send_notification("User input required - Manual Selection of Entries")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
                 if user_input.isdigit():
                     selection_index = int(user_input) - 1
@@ -349,7 +381,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
         return None
 
 
-async def extract_female_performers(selected_entry, filename_ignore_performer_ID):
+async def extract_female_performers(selected_entry, filename_ignore_performer_ID, send_notification):
 
     def clean_name(name: str) -> str:
         # Remove any word that starts with ID followed by optional space and digits
@@ -390,7 +422,13 @@ async def extract_female_performers(selected_entry, filename_ignore_performer_ID
                     performer["parent"]["extras"].get("gender") is None
             ):
                 # Ask the user for input
+                if send_notification:
+                    result = await send_notification("User input required - Approve Performer Gender")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input(f"Treat performer '{performer.get('name', 'Unknown')}' as Female? (yes/no): ").strip().lower()
+
 
                 if user_input in ("yes", "y"):
                     if filename_ignore_performer_ID:
@@ -406,7 +444,7 @@ async def extract_female_performers(selected_entry, filename_ignore_performer_ID
         if female_performers:
             return female_performers
         else:
-            user_entries = await get_user_input()
+            user_entries = await get_user_input_performers(send_notification)
             if user_entries:
                 female_performers.extend([(name, "") for name in user_entries])
             if not female_performers or len(female_performers) < 1:

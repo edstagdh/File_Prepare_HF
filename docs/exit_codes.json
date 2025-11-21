@@ -28,6 +28,8 @@
   "41": "Invalid upload mode",
   "42": "Unable to upload to tracker without creating a creating template",
   "43": "Unable to upload to tracker without uploading images required for template",
+  "44": "Notifier code file name not configured.",
+  "45": "Notifier code file not found.",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"

@@ -1,3 +1,4 @@
+import importlib
 import os
 import asyncio
 import re
@@ -86,6 +87,10 @@ async def process_files():
         hamster_upload_thumbnails = config["hamster_upload_thumbnails"]
         image_output_format = config["image_output_format"].lower()
 
+        # Notifiers Configuration
+        use_notifier = config["use_notifier"]
+        notifier_name = config["notifier_name"]
+
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
     else:
@@ -97,6 +102,36 @@ async def process_files():
     else:
         MTCNN = None
     template_file_full_path = None
+
+    if use_notifier:
+        # Directory where this script resides
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        notifiers_dir = os.path.join(base_dir, "Notifiers")
+
+        # Add Notifiers folder to sys.path so Python can import from it
+        if notifiers_dir not in sys.path:
+            sys.path.insert(0, notifiers_dir)
+
+        if not notifier_name or notifier_name.strip() == "":
+            logger.error("Notifier name is empty while notifier usage is enabled")
+            exit(44)
+
+        full_notifier_path = os.path.join(notifiers_dir, notifier_name)
+
+        if not os.path.exists(full_notifier_path):
+            logger.error(f"Notifier({notifier_name}) code file not found")
+            exit(45)
+
+        try:
+            module_name = notifier_name.replace(".py", "")
+            notifier_module = importlib.import_module(module_name)
+            send_notification = notifier_module.send_notification
+
+        except Exception as e:
+            logger.error(f"Failed to import notifier '{notifier_name}': {e}")
+            exit(46)
+    else:
+        send_notification = None
 
     if image_output_format not in ["webp", "jpeg", "jpg", "bmp", "png"]:
         logger.error(f"image output format not valid")
@@ -225,6 +260,7 @@ async def process_files():
                     create_template_file,
                     jav_api_mode,
                     filename_ignore_performer_ID,
+                    send_notification,
                     mode=1
                 )
 
@@ -267,6 +303,7 @@ async def process_files():
                     create_template_file,
                     jav_api_mode,
                     filename_ignore_performer_ID,
+                    send_notification,
                     mode=2
                 )
 
@@ -612,6 +649,11 @@ async def process_files():
                     continue  # Skip to the next file
 
             if scene_description == "Scene description not found" and create_template_file:
+                if send_notification:
+                    result = await send_notification("Warning - Scene description not found")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 logger.warning("Scene description not found, please update manually in template")
             if upload_to_tracker:
                 trackers_len = len(tracker_mode)

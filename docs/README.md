@@ -126,6 +126,8 @@ File_Prepare_HF/
    ├── Upload_IMGBB.py                          # IMGBB code integration
    ├── Upload_Hamster.py                        # Hamster code integration
 └── Logs/                                       # Log files
+└── Notifiers/                                  # Notifiers Integration
+   ├── Notifier_TG.py                           # Telegram Notifier code integration
 └── Resources/                                  # Resource files used in code
    ├── BBCode_Images.json                       # Icons mapping for images URLs
    ├── Gotham_Medium.otf                        # Font file for previews text overlay
