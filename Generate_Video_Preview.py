@@ -1,5 +1,4 @@
 import asyncio
-import json
 import hashlib
 import os
 import random
@@ -47,6 +46,8 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         transition_mode = config["transition_mode"].lower()
         available_transitions = config["available_transitions"]
         transition_duration = config["transition_duration"]
+        fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
+        preview_quality_resolution = config["preview_quality_resolution"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -67,7 +68,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
-                                  transition_mode, available_transitions, transition_duration)
+                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -260,7 +261,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
-                        available_transitions, transition_duration):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -325,6 +326,10 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
     create_webm_preview_sheet = updated_create_flags['webm_sheet']
 
     # logger.debug(f"Preview flags: {updated_create_flags}")
+    skip_video = False
+    codec_name = None
+    width = None
+    height = None
 
     if any([create_webp_preview, create_gif_preview, create_webp_preview_sheet, create_gif_preview_sheet, create_webm_preview, create_webm_preview_sheet]):
         # Verify video file information
@@ -358,24 +363,21 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
             if exit_code == 0 and ffprobe_output.strip():
                 try:
-                    # Split by 'x' to get codec and resolution
-
                     parts = ffprobe_output.strip().split("x")
-
-                    # If the split parts have the expected length, continue
                     if len(parts) == 3:
-                        codec_name = parts[0]  # First part is codec
-                        width, height = map(int, parts[1:3])  # Second and third parts are resolution
-                        # Check if the codec is msmpeg4v3
+                        codec_name = parts[0]
+                        width, height = map(int, parts[1:3])
                         if codec_name == "msmpeg4v3":
                             logger.error(f"Video uses unsupported codec: {codec_name}. Requires full re-encoding.")
-                            return False
+                            skip_video = True
                     else:
-                        # If the output is not in the expected format
                         logger.error(f"Unexpected ffprobe output format: {ffprobe_output}")
-                        return False
+                        skip_video = True
                 except (ValueError, IndexError) as e:
                     logger.error(f"Could not determine codec for {video_path}: error: {e}")
+                    skip_video = True
+
+                if skip_video:
                     return False
             else:
                 logger.error(f"Could not determine codec for {video_path}")
@@ -420,7 +422,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point, font_path)
+                                                       print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -441,11 +443,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
         if is_vertical:
             if not black_bars:
-                scale_option = "scale=-2:480"
+                scale_option = "scale=-2:650"
             else:
-                scale_option = "scale=480:-2"
+                scale_option = "scale=650:-2"
         else:
-            scale_option = "scale=480:-2"
+            scale_option = "scale=650:-2"
 
         # Create Preview files if selected
         # Create Preview WebP
@@ -453,7 +455,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webp_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-vf \"fps=24,{scale_option}:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
+                f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
@@ -489,7 +491,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create concat video file for gif if create_gif_preview is true
         if create_gif_preview:
             concat_output_file_gif = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile_gif.mp4")
-            concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview, concat_output_file_gif, transition_mode, available_transitions,
+            concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview_gif, concat_output_file_gif, transition_mode, available_transitions,
                                                                                     transition_duration)
             if not concat_result_gif or not concat_result_gif_path:
                 logger.error(f"Failed to concatenate video segments concat file")
@@ -525,7 +527,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
                                                    preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path,
-                                                   hamster_upload_previews)
+                                                   hamster_upload_previews, num_of_segments, fit_thumbs_in_less_rows)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -584,76 +586,98 @@ async def ask_delete_file(file_path, ignore_existing):
 
 
 async def generate_cut_points(
-        num_of_segments,
-        blacklisted_cut_points,
-        confirm_cut_points_required,
-        duration,
-        segment_cut_duration,
-        temp_folder,
-        is_vertical,
-        black_bars,
-        timestamps_mode,
-        preview_sheet_required,
-        video_path,
-        filename_without_ext,
-        print_cut_points,
-        last_cut_point,
-        font_path
+        num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration, temp_folder, is_vertical, black_bars,
+        timestamps_mode, preview_sheet_required, video_path, filename_without_ext, print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution
 ):
     """Generate unique evenly spaced cut points with random variations."""
+    temp_files_preview = None
     calc_failed_counter = 0
+    max_failures = 500
+
     while True:
+        # Safety stop
+        if calc_failed_counter > max_failures:
+            logger.error("Too many failed attempts to generate valid cut points. Aborting.")
+            break
+
+        # Reduce duration step-by-step if failing
         if calc_failed_counter % 50 == 0 and calc_failed_counter > 0:
             if segment_cut_duration <= 0.1:
                 logger.error("Segment duration too short to reduce")
                 break
-            else:
-                segment_cut_duration = round(segment_cut_duration - 0.1, 2)
-                logger.debug(f"cut point generation has failed {calc_failed_counter} times, reducing segment cut duration by 0.1 to accommodate, updated value:"
-                             f" {segment_cut_duration}")
+            segment_cut_duration = round(segment_cut_duration - 0.1, 2)
+            logger.debug(
+                f"cut point generation has failed {calc_failed_counter} times, "
+                f"reducing segment cut duration by 0.1 to {segment_cut_duration}"
+            )
 
+        # Start / end percentages
         start_point = round(random.uniform(0.02, 0.08), 3)
-        if last_cut_point == 0:
-            end_point = round(random.uniform(0.975, 0.99), 3)
-        else:
-            end_point = last_cut_point / duration
-        cut_points = {start_point, end_point}
+        end_point = (
+            round(random.uniform(0.975, 0.99), 3)
+            if last_cut_point == 0
+            else last_cut_point / duration
+        )
+
+        # Validate bounds
+        if end_point <= start_point:
+            calc_failed_counter += 1
+            continue
+
         num_cuts = num_of_segments - 1
+        if num_cuts <= 0:
+            logger.error("num_of_segments must be >= 2")
+            break
+
         step = (end_point - start_point) / num_cuts
+
+        points = [start_point, end_point]
+
         for i in range(1, num_cuts):
             next_point = round(start_point + step * i + random.uniform(-0.02, 0.02), 3)
-            if start_point < next_point < end_point and next_point not in blacklisted_cut_points:
-                cut_points.add(next_point)
-        if len(cut_points) != num_of_segments:
-            logger.error(f'not enough cut points generated: {len(cut_points)}, cut points: {cut_points}')
-            continue
-        sorted_points = sorted(cut_points)
-        if confirm_cut_points_required:
-            logger.debug("Generated cut points with timestamp breakdown:")
-            for i, pct in enumerate(sorted_points, start=1):
-                time_in_seconds = pct * duration
-                formatted_time = await format_duration(time_in_seconds)
-                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}")
-            await asyncio.sleep(0.5)
-            confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
-            if confirmation != "yes":
-                logger.debug("Regenerating cut points...\n")
+
+            if not (start_point < next_point < end_point):
                 continue
-        elif print_cut_points:
+
+            # float-safe blacklist check
+            if any(abs(next_point - b) < 0.001 for b in blacklisted_cut_points):
+                continue
+
+            points.append(next_point)
+
+        # Uniqueness check AFTER generation
+        unique_points = sorted(set(points))
+
+        if len(unique_points) != num_of_segments:
+            logger.error(f'not enough cut points generated: {len(unique_points)}, cut points: {unique_points}')
+            calc_failed_counter += 1
+            continue
+
+        # Logging
+        if confirm_cut_points_required or print_cut_points:
             logger.debug("Generated cut points with timestamp breakdown:")
-            for i, pct in enumerate(sorted_points, start=1):
+            for i, pct in enumerate(unique_points, start=1):
                 time_in_seconds = pct * duration
                 formatted_time = await format_duration(time_in_seconds)
-                logger.debug(f"Segment {i}: {pct:.2%} of video | Time: {formatted_time}({time_in_seconds})")
+                logger.debug(
+                    f"Segment {i}: {pct:.2%} | Time: {formatted_time} ({time_in_seconds})"
+                )
 
-        # Convert percentages to absolute seconds
-        cut_points_seconds = [round(duration * pct) for pct in sorted_points]
+            if confirm_cut_points_required:
+                await asyncio.sleep(0.5)
+                confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
+                if confirmation != "yes":
+                    logger.debug("Regenerating cut points...\n")
+                    calc_failed_counter += 1
+                    continue
 
-        # Check for scene changes at each cut point
+        # Convert percentages to absolute seconds (float for accuracy)
+        cut_points_seconds = [duration * pct for pct in unique_points]
+
+        # Check scene changes
         scene_change_found = False
-        for i, ts in enumerate(cut_points_seconds, start=1):
-            scene_at_cut = await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration)
-            if scene_at_cut:
+        for ts in cut_points_seconds:
+            if await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration):
                 # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
                 scene_change_found = True
                 break
@@ -662,18 +686,12 @@ async def generate_cut_points(
             calc_failed_counter += 1
             continue
 
+        # Generate segments
         temp_files_preview = await generate_video_segments(
             video_path,
             filename_without_ext,
             cut_points_seconds,
-            segment_cut_duration,
-            duration,
-            temp_folder,
-            is_vertical,
-            black_bars,
-            timestamps_mode,
-            preview_sheet_required,
-            font_path
+            segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, font_path, width, height, preview_quality_resolution
         )
 
         if not temp_files_preview:
@@ -682,17 +700,40 @@ async def generate_cut_points(
                 file_path = os.path.join(temp_folder, filename)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
+            calc_failed_counter += 1
             continue
 
         return temp_files_preview
-    if not temp_files_preview:
-        logger.error("Failed to generate cut points")
+
+    logger.error("Failed to generate cut points")
+    return None
+
 
 
 async def generate_video_segments(video_path, filename_without_ext, cut_points, segment_cut_duration, duration, temp_folder, is_vertical, black_bars, timestamps_mode,
-                                  preview_sheet_required, font_path):
+                                  preview_sheet_required, font_path, width, height, preview_quality_resolution):
     """Generates video segments from a given video and overlays timestamps on them."""
     temp_files_webp = []
+
+    if preview_quality_resolution == "720p" and height >= 720 and width >= 1280:
+        h_scale = "1280:720"
+    elif preview_quality_resolution == "1080p" and height >= 1080 and width >= 1920:
+        h_scale = "1920:1080"
+    else:
+        if height < 720 and width < 1280:
+            h_scale = f"{width}:{height}"
+        else:
+            h_scale = "1280:720"
+
+    if preview_quality_resolution == "720p" and height >= 1280 and width >= 720:
+        v_scale = "720:1280"
+    elif preview_quality_resolution == "1080p" and height >= 1920 and width >= 1080:
+        v_scale = "1080:1920"
+    else:
+        if height < 1280 and width < 720:
+            v_scale = f"{width}:{height}"
+        else:
+            v_scale = "720:1280"
 
     while len(temp_files_webp) < 15:
         for index, start in enumerate(cut_points, start=1):
@@ -708,14 +749,14 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
             # Choose FFmpeg command based on aspect ratio settings
             if is_vertical and black_bars:
-                vf_filter = "scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2"
+                vf_filter = f"scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2"
             elif is_vertical:
-                vf_filter = "scale=270:480"
+                vf_filter = f"scale={v_scale}"
             else:
-                vf_filter = "scale=480:270"
+                vf_filter = f"scale={h_scale}"
 
             ffmpeg_segment_command = (
-                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset slow "
+                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset fast "
                 f"-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} "
                 f"-vf \"{vf_filter}\" \"{temp_file}\" -y"
             )
@@ -731,7 +772,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
 
                 temp_files_webp.append(temp_file)
                 if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path)
+                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical, preview_quality_resolution)
                     temp_files_webp.append(return_file)
             else:
                 temp_files_webp.append(temp_file)
@@ -788,7 +829,7 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
         return False
 
 
-async def overlay_timestamp(temp_folder, video_path, font_path):
+async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical, preview_quality_resolution):
     """Extracts timestamp from filename and overlays it on the video with shadow and spacing using configured font."""
     try:
         match = re.search(r'start-(\d{2}\.\d{2}\.\d{2})', video_path)
@@ -812,15 +853,26 @@ async def overlay_timestamp(temp_folder, video_path, font_path):
                           (0, -2), (0, 2),
                           (2, -2), (2, 0), (2, 2)]
 
+        # define font size for vertical/horizontal videos
+        if is_vertical:
+            font_size = 60
+        else:
+            if preview_quality_resolution == "720p":
+                font_size = 120
+            elif preview_quality_resolution == "1080p":
+                font_size = 160
+            else:
+                font_size = 60
+
         for dx, dy in shadow_offsets:
             drawtext_filters.append(
-                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize=32:"
+                f"drawtext=text='{timestamp}':{font_expr}:fontcolor=black@1.0:fontsize={font_size}:"
                 f"x=(w-text_w)-10+{dx}:y=10+{dy}:"
                 f"alpha=1"
             )
 
         drawtext_filters.append(
-            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize=32:"
+            f"drawtext=text='{timestamp}':{font_expr}:fontcolor=white:fontsize={font_size}:"
             f"x=(w-text_w)-10:y=10:"
             f"borderw=0:alpha=1"
         )
@@ -937,7 +989,8 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
-                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews):
+                                           upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews,
+                                           num_of_segments, fit_thumbs_in_less_rows):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -949,9 +1002,15 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
 
         # Group the video files in batches of 3 or 4
         if grid == 3:
-            video_groups = [video_files[i:i + 3] for i in range(0, len(video_files), 3)]
+            if is_vertical and fit_thumbs_in_less_rows and len(lines) >= 6:
+                video_groups = [video_files[i:i + 3*2] for i in range(0, len(video_files), 3*2)]
+            else:
+                video_groups = [video_files[i:i + 3] for i in range(0, len(video_files), 3)]
         elif grid == 4:
-            video_groups = [video_files[i:i + 4] for i in range(0, len(video_files), 4)]
+            if is_vertical and fit_thumbs_in_less_rows and len(lines) >= 8:
+                video_groups = [video_files[i:i + 4*2] for i in range(0, len(video_files), 4*2)]
+            else:
+                video_groups = [video_files[i:i + 4] for i in range(0, len(video_files), 4)]
         else:
             logger.error(f"Invalid grid value: {grid}. Only 3 or 4 are allowed.")
             return
@@ -983,10 +1042,9 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             output_file = os.path.join(temp_folder, f"stacked_{index + 1}.mp4")
             intermediate_files.append(output_file)
 
-            if grid == 3:
-                filter_complex = "[0:v][1:v][2:v]hstack=inputs=3[v]"
-            elif grid == 4:
-                filter_complex = "[0:v][1:v][2:v][3:v]hstack=inputs=4[v]"
+            num_inputs = len(group)
+            inputs_tags = ''.join(f'[{i}:v]' for i in range(num_inputs))
+            filter_complex = f"{inputs_tags}hstack=inputs={num_inputs}[v]"
 
             command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}\""
             stdout, stderr, exit_code = await run_command(command)
@@ -1022,7 +1080,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # Add scale if grid is 4
         if grid == 4:
             if not is_vertical or (is_vertical and add_black_bars):
-                downscale_filter = "scale=1890:trunc(ih/2)*2"
+                downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
                 downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
                 # logger.debug(downscale_command)
                 stdout, stderr, exit_code = await run_command(downscale_command)

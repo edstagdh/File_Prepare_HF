@@ -133,7 +133,7 @@ File_Prepare_HF/
    ├── Performers_Images.json_Example           # Contains mapped performer face images to auto insert in template
    ├── Sort_Performers_Images.py                # Helper script to sort the performer images json.
 ├── creds.secret_example                        # Example credentials file
-├── Generate_Thumbnails_Sheet.py                   # Thumbnails generation code
+├── Generate_Thumbnails_Sheet.py                # Thumbnails generation code
 ├── Generate_Torrent_File.py                    # Torrent generation code
 ├── Generate_Video_Preview.py                   # Preview generation code
 ├── LICENSE                                     # License file

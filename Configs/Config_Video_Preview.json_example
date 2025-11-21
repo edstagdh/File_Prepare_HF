@@ -12,7 +12,7 @@
   "TIMESTAMPS_MODE": 2,
   "GRID_WIDTH": 4,
   "NUM_OF_SEGMENTS": 16,
-  "SEGMENT_DURATION": 1.1,
+  "SEGMENT_DURATION": 1.5,
   "OVERWRITE_EXISTING": false,
   "PRINT_CUT_POINTS": false,
   "BLACKLISTED_CUT_POINTS": [],
@@ -22,6 +22,7 @@
   "LAST_CUT_POINT": 0,
   "add_file_info": false,
   "FONT_NAME_FULL": "Gotham_Medium.otf",
+  "fit_thumbs_in_less_rows": true,
   "available_transitions": [
     "fade",
     "fadeblack",
@@ -33,5 +34,8 @@
     "pixelize"
   ],
   "transition_mode": "fade",
-  "transition_duration": 0.25
+  "transition_duration": 0.25,
+  "preview_quality_resolution": "720p",
+  "preview_quality_resolutions_available": ["720p", "1080p"]
+
 }
