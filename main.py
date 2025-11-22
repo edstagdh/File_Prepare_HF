@@ -20,6 +20,14 @@ from Image_Uploaders.Upload_IMGBB import imgbb_upload_single_image
 from Image_Uploaders.Upload_Hamster import hamster_upload_single_image
 from Tracker_Uploader import process_upload_to_tracker
 
+# ---------------------- Version ----------------------
+VERSION_FILE = Path(__file__).parent / "VERSION"
+
+try:
+    with open(VERSION_FILE, "r", encoding="utf-8") as f:
+        __version__ = f.read().strip()
+except Exception:
+    __version__ = "unknown"
 
 async def process_files():
     # Load Config file
@@ -57,7 +65,6 @@ async def process_files():
         remove_chapters = config["remove_chapters"]
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
-        code_version = config["Code_Version"]
         bad_words = config["bad_words"]
         use_title = config["use_title"]
         performer_image_output_format = config["performer_image_output_format"].lower()
@@ -65,6 +72,7 @@ async def process_files():
         ignore_list = config["ignore_list"]
         filename_ignore_part_x = config["filename_ignore_part_x"]
         filename_ignore_performer_ID = config["filename_ignore_performer_ID"]
+        filename_ignore_res = config["filename_ignore_res"]
         free_string_parse = config["free_string_parse"]
         create_sub_folder = config["create_sub_folder"]
         cover_regeneration_mode = config["cover_regeneration_mode"]
@@ -172,6 +180,7 @@ async def process_files():
 
     # Start Pre Processing files
     logger.info("-" * 100)
+    logger.info(f"File_Prepare_HF v{__version__}")
     logger.info(f"Start pre processing in directory: {directory}")
     pre_process_results, exit_code = await pre_process_files(directory, bad_words, free_string_parse, mode=1)
     if not pre_process_results:
@@ -204,7 +213,9 @@ async def process_files():
     ]
     mp4_files = sorted(mp4_files, key=lambda f: f.name.lower())
     for file in mp4_files:
+        logger.debug(f"Processing file: {file}")
         force_regen_thumbs = False
+        pre_suffix = ""
         await asyncio.sleep(0.1)
         file_full_name = str(file.name)  # Get the full file_full_name (with extension)
         file_base_name = str(file.stem)  # Get the file_full_name without extension
@@ -245,6 +256,21 @@ async def process_files():
             vr2normal, upscaled, bts_video, pov, vertical, trailer = (
                 file_flags[flag] for flag in flag_names
             )
+
+            # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
+            match_part = re.search(r"\bPart\s*(\d+)\b", clean_tpdb_check_filename, re.IGNORECASE)
+            if match_part and not filename_ignore_part_x:
+                part_number = match_part.group(1)  # the number after 'Part'
+                pre_suffix += f"Part.{part_number}"
+                logger.info(f"Detected Part in title: {pre_suffix}")
+
+            match_res = re.search(r"\.(480p|720p|1080p|1440p|2160p)(?=[\W_]|$)", clean_tpdb_check_filename, re.IGNORECASE)
+            if match_res and not filename_ignore_res:
+                resolution = match_res.group(1).lower()
+                # remove leading dot if exists
+                pre_suffix = pre_suffix.lstrip(".")
+                pre_suffix += f".{resolution.lower()}"
+                logger.info(f"Detected resolution in title: {pre_suffix}")
 
             # Continue with your logic
             if free_string_parse:
@@ -343,15 +369,6 @@ async def process_files():
                 failed_files.append(file_full_name)
                 continue  # Skip to the next file
 
-            # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
-            match = re.search(r"\bPart\s*(\d+)\b", new_title, re.IGNORECASE)
-            if match and not filename_ignore_part_x:
-                part_number = match.group(1)  # the number after 'Part'
-                pre_suffix = f"Part.{part_number}"
-                logger.info(f"Detected Part in title: {pre_suffix}")
-            else:
-                pre_suffix = None
-
             # Adjust year/month/day so scene date will always come from database
             year_full, month, day = scene_date.split("-")
             year = year_full[-2:]
@@ -415,10 +432,10 @@ async def process_files():
         safe_title = await clean_filename(new_title, bad_words, mode=2)
 
         # Compose potential folder names
-        temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}.{pre_suffix}" if pre_suffix else \
-            f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
-        new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}.{pre_suffix}" if pre_suffix else \
+        new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{pre_suffix}" if pre_suffix != "" else \
             f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
+        temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{pre_suffix}" if pre_suffix != "" else \
+            f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
 
         # Decide whether to use title-based naming
         use_title_mode = use_title or len(temp_filename_check) > 200
@@ -491,16 +508,18 @@ async def process_files():
                 failed_files.append(file_full_name)
                 continue  # Skip to the next file
 
+        existing_title = await get_existing_title(new_file_full_path)
+        changed_title = True if existing_title != new_title else False
+
         try:
             contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
             description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
 
             # Always check metadata — but only *apply* it now if not re-encoding
-            existing_title = await get_existing_title(new_file_full_path)
             existing_description = await get_existing_description(new_file_full_path)
 
             metadata_mismatch = (
-                    existing_title != new_title or
+                    changed_title or
                     existing_description != description or
                     contains_unwanted_metadata
             )
@@ -611,7 +630,7 @@ async def process_files():
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
                  [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
-                  template_file_full_path, code_version, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
+                  template_file_full_path, __version__, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
             ]
             failed = False
             where_failed = None
