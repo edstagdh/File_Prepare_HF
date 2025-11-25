@@ -1079,24 +1079,24 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
 
         # Add scale if grid is 4
         if grid == 4:
-            if not is_vertical or (is_vertical and add_black_bars):
-                downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
-                downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
-                # logger.debug(downscale_command)
-                stdout, stderr, exit_code = await run_command(downscale_command)
-                if exit_code != 0:
-                    logger.error(f"Error running downscaling stacking command: {stdout}\n{stderr}")
-                    return
-                # Renaming the final output with the "_og" suffix
-                base, ext = os.path.splitext(final_output)
-                final_output_og = f"{base}_og{ext}"
-                if not os.path.exists(final_output_og):
-                    os.rename(final_output, final_output_og)
-                else:
-                    logger.warning(f"The file {final_output_og} already exists, skipping renaming.")
+            # if not is_vertical or (is_vertical and add_black_bars):
+            downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
+            downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
+            # logger.debug(downscale_command)
+            stdout, stderr, exit_code = await run_command(downscale_command)
+            if exit_code != 0:
+                logger.error(f"Error running downscaling stacking command: {stdout}\n{stderr}")
+                return
+            # Renaming the final output with the "_og" suffix
+            base, ext = os.path.splitext(final_output)
+            final_output_og = f"{base}_og{ext}"
+            if not os.path.exists(final_output_og):
+                os.rename(final_output, final_output_og)
+            else:
+                logger.warning(f"The file {final_output_og} already exists, skipping renaming.")
 
-                # Replace the final output with the downscaled version
-                os.rename(downscaled_output, final_output)
+            # Replace the final output with the downscaled version
+            os.rename(downscaled_output, final_output)
 
         # Generate previews (WebP, WebM, GIF)
         results = ""

@@ -971,28 +971,67 @@ async def get_video_fps(video_path: str) -> float:
 
 
 async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bool]:
-    cap = cv2.VideoCapture(video_path)
+    """
+    Returns (resolution_label, is_vertical)
+    resolution_label = "2160p", "1440p", "1080p", "720p", or "<height>p"
+    is_vertical = True if displayed height > width (rotation corrected)
+    """
 
-    if not cap.isOpened():
-        raise IOError(f"Failed to open video file: {video_path}")
+    # ffprobe JSON query including optional rotation
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,rotation",
+        "-of", "json",
+        video_path
+    ]
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
+    stdout, stderr, code = await run_command(cmd)
 
-    # Match only specific standard resolutions
-    if height >= 2160:
-        resolution = "2160p"
-    elif height >= 1440:
-        resolution = "1440p"
-    elif height >= 1080:
-        resolution = "1080p"
-    elif height >= 720:
-        resolution = "720p"
-    else:
-        resolution = f"{height}p"
+    if code != 0:
+        raise IOError(f"ffprobe failed: {stderr or stdout}")
 
+    import json
+    info = json.loads(stdout)
+
+    stream = info["streams"][0]
+
+    width = int(stream.get("width"))
+    height = int(stream.get("height"))
+
+    # rotation is optional — if missing, assume 0°
+    rotation = int(stream.get("rotation", 0)) % 180
+
+    # Correct for rotation (90°/270° means displayed width/height are swapped)
+    if rotation == 90:
+        width, height = height, width
+
+    # Determine orientation
     is_vertical = height > width
+
+    if is_vertical:
+        if width >= 2160:
+            resolution = "2160p"
+        elif width >= 1440:
+            resolution = "1440p"
+        elif width >= 1080:
+            resolution = "1080p"
+        elif width >= 720:
+            resolution = "720p"
+        else:
+            resolution = f"{width}p"
+    else:
+        if height >= 2160:
+            resolution = "2160p"
+        elif height >= 1440:
+            resolution = "1440p"
+        elif height >= 1080:
+            resolution = "1080p"
+        elif height >= 720:
+            resolution = "720p"
+        else:
+            resolution = f"{height}p"
+
     return resolution, is_vertical
 
 

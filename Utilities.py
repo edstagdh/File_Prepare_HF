@@ -11,6 +11,7 @@ from pymediainfo import MediaInfo
 from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
+INVALID_CHARS = set('\\/:*?"<>|')
 RUN_DEBUG_MODE = False
 
 
@@ -271,7 +272,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory, bad_words, free_string_parse, mode):
+async def pre_process_files(directory, bad_words, matching_mode, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -279,7 +280,7 @@ async def pre_process_files(directory, bad_words, free_string_parse, mode):
             if filename.lower().endswith('_old.mp4'):
                 continue
 
-            if not free_string_parse:
+            if matching_mode == "strict":
                 if ' ' in filename:
                     logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
                     return False, 12
@@ -297,7 +298,7 @@ async def pre_process_files(directory, bad_words, free_string_parse, mode):
                     logger.error(f"Failed to rename '{filename}' -> '{new_filename}': {e}")
                     return False, 13  # Exit code for rename failure
 
-            if not await is_valid_filename_format(new_filename) and not free_string_parse:
+            if not await is_valid_filename_format(new_filename) and matching_mode == "strict":
                 logger.error(f"Filename does not match required format: '{new_filename}'")
                 return False, 14  # Exit code for bad format
 
@@ -718,6 +719,7 @@ async def generate_template_video(
     if scene_tags:
         processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
+    # logger.debug(resolution)
     if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
         processed_string += f" {resolution} FHD"
     elif resolution == "2160p":  # Currently, supports on 2160p/1080p/720p
@@ -837,3 +839,87 @@ async def load_credentials(mode):
     except json.JSONDecodeError:
         logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
         return None, None, None
+
+
+def is_valid_filename(s: str) -> bool:
+    return not any(c in INVALID_CHARS for c in s)
+
+
+async def ainput(prompt: str) -> str:
+    return await asyncio.to_thread(input, prompt)
+
+
+async def collect_list_input(title: str, mode, validate=False):
+    logger.info(f"Start entering {title} (blank line to finish)")
+    items = []
+    while True:
+        entry = (await ainput("")).strip()
+        if entry == "":
+            break
+
+        if validate and not is_valid_filename(entry):
+            bad = [c for c in entry if c in INVALID_CHARS]
+            logger.error(f"Invalid characters in entry: {bad}")
+            logger.error("Please enter a valid value.")
+            continue
+        if mode == "performers":
+            items.append((entry, None))
+        else:
+            items.append(entry)
+    return items
+
+
+async def full_manual_mode_input(file_base_name):
+    logger.info(f"Full Manual Mode for file: {file_base_name}")
+
+    # --- new_title with validation ---
+    while True:
+        new_title = (await ainput("Enter new title:\n")).strip()
+        if is_valid_filename(new_title):
+            break
+        bad = [c for c in new_title if c in INVALID_CHARS]
+        logger.error(f"Invalid characters in title: {bad}")
+        logger.error("Please enter a valid title.")
+
+    # --- performers_names with validation (each line is one performer) ---
+    logger.info("Enter performers names (blank line to finish):")
+    performers_names = await collect_list_input("performers", mode="performers", validate=True)
+
+    # --- site with validation ---
+    while True:
+        site = (await ainput("Enter site:\n")).strip()
+        if is_valid_filename(site):
+            break
+        bad = [c for c in site if c in INVALID_CHARS]
+        logger.error(f"Invalid characters in site: {bad}")
+        logger.error("Please enter a valid site name.")
+
+    # --- scene_description ---
+    scene_description = (await ainput("Enter scene description:\n")).strip()
+
+    # --- scene_date (must be YYYY-MM-DD) ---
+    while True:
+        scene_date = (await ainput("Enter scene date (YYYY-MM-DD):\n")).strip()
+        try:
+            datetime.strptime(scene_date, "%Y-%m-%d")
+            break
+        except ValueError:
+            logger.error("Invalid date format. Use YYYY-MM-DD.")
+
+    # --- scene_tags (one per line, no validation needed) ---
+    logger.info("Enter scene tags (blank line to finish):")
+    scene_tags = await collect_list_input("tags", mode="tags", validate=True)
+
+    return {
+        "new_title": new_title,
+        "performers_names": performers_names,
+        "image_url": None,
+        "slug": None,
+        "scene_url": None,
+        "tpdb_image_url": None,
+        "tpdb_site": site,
+        "site_studio": None,
+        "scene_description": scene_description,
+        "scene_date": scene_date,
+        "scene_tags": scene_tags,
+    }

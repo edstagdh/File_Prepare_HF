@@ -8,7 +8,7 @@ from datetime import datetime
 from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
-    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename
+    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input
 from TPDB_API_Processing import get_data_from_api
 from Media_Processing import get_existing_title, get_existing_description, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
@@ -35,8 +35,11 @@ async def process_files():
     if not config:
         exit(exit_code)
     else:
-        # Working Mod, By default scenes is used
+        # Working Mode, By default scenes is used
         jav_api_mode = config.get("jav_only_api_mode")
+
+        # Matching mode:
+        matching_mode = config["scene_matching_mode"]
 
         # Generate flags, Note - HF Template generation will not work if mediainfo file is set to not generate
         create_cover_image = config["create_cover_image"]
@@ -73,7 +76,7 @@ async def process_files():
         filename_ignore_part_x = config["filename_ignore_part_x"]
         filename_ignore_performer_ID = config["filename_ignore_performer_ID"]
         filename_ignore_res = config["filename_ignore_res"]
-        free_string_parse = config["free_string_parse"]
+
         create_sub_folder = config["create_sub_folder"]
         cover_regeneration_mode = config["cover_regeneration_mode"]
 
@@ -105,7 +108,7 @@ async def process_files():
         logger.error(f"❌ Python {sys.version.split()[0]} is NOT within supported range {python_min_version_supported} to {python_max_version_supported}.")
         exit(36)
 
-    if create_face_portrait_pic:
+    if create_face_portrait_pic and matching_mode != "full_manual":
         from mtcnn import MTCNN
     else:
         MTCNN = None
@@ -182,7 +185,7 @@ async def process_files():
     logger.info("-" * 100)
     logger.info(f"File_Prepare_HF v{__version__}")
     logger.info(f"Start pre processing in directory: {directory}")
-    pre_process_results, exit_code = await pre_process_files(directory, bad_words, free_string_parse, mode=1)
+    pre_process_results, exit_code = await pre_process_files(directory, bad_words, matching_mode, mode=1)
     if not pre_process_results:
         logger.error("An error has occurred during preprocessing, please review input files.")
         exit(exit_code)
@@ -213,7 +216,7 @@ async def process_files():
     ]
     mp4_files = sorted(mp4_files, key=lambda f: f.name.lower())
     for file in mp4_files:
-        logger.debug(f"Processing file: {file}")
+        # logger.debug(f"Processing file: {file}")
         force_regen_thumbs = False
         pre_suffix = ""
         await asyncio.sleep(0.1)
@@ -235,7 +238,7 @@ async def process_files():
             logger.info(f"Start file: {file}, file {processed_files + 1} out of {total_files}")
 
             # Define flags and initialize them
-            flag_names = ["vr2normal", "upscaled", "bts", "pov", "vertical", "trailer"]
+            flag_names = ["vr2normal", "upscaled", "bts", "pov", "vertical", "trailer", "v2"]
             file_flags = {flag: False for flag in flag_names}
 
             # Prepare lowercase filename and split by '.'
@@ -253,7 +256,7 @@ async def process_files():
             )
 
             # Unpack flags
-            vr2normal, upscaled, bts_video, pov, vertical, trailer = (
+            vr2normal, upscaled, bts_video, pov, vertical, trailer, v2 = (
                 file_flags[flag] for flag in flag_names
             )
 
@@ -273,7 +276,31 @@ async def process_files():
                 logger.info(f"Detected resolution in title: {pre_suffix}")
 
             # Continue with your logic
-            if free_string_parse:
+            if matching_mode == "full_manual":
+                logger.warning(f"Warning - Full Manual mode selected, some features may not work.")
+                # User Input
+                manual_input_data = await full_manual_mode_input(file_base_name)
+                new_title = manual_input_data["new_title"]
+                performers_names = manual_input_data["performers_names"]
+                image_url = manual_input_data["image_url"]
+                slug = manual_input_data["slug"]
+                scene_url = manual_input_data["scene_url"]
+                tpdb_image_url = manual_input_data["tpdb_image_url"]
+                tpdb_site = manual_input_data["tpdb_site"]
+                site_studio = manual_input_data["site_studio"]
+                scene_description = manual_input_data["scene_description"]
+                scene_date = manual_input_data["scene_date"]
+                scene_tags = manual_input_data["scene_tags"]
+
+                # Reset flags due to full manual mode.
+                create_cover_image = False
+                create_face_portrait_pic = False
+                imgbox_upload_cover = False
+                imgbb_upload_cover = False
+                hamster_upload_cover = False
+
+
+            elif matching_mode == "free_string_parse":
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
@@ -290,7 +317,7 @@ async def process_files():
                     mode=1
                 )
 
-            else:
+            elif matching_mode == "strict":
 
                 # Check for Part in file base name
                 part_match = re.search(r"\.part\.\d+", file_base_name, re.IGNORECASE)
@@ -332,6 +359,11 @@ async def process_files():
                     send_notification,
                     mode=2
                 )
+            else:
+                logger.error(f"Invalid matching mode: {matching_mode}")
+                logger.warning(f"End file: {file_full_name}")
+                failed_files.append(file_full_name)
+                exit(47)
 
             # Prepare critical fields dictionary
             critical_fields = {
@@ -382,7 +414,7 @@ async def process_files():
             scene_pretty_date = f"{year_full}-{month_name}-{day}"
 
             # Construct scene URL and error prefix
-            tpdb_scene_url = f"{tpdb_scenes_url}{slug}"
+            tpdb_scene_url = f"{tpdb_scenes_url}{slug}" if slug else None
             error_prefix = f"File: {file_full_name} - Failed to get metadata via API"
 
             # Validate title
@@ -422,6 +454,8 @@ async def process_files():
             suffix = "Pov"
         elif trailer:
             suffix = "Trailer"
+        elif v2:
+            suffix = "V2"
         else:
             suffix = ""
 
@@ -555,7 +589,7 @@ async def process_files():
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
             fps = await get_video_fps(new_file_full_path)
-            resolution, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
+            resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
             codec = await get_video_codec(new_file_full_path)
 
             # Disable uploading to imgbox
@@ -629,7 +663,7 @@ async def process_files():
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
-                 [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution, is_vertical, codec, extension, output_directory, new_filename_base_name,
+                 [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec, extension, output_directory, new_filename_base_name,
                   template_file_full_path, __version__, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
             ]
             failed = False

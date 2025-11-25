@@ -1,5 +1,11 @@
 {
   "jav_only_api_mode": false,
+  "scene_matching_mode": "free_string_parse",
+  "scene_matching_modes_available": {
+    "strict": "Filename must be in strict format in order to attempt match",
+    "free_string_parse": "Filename will be matched according to filename.",
+    "full_manual": "No matching is done, some functionalities are disabled, manual input required."
+  },
   "working_path": "G:\\temp8",
   "create_cover_image": false,
   "create_thumbnails": false,
@@ -42,7 +48,6 @@
   "filename_ignore_part_x": true,
   "filename_ignore_performer_ID": true,
   "filename_ignore_res": false,
-  "free_string_parse": true,
   "custom_name_format_mode": 1,
   "upload_mode": "single",
   "upload_to_tracker": false,
