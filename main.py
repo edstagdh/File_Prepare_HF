@@ -70,6 +70,7 @@ async def process_files():
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
         use_title = config["use_title"]
+        manual_mode_ask_suffix = config["manual_mode_ask_suffix"]
         performer_image_output_format = config["performer_image_output_format"].lower()
         font_full_name = config["font_full_name"]
         ignore_list = config["ignore_list"]
@@ -176,6 +177,10 @@ async def process_files():
             logger.error(f"Invalid template file name: {template_file_name}")
             exit(34)
 
+    if matching_mode != "full_manual":
+        manual_mode_ask_suffix = False
+    manual_suffix = ""
+
     # Verify working path
     if not os.path.isdir(directory):
         logger.error("Please enter a valid directory path.")
@@ -279,7 +284,7 @@ async def process_files():
             if matching_mode == "full_manual":
                 logger.warning(f"Warning - Full Manual mode selected, some features may not work.")
                 # User Input
-                manual_input_data = await full_manual_mode_input(file_base_name)
+                manual_input_data = await full_manual_mode_input(file_base_name, manual_mode_ask_suffix)
                 new_title = manual_input_data["new_title"]
                 performers_names = manual_input_data["performers_names"]
                 image_url = manual_input_data["image_url"]
@@ -291,6 +296,10 @@ async def process_files():
                 scene_description = manual_input_data["scene_description"]
                 scene_date = manual_input_data["scene_date"]
                 scene_tags = manual_input_data["scene_tags"]
+                if manual_mode_ask_suffix:
+                    manual_suffix = manual_input_data["suffix"]
+                else:
+                    manual_suffix = ""
 
                 # Reset flags due to full manual mode.
                 create_cover_image = False
@@ -410,8 +419,11 @@ async def process_files():
                 scene_description = "Scene description not found"
 
             # Format month as full name and prepare scene date string
-            month_name = datetime.strptime(month, "%m").strftime("%B")
-            scene_pretty_date = f"{year_full}-{month_name}-{day}"
+            if scene_date != "0000-00-00":
+                month_name = datetime.strptime(month, "%m").strftime("%B")
+                scene_pretty_date = f"{year_full}-{month_name}-{day}"
+            else:
+                scene_pretty_date = ""
 
             # Construct scene URL and error prefix
             tpdb_scene_url = f"{tpdb_scenes_url}{slug}" if slug else None
@@ -466,11 +478,24 @@ async def process_files():
         safe_title = await clean_filename(new_title, bad_words, mode=2)
 
         # Compose potential folder names
-        new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{pre_suffix}" if pre_suffix != "" else \
-            f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
-        temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{pre_suffix}" if pre_suffix != "" else \
-            f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
+        if pre_suffix != "":
+            if scene_date != "0000-00-00":
+                new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{pre_suffix}"
+                temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{pre_suffix}"
+            else:
+                new_filename = f"{formatted_site}.{safe_title}{pre_suffix}"
+                temp_filename_check = f"{formatted_site}.{formatted_filename_performers_names}{pre_suffix}"
+        else:
+            if scene_date != "0000-00-00":
+                new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
+                temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
+            else:
+                new_filename = f"{formatted_site}.{safe_title}"
+                temp_filename_check = f"{formatted_site}.{formatted_filename_performers_names}"
 
+        if manual_mode_ask_suffix:
+            new_filename += manual_suffix
+            temp_filename_check += manual_suffix
         # Decide whether to use title-based naming
         use_title_mode = use_title or len(temp_filename_check) > 200
         try:
@@ -522,13 +547,18 @@ async def process_files():
             studio_info = tpdb_site
             studio_tag = [tpdb_site]
         new_title_parts = [studio_info, scene_pretty_date, new_title, formatted_names]
-        # Remove Performers object if its None to avoid excess " - " in title
+
+        # Remove performers object if None/empty
         if new_title_parts and (new_title_parts[-1] is None or new_title_parts[-1] == ""):
             create_face_portrait_pic = False
             new_title_parts.pop()
+
+        # Add suffix only if it exists
         if suffix:
             new_title_parts.append(suffix)
-        new_title = " - ".join(new_title_parts)
+
+        # Final filtered join
+        new_title = " - ".join([p for p in new_title_parts if p])
 
         # Rename existing file to new file_full_name if needed
         new_full_filename = f"{new_filename}.{suffix}{file_extension}" if suffix else f"{new_filename}{file_extension}"

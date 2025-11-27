@@ -31,6 +31,7 @@
   "python_max_version_supported": [3, 10],
   "bad_words": [".Hardcore"],
   "use_title": false,
+  "manual_mode_ask_suffix": true,
   "create_sub_folder": false,
   "imgbox_upload_cover": false,
   "imgbox_upload_thumbnails": false,

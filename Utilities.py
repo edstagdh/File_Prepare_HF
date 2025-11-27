@@ -759,7 +759,7 @@ async def generate_template_video(
         "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
         "{SCREENS_BUTTON}": screens_button_icon_url,
         "{NEW_TITLE}": new_title,
-        "{SCENE_PRETTY_DATE}": scene_pretty_date,
+        "{SCENE_PRETTY_DATE}": scene_pretty_date if scene_pretty_date != "" else "N/A",
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
         "{FORMATTED_NAMES}": mapped_names,
         "{FPS}": fps_icon_url,
@@ -854,61 +854,130 @@ async def collect_list_input(title: str, mode, validate=False):
     items = []
     while True:
         entry = (await ainput("")).strip()
+
+        # Blank line = end of input
         if entry == "":
             break
 
+        # Prevent empty performer names (e.g. when user enters whitespace)
+        if mode == "performers" and not entry:
+            logger.error("Performer name cannot be empty.")
+            continue
+
+        # Optional filename-like validation
         if validate and not is_valid_filename(entry):
             bad = [c for c in entry if c in INVALID_CHARS]
             logger.error(f"Invalid characters in entry: {bad}")
             logger.error("Please enter a valid value.")
             continue
+
         if mode == "performers":
             items.append((entry, None))
         else:
             items.append(entry)
+
     return items
 
 
-async def full_manual_mode_input(file_base_name):
+async def full_manual_mode_input(file_base_name, manual_mode_ask_suffix):
+    await asyncio.sleep(1)
     logger.info(f"Full Manual Mode for file: {file_base_name}")
-
-    # --- new_title with validation ---
-    while True:
-        new_title = (await ainput("Enter new title:\n")).strip()
-        if is_valid_filename(new_title):
-            break
-        bad = [c for c in new_title if c in INVALID_CHARS]
-        logger.error(f"Invalid characters in title: {bad}")
-        logger.error("Please enter a valid title.")
-
-    # --- performers_names with validation (each line is one performer) ---
-    logger.info("Enter performers names (blank line to finish):")
-    performers_names = await collect_list_input("performers", mode="performers", validate=True)
 
     # --- site with validation ---
     while True:
-        site = (await ainput("Enter site:\n")).strip()
+        site = (await ainput("[REQUIRED]Enter site:\n")).strip()
+
+        # Empty check (critical field)
+        if not site:
+            logger.error("Site cannot be empty.")
+            continue
+
+        # Filename validation
         if is_valid_filename(site):
             break
+
         bad = [c for c in site if c in INVALID_CHARS]
         logger.error(f"Invalid characters in site: {bad}")
         logger.error("Please enter a valid site name.")
 
-    # --- scene_description ---
-    scene_description = (await ainput("Enter scene description:\n")).strip()
-
-    # --- scene_date (must be YYYY-MM-DD) ---
+    # --- scene_date (must be YYYY-MM-DD or the literal none/None) ---
     while True:
-        scene_date = (await ainput("Enter scene date (YYYY-MM-DD):\n")).strip()
+        scene_date = (await ainput("[REQUIRED]Enter scene date (YYYY-MM-DD or none):\n")).strip()
+
+        # Accept None / none (meaning: no date available)
+        if scene_date.lower() == "none":
+            scene_date = None
+            break
+
+        # Validate strict YYYY-MM-DD
         try:
             datetime.strptime(scene_date, "%Y-%m-%d")
             break
         except ValueError:
-            logger.error("Invalid date format. Use YYYY-MM-DD.")
+            logger.error("Invalid date format. Use YYYY-MM-DD or 'none'.")
+
+    # --- new_title with validation ---
+    while True:
+        new_title = (await ainput("[REQUIRED]Enter new title:\n")).strip()
+
+        # Check for empty
+        if not new_title:
+            logger.error("Title cannot be empty.")
+            continue
+
+        # Check filename validity
+        if is_valid_filename(new_title):
+            break
+
+        bad = [c for c in new_title if c in INVALID_CHARS]
+        logger.error(f"Invalid characters in title: {bad}")
+        logger.error("Please enter a valid title.")
+
+    logger.info("[REQUIRED]Enter performers names (blank line to finish):")
+    performers_names = await collect_list_input(
+        "performers",
+        mode="performers",
+        validate=True
+    )
+
+    # --- scene_description ---
+    scene_description = (await ainput("Enter scene description(blank for none):\n")).strip()
 
     # --- scene_tags (one per line, no validation needed) ---
     logger.info("Enter scene tags (blank line to finish):")
     scene_tags = await collect_list_input("tags", mode="tags", validate=True)
+
+    # --- optional multi-part suffix input ---
+    suffix = ""
+    if manual_mode_ask_suffix:
+        suffix_parts = []
+        logger.info("Enter suffix parts (blank line to finish):")
+
+        while True:
+            entry = (await ainput("")).strip()
+
+            # Blank line = end
+            if entry == "":
+                # Require at least one suffix part
+                if not suffix_parts:
+                    logger.warning("manual_mode_ask_suffix is enabled however no suffix was inputted.")
+                    continue
+                break
+
+            # Validate characters
+            if not is_valid_filename(entry):
+                bad = [c for c in entry if c in INVALID_CHARS]
+                logger.error(f"Invalid characters in suffix part: {bad}")
+                logger.error("Please enter a valid suffix part.")
+                continue
+
+            suffix_parts.append(entry)
+
+        # Transform each part: uppercase first letter, keep rest the same
+        suffix_parts = [part[:1].upper() + part[1:] if part else part for part in suffix_parts]
+
+        # Join with dots and preserve your leading dot
+        suffix = "." + ".".join(suffix_parts)
 
     return {
         "new_title": new_title,
@@ -920,6 +989,7 @@ async def full_manual_mode_input(file_base_name):
         "tpdb_site": site,
         "site_studio": None,
         "scene_description": scene_description,
-        "scene_date": scene_date,
+        "scene_date": scene_date if scene_date else "0000-00-00",
         "scene_tags": scene_tags,
+        "suffix": suffix
     }
