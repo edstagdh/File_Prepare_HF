@@ -10,42 +10,57 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, mode):
+async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_id, mode):
     max_retries = 3
     delay = 5
+
     try:
         work_mode = 4 if jav_api_mode else 1
         api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=work_mode)
+
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None
 
-        if mode == 1:
-            # logger.debug(string_parse)
-            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        elif mode == 2:
-            # logger.debug(string_parse)
-            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-            if response_data is None or not response_data.get('data'):
-                string_parse_fallback = await convert_number_suffix_to_word(string_parse)
-                # logger.debug(string_parse_fallback)
-                if string_parse_fallback != string_parse and part_match:
-                    response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
-                elif response_data is None or not response_data.get('data'):
-                    string_advanced_parse_fallback = await remove_date_from_text(string_parse)
-                    # logger.debug(string_advanced_parse_fallback)
-                    response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
+        if existing_tpdb_id:
+            # logger.debug(f"using tpdb_id: {existing_tpdb_id}")
+            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_id, max_retries, delay, mode='id')
+            mode = 0
         else:
-            return None, None, None, None, None, None, None, None, None, None, None
+            if mode == 1:
+                # logger.debug(query_string)
+                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+            elif mode == 2:
+                # logger.debug(query_string)
+                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+                if response_data is None or not response_data.get('data'):
+                    query_string_fallback = await convert_number_suffix_to_word(query_string)
+                    # logger.debug(query_string_fallback)
+                    if query_string_fallback != query_string and part_match:
+                        response_data = await send_request(api_scenes_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
+                    elif response_data is None or not response_data.get('data'):
+                        string_advanced_parse_fallback = await remove_date_from_text(query_string)
+                        # logger.debug(string_advanced_parse_fallback)
+                        response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
+            else:
+                return None, None, None, None, None, None, None, None, None, None, None, None
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
+            return None, None, None, None, None, None, None, None, None, None, None, None
+        if mode in [1,2]:
+            valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
+        else:
+            item = response_data.get("data")
+            valid_entries = []
+            if item:
+                valid_entries.append(item)
+            else:
+                return None, None, None, None, None, None, None, None, None, None, None, None
 
         if not valid_entries:
-            logger.error(f"No matching entries for the provided date for string: {string_parse}")
-            return None, None, None, None, None, None, None, None, None, None, None
+            logger.error(f"No matching entries for the provided date for string: {query_string}")
+            return None, None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
@@ -54,7 +69,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
@@ -63,6 +78,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
+        tpdb_id = selected_entry.get('id')
         if generate_hf_template:
             scene_tags = await extract_scene_tags(selected_entry)
         else:
@@ -107,22 +123,26 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
     except Exception as e:
         logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None, None
 
 
-async def send_request(api_url, api_auth, string_parse, max_retries, delay):
+async def send_request(api_url, api_auth, query_string, max_retries, delay, mode="parse"):
     if "performers" in api_url:
-        url = f"{api_url}{string_parse}"
+        url = f"{api_url}{query_string}"
     else:
-        url = f"{api_url}?parse={string_parse}"
+        if mode=='id':
+            url = f"{api_url}/{query_string}"
+        else:
+            # default to parse
+            url = f"{api_url}?parse={query_string}"
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
@@ -138,7 +158,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
                 if attempt > 0:
                     logger.info("Retry successful!")
                 # Debug
-                # logger.info(f"API data fetched successfully for file {string_parse}")
+                # logger.info(f"API data fetched successfully for file {query_string}")
                 # logger.debug(response_data)
                 return response_data
             return None

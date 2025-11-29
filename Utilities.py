@@ -815,13 +815,13 @@ async def load_credentials(mode):
     try:
         with open('creds.secret', 'r') as secret_file:
             secrets = json.load(secret_file)
-            if mode == 1:
+            if mode == 1:  # Scenes API endpoint
                 return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
             elif mode == 2:
                 return secrets["api_auth"], secrets["api_performer_url"], None
             elif mode == 3:
                 return secrets["imgbox_u"], secrets["imgbox_u"], None
-            elif mode == 4:
+            elif mode == 4:  # JAV API endpoint
                 return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
             elif mode == 5:
                 return secrets["hamster_album_id"], secrets["hamster_api_key"], None

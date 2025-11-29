@@ -62,11 +62,11 @@ async def has_unwanted_metadata(file_path) -> bool:
 async def get_existing_title(input_file):
     try:
         # Load the MP4 file using Mutagen
-        audio = MP4(input_file)
+        video_file = MP4(input_file)
 
         # Check if tags exist before trying to access them
-        if audio.tags is not None:
-            title = audio.tags.get('©nam')
+        if video_file.tags is not None:
+            title = video_file.tags.get('©nam')
             if title:
                 return title[0].strip()  # Mutagen stores values as a list, take the first element
             else:
@@ -83,11 +83,11 @@ async def get_existing_title(input_file):
 async def get_existing_description(input_file):
     try:
         # Load the MP4 file using Mutagen
-        audio = MP4(input_file)
+        video_file = MP4(input_file)
 
         # Check if tags exist before trying to access them
-        if audio.tags is not None:
-            description = audio.tags.get('©cmt')
+        if video_file.tags is not None:
+            description = video_file.tags.get('©cmt')
             if description:
                 return description[0].strip()  # Mutagen stores values as a list, take the first element
             else:
@@ -98,6 +98,27 @@ async def get_existing_description(input_file):
             return None
     except Exception:
         logger.exception(f"Error retrieving description from {input_file}")
+        return None
+
+
+async def get_existing_TPDB_ID(input_file):
+    try:
+        # Load the MP4 file using Mutagen
+        video_file = MP4(input_file)
+
+        # Check if tags exist before trying to access them
+        if video_file.tags is not None:
+            tpdb_id = video_file.tags.get('©alb')
+            if tpdb_id:
+                return tpdb_id[0].strip()  # Mutagen stores values as a list, take the first element
+            else:
+                # logger.warning(f"No tpdb_id found in {input_file}")
+                return None
+        else:
+            # logger.warning(f"No tpdb_id found in {input_file}")
+            return None
+    except Exception:
+        logger.exception(f"Error retrieving tpdb_id from {input_file}")
         return None
 
 
@@ -1139,7 +1160,7 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description):
+async def update_metadata(input_file, title, description, tpdb_id):
     """
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
@@ -1150,6 +1171,7 @@ async def update_metadata(input_file, title, description):
         # --- update scene data ---
         video["\xa9nam"] = [title]  # Title
         video["\xa9cmt"] = [description]  # Comment/Description
+        video["\xa9alb"] = [tpdb_id]  # TPDB ID
 
         # --- Remove unwanted ---
         for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
