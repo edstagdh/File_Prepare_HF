@@ -17,7 +17,8 @@ This process requires matching scene via TPDB, it is not a standalone script.
 ## 🛣️ Roadmap
 
 - [x] Add tags generation for scene upload process.
-- [ ] Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).
+- [ ] ~~Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).~~
+<br>A "full manual" mode has been introduced, however it does have limitations, this cannot be fully implemented at this stage.
 - [x] Support for Static thumbnails generation without using Scorp VTM software.
 - [ ] ~~Support other types of databases, e.g. StashDB.~~ Note - I don't have access to other databases at this time.
 - [x] Add an option to use jpg format images.
