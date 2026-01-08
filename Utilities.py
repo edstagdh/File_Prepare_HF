@@ -515,6 +515,8 @@ async def generate_template_video(
     with open(media_info_file_path, "r", encoding="utf-8") as f:
         media_info = f.read()
 
+    resources_img_host_url, _, _ = await load_credentials(7)
+
     # Load JSON config
     json_map, exit_code = await load_json_file("Resources/BBCode_Images.json")
     if exit_code != 0 or json_map is None:
@@ -523,16 +525,16 @@ async def generate_template_video(
     # Additional information
     _, template_name = os.path.split(template_file_full_path)
     template_base_name, _ = os.path.splitext(template_name)
-    fps_icon_url = json_map[f"{fps}"]
-    resolution_icon_url = json_map[f"{resolution}"]
-    codec_icon_url = json_map[f"{codec}"]
-    extension_icon_url = json_map[f"{extension.replace('.', '')}"]
-    desc_button_icon_url = json_map[f"desc_button"]
-    release_date_button_icon_url = json_map[f"release_date_button"]
-    performers_button_icon_url = json_map[f"performers_button"]
-    mediainfo_button_icon_url = json_map[f"mediainfo_button"]
-    screens_button_icon_url = json_map[f"screens_button"]
-    bg = json_map[f"bg"]
+    fps_icon_url = f"{resources_img_host_url}{json_map[fps]}"
+    resolution_icon_url = f"{resources_img_host_url}{json_map[resolution]}"
+    codec_icon_url = f"{resources_img_host_url}{json_map[codec]}"
+    extension_icon_url = f"{resources_img_host_url}{json_map[extension.replace('.', '')]}"
+    desc_button_icon_url = f"{resources_img_host_url}{json_map['desc_button']}"
+    release_date_button_icon_url = f"{resources_img_host_url}{json_map['release_date_button']}"
+    performers_button_icon_url = f"{resources_img_host_url}{json_map['performers_button']}"
+    mediainfo_button_icon_url = f"{resources_img_host_url}{json_map['mediainfo_button']}"
+    screens_button_icon_url = f"{resources_img_host_url}{json_map['screens_button']}"
+    bg = f"{resources_img_host_url}{json_map['bg']}"
 
     # Default image paths
     cover_image = f"{new_filename_base_name}.{image_output_format}"
@@ -824,9 +826,11 @@ async def load_credentials(mode):
             elif mode == 4:  # JAV API endpoint
                 return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
             elif mode == 5:
-                return secrets["hamster_album_id"], secrets["hamster_api_key"], None
+                return secrets["hamster_album_id"], secrets["hamster_api_key"], secrets["hamster_site_url"]
             elif mode == 6:
                 return secrets["trackers"], None, None
+            elif mode == 7:
+                return secrets["hamster_site_url"], None, None
             else:
                 return None, None, None
 

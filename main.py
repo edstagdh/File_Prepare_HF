@@ -61,6 +61,7 @@ async def process_files():
         zoom_factor = config["zoom_factor"]
         blur_kernel_size = config["blur_kernel_size"]
         re_encode_hevc = config["re_encode_hevc"]
+        re_encode_hevc_CRF = config["re_encode_hevc_CRF"]
         keep_original_file = config["keep_original_file"]
         posters_limit = config["posters_limit"]
         template_file_name = config["template_name"]
@@ -628,7 +629,7 @@ async def process_files():
                             logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
                             failed_files.append(new_file_full_path)
                             continue
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id)
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id, matching_mode)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
                         failed_files.append(new_file_full_path)
@@ -638,7 +639,7 @@ async def process_files():
                 # If we will re-encode, just log if metadata mismatch exists (for debugging)
                 if metadata_mismatch:
                     # logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id)
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id, matching_mode)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
                         failed_files.append(new_file_full_path)
@@ -691,10 +692,10 @@ async def process_files():
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
                 (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters,
-                                                   contains_unwanted_metadata]),
+                                                   contains_unwanted_metadata, re_encode_hevc_CRF]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_id]),
+                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_id, matching_mode]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,
@@ -784,7 +785,7 @@ async def process_files():
                             hamster_file_path,
                             directory,
                             remove_e_files,
-                            resolution,
+                            resolution_template,
                             codec,
                             is_last_tracker
                         )

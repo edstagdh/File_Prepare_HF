@@ -98,6 +98,8 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             site = "Fansly-" + site
 
         site_parent = selected_entry.get("site", {}).get("parent")
+        if site_parent and site_parent.get("name", None) == 'ManyVids' and not "Manyvids:" in site:
+            site = "Manyvids: " + site
 
         if site_parent:
             site_parent_uuid = site_parent.get("uuid")
@@ -107,7 +109,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry, filename_ignore_performer_ID, send_notification)
+            female_performers = await extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
@@ -130,7 +132,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
     except Exception as e:
-        logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
+        logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
         return None, None, None, None, None, None, None, None, None, None, None, None
 
 
@@ -142,7 +144,7 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
             url = f"{api_url}/{query_string}"
         else:
             # default to parse
-            url = f"{api_url}?parse={query_string}"
+            url = f"{api_url}?orderBy=recently_released&parse={query_string}&per_page=40&page=1"
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
@@ -290,13 +292,16 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
     return None
 
 
-async def get_user_input_performers(send_notification):
+async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification):
     """
     Asks the user for a yes/no response.
     If 'yes', prompts for text input and returns it.
     If 'no', returns None.
     Continues prompting until a valid response is given.
     """
+    scene_title = selected_entry.get('title', '(No title available)')
+    scene_slug = selected_entry.get('slug', '(No scene available)')
+    scene_url = f"{tpdb_scenes_url}/{scene_slug}"
     temp_performers = []
     while True:
         try:
@@ -305,6 +310,8 @@ async def get_user_input_performers(send_notification):
                 if not result:
                     logger.warning("Notifier failed to send user input request.")
                 await asyncio.sleep(0.5)
+            logger.info(f'User input required - Manual Performer Entry for scene: "{scene_title}" | {scene_url}')
+            await asyncio.sleep(0.5)
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
             if response in ("yes", "y"):
                 while True:
@@ -401,7 +408,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
         return None
 
 
-async def extract_female_performers(selected_entry, filename_ignore_performer_ID, send_notification):
+async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification):
 
     def clean_name(name: str) -> str:
         # Remove any word that starts with ID followed by optional space and digits
@@ -464,7 +471,7 @@ async def extract_female_performers(selected_entry, filename_ignore_performer_ID
         if female_performers:
             return female_performers
         else:
-            user_entries = await get_user_input_performers(send_notification)
+            user_entries = await get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification)
             if user_entries:
                 female_performers.extend([(name, "") for name in user_entries])
             if not female_performers or len(female_performers) < 1:
@@ -486,6 +493,10 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
     """
     max_retries = 3
     delay = 5
+
+    if not performer_name:
+        logger.error("Valid Performer ID is required, manual performer name was provided without ID.")
+        return None
 
     try:
         api_auth, api_performers_url, _ = await load_credentials(mode=2)

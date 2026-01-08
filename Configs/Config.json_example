@@ -15,6 +15,7 @@
   "create_face_portrait_pic": false,
   "create_template_file" : false,
   "re_encode_hevc": false,
+  "re_encode_hevc_CRF": 24,
   "re_encode_downscale": false,
   "limit_cpu_usage": true,
   "remove_chapters": true,

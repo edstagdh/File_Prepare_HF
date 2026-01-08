@@ -463,7 +463,8 @@ async def get_video_metadata(file_path, char_break_line, duration):
             except Exception as e:
                 logger.error(f"Error parsing CRF: {e}")
 
-        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}"
+        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}" if crf_value != "N/A" else\
+            f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps"
     except Exception as e:
         logger.error(f"Error extracting video properties: {e}")
         video_details = "N/A"

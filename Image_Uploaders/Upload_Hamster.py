@@ -6,12 +6,12 @@ import base64
 from Utilities import load_credentials
 
 
-async def upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_title):
+async def upload_to_hamster(hamster_site_url, hamster_api_key, hamster_album_id, filepath, img_title):
     """
-    Upload an image to Hamster.is using Base64 encoding.
+    Upload an image to hamster img host using Base64 encoding.
     """
     try:
-        url = "https://hamster.is/api/1/upload"
+        url = f"{hamster_site_url}/api/1/upload"
 
         if not os.path.isfile(filepath):
             logger.error(f"File not found: {filepath}")
@@ -71,13 +71,13 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
     txt_filepath = os.path.join(os.path.dirname(filepath), txt_filename)
     img_title = f"{new_filename_base_name}_{mode}"
 
-    hamster_album_id, hamster_api_key, _ = await load_credentials(5)
+    hamster_album_id, hamster_api_key, hamster_site_url = await load_credentials(5)
 
-    if not hamster_api_key or not hamster_album_id:
-        logger.error("Missing 'hamster_api_key' or 'hamster_album_id' in creds.secret.")
+    if not hamster_api_key or not hamster_album_id or not hamster_site_url:
+        logger.error("Missing 'hamster_api_key' or 'hamster_album_id' or 'hamster_site_url' in creds.secret.")
         exit(-99)
 
-    result = await upload_to_hamster(hamster_api_key, hamster_album_id, filepath, img_title)
+    result = await upload_to_hamster(hamster_site_url, hamster_api_key, hamster_album_id, filepath, img_title)
     result_json = {
         "image_url": result
     }
