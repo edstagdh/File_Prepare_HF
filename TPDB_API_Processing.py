@@ -10,50 +10,66 @@ from typing import Optional
 from Utilities import load_credentials
 
 
-async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode, filename_ignore_performer_ID, mode):
+async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_id, mode):
     max_retries = 3
     delay = 5
+
     try:
         work_mode = 4 if jav_api_mode else 1
         api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=work_mode)
+
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None
 
-        if mode == 1:
-            # logger.debug(string_parse)
-            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-        elif mode == 2:
-            # logger.debug(string_parse)
-            response_data = await send_request(api_scenes_url, api_auth, string_parse, max_retries, delay)
-            if response_data is None or not response_data.get('data'):
-                string_parse_fallback = await convert_number_suffix_to_word(string_parse)
-                # logger.debug(string_parse_fallback)
-                if string_parse_fallback != string_parse and part_match:
-                    response_data = await send_request(api_scenes_url, api_auth, string_parse_fallback, max_retries, delay)
-                elif response_data is None or not response_data.get('data'):
-                    string_advanced_parse_fallback = await remove_date_from_text(string_parse)
-                    # logger.debug(string_advanced_parse_fallback)
-                    response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay)
+        if existing_tpdb_id:
+            # logger.debug(f"using tpdb_id: {existing_tpdb_id}")
+            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_id, max_retries, delay, mode='id')
+            mode = 0
         else:
-            return None, None, None, None, None, None, None, None, None, None, None
+            if mode == 1:
+                # logger.debug(query_string)
+                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+            elif mode == 2:
+                # logger.debug(query_string)
+                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+                if response_data is None or not response_data.get('data'):
+                    query_string_fallback = await convert_number_suffix_to_word(query_string)
+                    # logger.debug(query_string_fallback)
+                    if query_string_fallback != query_string and part_match:
+                        response_data = await send_request(api_scenes_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
+                    elif response_data is None or not response_data.get('data'):
+                        string_advanced_parse_fallback = await remove_date_from_text(query_string)
+                        # logger.debug(string_advanced_parse_fallback)
+                        response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
+            else:
+                return None, None, None, None, None, None, None, None, None, None, None, None
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None, None
-        valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode)
+            return None, None, None, None, None, None, None, None, None, None, None, None
+        if mode in [1,2]:
+            valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
+        else:
+            item = response_data.get("data")
+            valid_entries = []
+            if item:
+                valid_entries.append(item)
+            else:
+                return None, None, None, None, None, None, None, None, None, None, None, None
 
         if not valid_entries:
-            logger.error(f"No matching entries for the provided date for string: {string_parse}")
-            return None, None, None, None, None, None, None, None, None, None, None
+            logger.error(f"No matching entries for the provided date for string: {query_string}")
+            return None, None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             logger.warning("More than 1 scene returned in results, please be more specific")
-            selected_entry = await filter_entries_by_user_choice(valid_entries)
+            selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
         else:
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
@@ -62,6 +78,7 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
+        tpdb_id = selected_entry.get('id')
         if generate_hf_template:
             scene_tags = await extract_scene_tags(selected_entry)
         else:
@@ -81,6 +98,8 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
             site = "Fansly-" + site
 
         site_parent = selected_entry.get("site", {}).get("parent")
+        if site_parent and site_parent.get("name", None) == 'ManyVids' and not "Manyvids:" in site:
+            site = "Manyvids: " + site
 
         if site_parent:
             site_parent_uuid = site_parent.get("uuid")
@@ -90,33 +109,42 @@ async def get_data_from_api(string_parse, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry, filename_ignore_performer_ID)
+            female_performers = await extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
             while True:
                 logger.info("Enter Performers Manually")
+                if send_notification:
+                    result = await send_notification("User input required - Manual Performer Entry")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input("Enter a value (or type 'exit' to stop): ")
                 if user_input.lower() == 'exit':
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags
+        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
     except Exception as e:
-        logger.error(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None, None
+        logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
+        return None, None, None, None, None, None, None, None, None, None, None, None
 
 
-async def send_request(api_url, api_auth, string_parse, max_retries, delay):
+async def send_request(api_url, api_auth, query_string, max_retries, delay, mode="parse"):
     if "performers" in api_url:
-        url = f"{api_url}{string_parse}"
+        url = f"{api_url}{query_string}"
     else:
-        url = f"{api_url}?parse={string_parse}"
+        if mode=='id':
+            url = f"{api_url}/{query_string}"
+        else:
+            # default to parse
+            url = f"{api_url}?orderBy=recently_released&parse={query_string}&per_page=40&page=1"
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
@@ -132,7 +160,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
                 if attempt > 0:
                     logger.info("Retry successful!")
                 # Debug
-                # logger.info(f"API data fetched successfully for file {string_parse}")
+                # logger.info(f"API data fetched successfully for file {query_string}")
                 # logger.debug(response_data)
                 return response_data
             return None
@@ -148,7 +176,7 @@ async def send_request(api_url, api_auth, string_parse, max_retries, delay):
     return None
 
 
-async def filter_entries_by_user_choice(valid_entries):
+async def filter_entries_by_user_choice(valid_entries, send_notification):
     if len(valid_entries) > 1:
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
@@ -167,7 +195,11 @@ async def filter_entries_by_user_choice(valid_entries):
 
         logger.info("0. None of the results are good")
         await asyncio.sleep(0.5)
-
+        if send_notification:
+            result = await send_notification("User input required - Select Entry to Keep")
+            if not result:
+                logger.warning("Notifier failed to send user input request.")
+            await asyncio.sleep(0.5)
         while True:
             try:
                 choice = int(input(f"Enter the number of the result to keep (0-{len(valid_entries)}): \n"))
@@ -253,21 +285,33 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
             if attempt < max_retries - 1:
                 logger.warning(f"Retrying in {delay} seconds...")
                 await asyncio.sleep(delay)
+                return None
             else:
                 logger.error("Maximum retries reached. Request failed.")
                 return None
+    return None
 
 
-async def get_user_input():
+async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification):
     """
     Asks the user for a yes/no response.
     If 'yes', prompts for text input and returns it.
     If 'no', returns None.
     Continues prompting until a valid response is given.
     """
+    scene_title = selected_entry.get('title', '(No title available)')
+    scene_slug = selected_entry.get('slug', '(No scene available)')
+    scene_url = f"{tpdb_scenes_url}/{scene_slug}"
     temp_performers = []
     while True:
         try:
+            if send_notification:
+                result = await send_notification("User input required - Manual Performer Entry")
+                if not result:
+                    logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+            logger.info(f'User input required - Manual Performer Entry for scene: "{scene_title}" | {scene_url}')
+            await asyncio.sleep(0.5)
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
             if response in ("yes", "y"):
                 while True:
@@ -286,7 +330,7 @@ async def get_user_input():
             return None
 
 
-async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mode):
+async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode):
     try:
         valid_entries = []
         unmatched_entries = []
@@ -303,6 +347,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 # Check if title contains 'interview'
                 if "interview" in title:
                     await asyncio.sleep(0.5)
+                    if send_notification:
+                        result = await send_notification(f"User input required - Filter Entries by Date")
+                        if not result:
+                            logger.warning("Notifier failed to send user input request.")
+                        await asyncio.sleep(0.5)
                     user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
                         logger.info(f"Ignoring scene: {item.get('title')}")
@@ -316,6 +365,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 # Date range check (within ±1 to ±7 days)
                 elif abs((item_date - scene_date).days) in range(1, 7):
                     await asyncio.sleep(0.5)
+                    if send_notification:
+                        result = await send_notification("User input required - Filter Entries by Date")
+                        if not result:
+                            logger.warning("Notifier failed to send user input request.")
+                        await asyncio.sleep(0.5)
                     user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
                                        f"include it in the results? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
@@ -331,6 +385,11 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
                 for idx, (title, url, _, scene_date) in enumerate(unmatched_entries, 1):
                     logger.info(f"{idx}. {title} — {scene_date} — {url}")
                 await asyncio.sleep(0.5)
+                if send_notification:
+                    result = await send_notification("User input required - Manual Selection of Entries")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
                 if user_input.isdigit():
                     selection_index = int(user_input) - 1
@@ -349,7 +408,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, mod
         return None
 
 
-async def extract_female_performers(selected_entry, filename_ignore_performer_ID):
+async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification):
 
     def clean_name(name: str) -> str:
         # Remove any word that starts with ID followed by optional space and digits
@@ -390,7 +449,13 @@ async def extract_female_performers(selected_entry, filename_ignore_performer_ID
                     performer["parent"]["extras"].get("gender") is None
             ):
                 # Ask the user for input
+                if send_notification:
+                    result = await send_notification("User input required - Approve Performer Gender")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                    await asyncio.sleep(0.5)
                 user_input = input(f"Treat performer '{performer.get('name', 'Unknown')}' as Female? (yes/no): ").strip().lower()
+
 
                 if user_input in ("yes", "y"):
                     if filename_ignore_performer_ID:
@@ -406,7 +471,7 @@ async def extract_female_performers(selected_entry, filename_ignore_performer_ID
         if female_performers:
             return female_performers
         else:
-            user_entries = await get_user_input()
+            user_entries = await get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification)
             if user_entries:
                 female_performers.extend([(name, "") for name in user_entries])
             if not female_performers or len(female_performers) < 1:
@@ -428,6 +493,10 @@ async def get_performer_profile_picture(performer_name: str, performer_id: str, 
     """
     max_retries = 3
     delay = 5
+
+    if not performer_name:
+        logger.error("Valid Performer ID is required, manual performer name was provided without ID.")
+        return None
 
     try:
         api_auth, api_performers_url, _ = await load_credentials(mode=2)

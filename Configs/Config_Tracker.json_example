@@ -19,6 +19,7 @@
   "password": { "by": "name", "value": "password" },
   "submit":   { "by": "id", "value": "login_button" }
   },
+  "2FA": false,
   "login_success": {
   "by": "css",
   "value": "ul#userinfo_username a.username"

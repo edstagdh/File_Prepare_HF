@@ -7,6 +7,7 @@
   "CREATE_GIF_PREVIEW_SHEET": false,
   "KEEP_TEMP_FILES": false,
   "ADD_BLACK_BARS": false,
+  "WEBP_PREVIEW_FPS": 24,
   "GIF_PREVIEW_FPS": 15,
   "NUMBER_OF_SEGMENTS_GIF": 8,
   "TIMESTAMPS_MODE": 2,
@@ -37,5 +38,4 @@
   "transition_duration": 0.25,
   "preview_quality_resolution": "720p",
   "preview_quality_resolutions_available": ["720p", "1080p"]
-
 }

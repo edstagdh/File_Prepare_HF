@@ -11,6 +11,7 @@ from pymediainfo import MediaInfo
 from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
+INVALID_CHARS = set('\\/:*?"<>|')
 RUN_DEBUG_MODE = False
 
 
@@ -271,7 +272,7 @@ async def is_valid_filename_format(filename: str) -> bool:
     ))
 
 
-async def pre_process_files(directory, bad_words, free_string_parse, mode):
+async def pre_process_files(directory, bad_words, matching_mode, mode):
     try:
         for filename in os.listdir(directory):
             if not filename.lower().endswith('.mp4'):
@@ -279,7 +280,7 @@ async def pre_process_files(directory, bad_words, free_string_parse, mode):
             if filename.lower().endswith('_old.mp4'):
                 continue
 
-            if not free_string_parse:
+            if matching_mode == "strict":
                 if ' ' in filename:
                     logger.error(f"Filename contains spaces: '{filename}'. Please remove spaces before proceeding.")
                     return False, 12
@@ -297,7 +298,7 @@ async def pre_process_files(directory, bad_words, free_string_parse, mode):
                     logger.error(f"Failed to rename '{filename}' -> '{new_filename}': {e}")
                     return False, 13  # Exit code for rename failure
 
-            if not await is_valid_filename_format(new_filename) and not free_string_parse:
+            if not await is_valid_filename_format(new_filename) and matching_mode == "strict":
                 logger.error(f"Filename does not match required format: '{new_filename}'")
                 return False, 14  # Exit code for bad format
 
@@ -514,6 +515,8 @@ async def generate_template_video(
     with open(media_info_file_path, "r", encoding="utf-8") as f:
         media_info = f.read()
 
+    resources_img_host_url, _, _ = await load_credentials(7)
+
     # Load JSON config
     json_map, exit_code = await load_json_file("Resources/BBCode_Images.json")
     if exit_code != 0 or json_map is None:
@@ -522,16 +525,16 @@ async def generate_template_video(
     # Additional information
     _, template_name = os.path.split(template_file_full_path)
     template_base_name, _ = os.path.splitext(template_name)
-    fps_icon_url = json_map[f"{fps}"]
-    resolution_icon_url = json_map[f"{resolution}"]
-    codec_icon_url = json_map[f"{codec}"]
-    extension_icon_url = json_map[f"{extension.replace('.', '')}"]
-    desc_button_icon_url = json_map[f"desc_button"]
-    release_date_button_icon_url = json_map[f"release_date_button"]
-    performers_button_icon_url = json_map[f"performers_button"]
-    mediainfo_button_icon_url = json_map[f"mediainfo_button"]
-    screens_button_icon_url = json_map[f"screens_button"]
-    bg = json_map[f"bg"]
+    fps_icon_url = f"{resources_img_host_url}{json_map[fps]}"
+    resolution_icon_url = f"{resources_img_host_url}{json_map[resolution]}"
+    codec_icon_url = f"{resources_img_host_url}{json_map[codec]}"
+    extension_icon_url = f"{resources_img_host_url}{json_map[extension.replace('.', '')]}"
+    desc_button_icon_url = f"{resources_img_host_url}{json_map['desc_button']}"
+    release_date_button_icon_url = f"{resources_img_host_url}{json_map['release_date_button']}"
+    performers_button_icon_url = f"{resources_img_host_url}{json_map['performers_button']}"
+    mediainfo_button_icon_url = f"{resources_img_host_url}{json_map['mediainfo_button']}"
+    screens_button_icon_url = f"{resources_img_host_url}{json_map['screens_button']}"
+    bg = f"{resources_img_host_url}{json_map['bg']}"
 
     # Default image paths
     cover_image = f"{new_filename_base_name}.{image_output_format}"
@@ -718,6 +721,7 @@ async def generate_template_video(
     if scene_tags:
         processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
+    # logger.debug(resolution)
     if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
         processed_string += f" {resolution} FHD"
     elif resolution == "2160p":  # Currently, supports on 2160p/1080p/720p
@@ -757,7 +761,7 @@ async def generate_template_video(
         "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
         "{SCREENS_BUTTON}": screens_button_icon_url,
         "{NEW_TITLE}": new_title,
-        "{SCENE_PRETTY_DATE}": scene_pretty_date,
+        "{SCENE_PRETTY_DATE}": scene_pretty_date if scene_pretty_date != "" else "N/A",
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
         "{FORMATTED_NAMES}": mapped_names,
         "{FPS}": fps_icon_url,
@@ -813,18 +817,20 @@ async def load_credentials(mode):
     try:
         with open('creds.secret', 'r') as secret_file:
             secrets = json.load(secret_file)
-            if mode == 1:
+            if mode == 1:  # Scenes API endpoint
                 return secrets["api_auth"], secrets["api_scenes_url"], secrets["api_sites_url"]
             elif mode == 2:
                 return secrets["api_auth"], secrets["api_performer_url"], None
             elif mode == 3:
                 return secrets["imgbox_u"], secrets["imgbox_u"], None
-            elif mode == 4:
+            elif mode == 4:  # JAV API endpoint
                 return secrets["api_auth"], secrets["api_jav_url"], secrets["api_sites_url"]
             elif mode == 5:
-                return secrets["hamster_album_id"], secrets["hamster_api_key"], None
+                return secrets["hamster_album_id"], secrets["hamster_api_key"], secrets["hamster_site_url"]
             elif mode == 6:
                 return secrets["trackers"], None, None
+            elif mode == 7:
+                return secrets["hamster_site_url"], None, None
             else:
                 return None, None, None
 
@@ -837,3 +843,157 @@ async def load_credentials(mode):
     except json.JSONDecodeError:
         logger.error("Error parsing creds.secret. Ensure the JSON is formatted correctly.")
         return None, None, None
+
+
+def is_valid_filename(s: str) -> bool:
+    return not any(c in INVALID_CHARS for c in s)
+
+
+async def ainput(prompt: str) -> str:
+    return await asyncio.to_thread(input, prompt)
+
+
+async def collect_list_input(title: str, mode, validate=False):
+    logger.info(f"Start entering {title} (blank line to finish)")
+    items = []
+    while True:
+        entry = (await ainput("")).strip()
+
+        # Blank line = end of input
+        if entry == "":
+            break
+
+        # Prevent empty performer names (e.g. when user enters whitespace)
+        if mode == "performers" and not entry:
+            logger.error("Performer name cannot be empty.")
+            continue
+
+        # Optional filename-like validation
+        if validate and not is_valid_filename(entry):
+            bad = [c for c in entry if c in INVALID_CHARS]
+            logger.error(f"Invalid characters in entry: {bad}")
+            logger.error("Please enter a valid value.")
+            continue
+
+        if mode == "performers":
+            items.append((entry, None))
+        else:
+            items.append(entry)
+
+    return items
+
+
+async def full_manual_mode_input(file_base_name, manual_mode_ask_suffix):
+    await asyncio.sleep(1)
+    logger.info(f"Full Manual Mode for file: {file_base_name}")
+
+    # --- site with validation ---
+    while True:
+        site = (await ainput("[REQUIRED]Enter site:\n")).strip()
+
+        # Empty check (critical field)
+        if not site:
+            logger.error("Site cannot be empty.")
+            continue
+
+        # Filename validation
+        if is_valid_filename(site):
+            break
+
+        bad = [c for c in site if c in INVALID_CHARS]
+        logger.error(f"Invalid characters in site: {bad}")
+        logger.error("Please enter a valid site name.")
+
+    # --- scene_date (must be YYYY-MM-DD or the literal none/None) ---
+    while True:
+        scene_date = (await ainput("[REQUIRED]Enter scene date (YYYY-MM-DD or none):\n")).strip()
+
+        # Accept None / none (meaning: no date available)
+        if scene_date.lower() == "none":
+            scene_date = None
+            break
+
+        # Validate strict YYYY-MM-DD
+        try:
+            datetime.strptime(scene_date, "%Y-%m-%d")
+            break
+        except ValueError:
+            logger.error("Invalid date format. Use YYYY-MM-DD or 'none'.")
+
+    # --- new_title with validation ---
+    while True:
+        new_title = (await ainput("[REQUIRED]Enter new title:\n")).strip()
+
+        # Check for empty
+        if not new_title:
+            logger.error("Title cannot be empty.")
+            continue
+
+        # Check filename validity
+        if is_valid_filename(new_title):
+            break
+
+        bad = [c for c in new_title if c in INVALID_CHARS]
+        logger.error(f"Invalid characters in title: {bad}")
+        logger.error("Please enter a valid title.")
+
+    logger.info("[REQUIRED]Enter performers names (blank line to finish):")
+    performers_names = await collect_list_input(
+        "performers",
+        mode="performers",
+        validate=True
+    )
+
+    # --- scene_description ---
+    scene_description = (await ainput("Enter scene description(blank for none):\n")).strip()
+
+    # --- scene_tags (one per line, no validation needed) ---
+    logger.info("Enter scene tags (blank line to finish):")
+    scene_tags = await collect_list_input("tags", mode="tags", validate=True)
+
+    # --- optional multi-part suffix input ---
+    suffix = ""
+    if manual_mode_ask_suffix:
+        suffix_parts = []
+        logger.info("Enter suffix parts (blank line to finish):")
+
+        while True:
+            entry = (await ainput("")).strip()
+
+            # Blank line = end
+            if entry == "":
+                # Require at least one suffix part
+                if not suffix_parts:
+                    logger.warning("manual_mode_ask_suffix is enabled however no suffix was inputted.")
+                    continue
+                break
+
+            # Validate characters
+            if not is_valid_filename(entry):
+                bad = [c for c in entry if c in INVALID_CHARS]
+                logger.error(f"Invalid characters in suffix part: {bad}")
+                logger.error("Please enter a valid suffix part.")
+                continue
+
+            suffix_parts.append(entry)
+
+        # Transform each part: uppercase first letter, keep rest the same
+        suffix_parts = [part[:1].upper() + part[1:] if part else part for part in suffix_parts]
+
+        # Join with dots and preserve your leading dot
+        suffix = "." + ".".join(suffix_parts)
+
+    return {
+        "new_title": new_title,
+        "performers_names": performers_names,
+        "image_url": None,
+        "slug": None,
+        "scene_url": None,
+        "tpdb_image_url": None,
+        "tpdb_site": site,
+        "site_studio": None,
+        "scene_description": scene_description,
+        "scene_date": scene_date if scene_date else "0000-00-00",
+        "scene_tags": scene_tags,
+        "suffix": suffix
+    }

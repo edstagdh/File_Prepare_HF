@@ -55,6 +55,29 @@ async def get_user_input_form_submit_status():
             return False
 
 
+async def get_user_input_2fa():
+    """
+    Asks the user for a yes/no response.
+    If 'yes', returns True.
+    If 'no', continues asking for user input until a status response is given.
+    If 'cancel', returns False.
+    Continues prompting until a valid response is given.
+    """
+    while True:
+        try:
+            response = input("Did you finish login-in process with 2 factor authentication? (yes[y]/no[n]/cancel[c]): \n").strip().lower()
+            if response in ["yes", "y"]:
+                return True
+            elif response in ["cancel", "c"]:
+                return False
+            elif response in ["no", "n"]:
+                logger.info("Please continue with the 2 factor authentication process, once done, input the correct response required, 'yes' or 'y'.\nif you would like to cancel the process, input 'cancel'")
+            else:
+                logger.warning("Invalid input. Please enter 'yes' or 'no'.\n")
+        except Exception as e:
+            logger.error(f"An error occurred: {e}")
+            return False
+
 async def get_by(selector_obj):
     by_map = {
         "id": By.ID,
@@ -222,6 +245,20 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         except Exception as e:
             logger.error(f"Failed to click login submit: {e}")
             return False
+
+        # 2FA Auth
+        two_factor_auth = config.get("2FA", None)
+        try:
+            if two_factor_auth:
+                await asyncio.sleep(0.2)
+                two_factor_auth_result = await get_user_input_2fa()
+                if not two_factor_auth_result:
+                    raise ValueError("2FA failed")
+                await asyncio.sleep(0.2)
+        except Exception:
+            logger.exception("Error during 2 factor authentication process")
+            return False
+
 
         # Wait for login success
         login_success_selector = config["login_success"]

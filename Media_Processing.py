@@ -61,20 +61,17 @@ async def has_unwanted_metadata(file_path) -> bool:
 
 async def get_existing_title(input_file):
     try:
-        # Load the MP4 file using Mutagen
-        audio = MP4(input_file)
+        media_info = MediaInfo.parse(input_file)
 
-        # Check if tags exist before trying to access them
-        if audio.tags is not None:
-            title = audio.tags.get('©nam')
-            if title:
-                return title[0].strip()  # Mutagen stores values as a list, take the first element
-            else:
-                # logger.warning(f"No title found in {input_file}")
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                title = track.title  # corresponds to ©nam
+                if title:
+                    return title.strip()
                 return None
-        else:
-            # logger.warning(f"No title found in {input_file}")
-            return None
+
+        return None
+
     except Exception:
         logger.exception(f"Error retrieving title from {input_file}")
         return None
@@ -82,22 +79,38 @@ async def get_existing_title(input_file):
 
 async def get_existing_description(input_file):
     try:
-        # Load the MP4 file using Mutagen
-        audio = MP4(input_file)
+        media_info = MediaInfo.parse(input_file)
 
-        # Check if tags exist before trying to access them
-        if audio.tags is not None:
-            description = audio.tags.get('©cmt')
-            if description:
-                return description[0].strip()  # Mutagen stores values as a list, take the first element
-            else:
-                # logger.warning(f"No description found in {input_file}")
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                description = track.comment  # corresponds to ©cmt
+                if description:
+                    return description.strip()
                 return None
-        else:
-            # logger.warning(f"No description found in {input_file}")
-            return None
+
+        return None
+
     except Exception:
         logger.exception(f"Error retrieving description from {input_file}")
+        return None
+
+
+
+async def get_existing_TPDB_ID(input_file):
+    try:
+        media_info = MediaInfo.parse(input_file)
+
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                tpdb_id = track.album  # corresponds to ©alb
+                if tpdb_id:
+                    return tpdb_id.strip()
+                return None
+
+        return None
+
+    except Exception:
+        logger.exception(f"Error retrieving tpdb_id from {input_file}")
         return None
 
 
@@ -278,7 +291,8 @@ async def cover_image_download_and_conversion(image_url: str,
         try:
             response = download_image(image_url)
         except Exception as e:
-            logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
+            # commented out to avoid log clutter, will always fall back to TPDB image url if exists.
+            # logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
             response = download_image(alt_image_url)
 
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
@@ -394,6 +408,9 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
     if exit_code != 0 or performers_images is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
 
+    # Create lowercase lookup map for fast case-insensitive checks
+    lower_map = {k.lower(): k for k in performers_images.keys()}
+
     for data in performers:
         try:
             if len(data) < 2:
@@ -408,8 +425,8 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
 
             performer_id = data[1]
 
-            if p in performers_images:
-                logger.debug(f"Performer {p} already has mapped image in json file")
+            if p.lower() in lower_map:
+                logger.debug(f"Performer {p} already has mapped image in json file (case-insensitive)")
                 continue
             logger.debug(f"Processing performer {p}, ID: {performer_id}")
             performer_posters, performer_slug = await get_performer_profile_picture(p, performer_id, posters_limit)
@@ -723,11 +740,16 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata,
+                          re_encode_hevc_CRF):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters)
+    if not isinstance(re_encode_hevc_CRF, int) or not (0 <= re_encode_hevc_CRF < 30):
+        logger.error(f"processing failed for {file_path}, unexpected CRF value: {re_encode_hevc_CRF}")
+        return False
+
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF)
 
     # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
@@ -773,9 +795,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical,
-                            re_encode_downscale, limit_cpu_usage,
-                            remove_chapters):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF):
     """
     Re-encode the given file to HEVC and show progress with a tqdm bar.
 
@@ -799,7 +819,7 @@ async def re_encode_to_hevc(file_path, is_vertical,
     keyint = int(fps * 2)  # every 2 seconds
 
     x265_params = (
-        "crf=24:"
+        f"crf={re_encode_hevc_CRF}:"
         "preset=medium:"
         "ref=3:"
         "limit-refs=2:"
@@ -901,38 +921,60 @@ async def re_encode_to_hevc(file_path, is_vertical,
 
 async def is_video_hevc_or_av1(file_path: str) -> bool:
     """
-    Check if the video is encoded with HEVC (H.265) or AV1.
-    Returns True if encoded with either HEVC or AV1 (but not both), False otherwise, None if failed.
+    Check if the video is encoded with HEVC or AV1 using pymediainfo.
+    Log codec and CRF if detected.
+    Return True if HEVC or AV1, False otherwise.
     """
+
     if not os.path.isfile(file_path):
+        logger.error(f"File does not exist: {file_path}")
         return False
 
-    command = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name",
-        "-of", "json",
-        file_path
-    ]
-
     try:
-        stdout, stderr, returncode = await run_command(command)
-
-        if returncode != 0:
-            logger.error(f"ffprobe failed for {file_path}:\n{stderr}")
-            return False
-
-        data = json.loads(stdout)
-        codec = data.get("streams", [{}])[0].get("codec_name", "").lower()
-        if codec in {"hevc", "av1"}:
-            codec_results = True
-            return codec_results
-        else:
-            return False
-
+        media_info = MediaInfo.parse(file_path)
     except Exception as e:
-        logger.error(f"Failed to check codec for {file_path}: {e}")
-        return None
+        logger.error(f"Failed to parse file with pymediainfo: {file_path}: {e}")
+        return False
+
+    video_track = None
+    for track in media_info.tracks:
+        if track.track_type == "Video":
+            video_track = track
+            break
+
+    if not video_track:
+        logger.error(f"No video track found: {file_path}")
+        return False
+
+    codec = (video_track.format or "").lower()
+    codec_clean = codec.replace(" ", "").replace("-", "")
+
+    is_hevc = codec_clean in {"hevc", "hvc1", "hev1"}
+    is_av1 = codec_clean == "av1"
+
+    # Extract CRF from encoding settings
+    crf_value = None
+    encoding_settings = getattr(video_track, "encoding_settings", "") or ""
+
+    if encoding_settings:
+        # Look for patterns like `crf=24.0`
+        match = re.search(r"crf\s*=\s*([0-9]+(?:\.[0-9]+)?)", encoding_settings.lower())
+        if match:
+            # Convert 24.0 → 24
+            crf_value = int(float(match.group(1)))
+            logger.info(f"Detected CRF {crf_value} for {file_path}")
+
+    # Log HEVC / AV1 detection
+    if is_hevc:
+        # logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
+        return True
+
+    if is_av1:
+        # logger.info(f"{file_path} detected as AV1. CRF={crf_value}")
+        return True
+
+    # logger.info(f"{file_path} codec is '{codec}', not HEVC/AV1")
+    return False
 
 
 async def get_video_duration(filepath):
@@ -971,28 +1013,67 @@ async def get_video_fps(video_path: str) -> float:
 
 
 async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bool]:
-    cap = cv2.VideoCapture(video_path)
+    """
+    Returns (resolution_label, is_vertical)
+    resolution_label = "2160p", "1440p", "1080p", "720p", or "<height>p"
+    is_vertical = True if displayed height > width (rotation corrected)
+    """
 
-    if not cap.isOpened():
-        raise IOError(f"Failed to open video file: {video_path}")
+    # ffprobe JSON query including optional rotation
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,rotation",
+        "-of", "json",
+        video_path
+    ]
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
+    stdout, stderr, code = await run_command(cmd)
 
-    # Match only specific standard resolutions
-    if height >= 2160:
-        resolution = "2160p"
-    elif height >= 1440:
-        resolution = "1440p"
-    elif height >= 1080:
-        resolution = "1080p"
-    elif height >= 720:
-        resolution = "720p"
-    else:
-        resolution = f"{height}p"
+    if code != 0:
+        raise IOError(f"ffprobe failed: {stderr or stdout}")
 
+    import json
+    info = json.loads(stdout)
+
+    stream = info["streams"][0]
+
+    width = int(stream.get("width"))
+    height = int(stream.get("height"))
+
+    # rotation is optional — if missing, assume 0°
+    rotation = int(stream.get("rotation", 0)) % 180
+
+    # Correct for rotation (90°/270° means displayed width/height are swapped)
+    if rotation == 90:
+        width, height = height, width
+
+    # Determine orientation
     is_vertical = height > width
+
+    if is_vertical:
+        if width >= 2160:
+            resolution = "2160p"
+        elif width >= 1440:
+            resolution = "1440p"
+        elif width >= 1080:
+            resolution = "1080p"
+        elif width >= 720:
+            resolution = "720p"
+        else:
+            resolution = f"{width}p"
+    else:
+        if height >= 2160:
+            resolution = "2160p"
+        elif height >= 1440:
+            resolution = "1440p"
+        elif height >= 1080:
+            resolution = "1080p"
+        elif height >= 720:
+            resolution = "720p"
+        else:
+            resolution = f"{height}p"
+
     return resolution, is_vertical
 
 
@@ -1100,7 +1181,7 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description):
+async def update_metadata(input_file, title, description, tpdb_id, matching_mode):
     """
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
@@ -1110,7 +1191,9 @@ async def update_metadata(input_file, title, description):
 
         # --- update scene data ---
         video["\xa9nam"] = [title]  # Title
-        video["\xa9cmt"] = [description]  # Comment/Description
+        if matching_mode != "full_manual":
+            video["\xa9cmt"] = [description]  # Comment/Description
+            video["\xa9alb"] = [tpdb_id]  # TPDB ID
 
         # --- Remove unwanted ---
         for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:

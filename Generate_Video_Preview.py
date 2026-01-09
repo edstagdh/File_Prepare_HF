@@ -29,6 +29,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         keep_temp_files = config["KEEP_TEMP_FILES"]
         add_black_bars = config["ADD_BLACK_BARS"]
         gif_preview_fps = config["GIF_PREVIEW_FPS"]
+        webp_preview_fps = config.get("WEBP_PREVIEW_FPS", None)
         number_of_segments_gif = config["NUMBER_OF_SEGMENTS_GIF"]
         timestamps_mode = config["TIMESTAMPS_MODE"]
         grid_width = config["GRID_WIDTH"]
@@ -65,7 +66,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
     # Start processing
     # logger.debug(f"processing previews for file: {new_file_full_path}")
     results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
-                                  timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
+                                  timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
                                   transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution)
@@ -258,7 +259,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
 
 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
-                        ignore_existing, grid, create_gif_preview, gif_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
+                        ignore_existing, grid, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
                         available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution):
@@ -454,7 +455,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_webp_preview:
             webp_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
-                f"-vf \"fps=24,{scale_option}:flags=lanczos\" "
+                f"-vf \"fps={webp_preview_fps},{scale_option}:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)
@@ -525,7 +526,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         concat_list_sheet = await filter_and_save_timestamped(concat_list, timestamps_mode, is_sheet=True)
         if create_webp_preview_sheet or create_gif_preview_sheet or create_webm_preview_sheet:
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
-                                                   is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet,
+                                                   is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet,
                                                    preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path,
                                                    hamster_upload_previews, num_of_segments, fit_thumbs_in_less_rows)
         if keep_temp_files:
@@ -988,7 +989,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 
 
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
-                                           add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
+                                           add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
                                            upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews,
                                            num_of_segments, fit_thumbs_in_less_rows):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
@@ -1079,31 +1080,31 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
 
         # Add scale if grid is 4
         if grid == 4:
-            if not is_vertical or (is_vertical and add_black_bars):
-                downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
-                downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
-                # logger.debug(downscale_command)
-                stdout, stderr, exit_code = await run_command(downscale_command)
-                if exit_code != 0:
-                    logger.error(f"Error running downscaling stacking command: {stdout}\n{stderr}")
-                    return
-                # Renaming the final output with the "_og" suffix
-                base, ext = os.path.splitext(final_output)
-                final_output_og = f"{base}_og{ext}"
-                if not os.path.exists(final_output_og):
-                    os.rename(final_output, final_output_og)
-                else:
-                    logger.warning(f"The file {final_output_og} already exists, skipping renaming.")
+            # if not is_vertical or (is_vertical and add_black_bars):
+            downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
+            downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
+            # logger.debug(downscale_command)
+            stdout, stderr, exit_code = await run_command(downscale_command)
+            if exit_code != 0:
+                logger.error(f"Error running downscaling stacking command: {stdout}\n{stderr}")
+                return
+            # Renaming the final output with the "_og" suffix
+            base, ext = os.path.splitext(final_output)
+            final_output_og = f"{base}_og{ext}"
+            if not os.path.exists(final_output_og):
+                os.rename(final_output, final_output_og)
+            else:
+                logger.warning(f"The file {final_output_og} already exists, skipping renaming.")
 
-                # Replace the final output with the downscaled version
-                os.rename(downscaled_output, final_output)
+            # Replace the final output with the downscaled version
+            os.rename(downscaled_output, final_output)
 
         # Generate previews (WebP, WebM, GIF)
         results = ""
         # WebP Preview
         if create_webp_preview_sheet:
             webp_command = (
-                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"fps=24,scale=iw:ih:flags=lanczos\" "
+                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"fps={webp_preview_fps},scale=iw:ih:flags=lanczos\" "
                 f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}\""
             )
             stdout, stderr, exit_code = await run_command(webp_command)

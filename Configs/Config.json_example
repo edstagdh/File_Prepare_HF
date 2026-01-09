@@ -1,5 +1,12 @@
 {
   "jav_only_api_mode": false,
+  "scene_matching_mode": "free_string_parse",
+  "scene_matching_modes_available": {
+    "strict": "Filename must be in strict format in order to attempt match",
+    "free_string_parse": "Filename will be matched according to filename.",
+    "full_manual": "No matching is done, some functionalities are disabled, manual input required."
+  },
+  "force_re_match_using_existing_TPDB_ID": true,
   "working_path": "G:\\temp8",
   "create_cover_image": false,
   "create_thumbnails": false,
@@ -8,6 +15,7 @@
   "create_face_portrait_pic": false,
   "create_template_file" : false,
   "re_encode_hevc": false,
+  "re_encode_hevc_CRF": 24,
   "re_encode_downscale": false,
   "limit_cpu_usage": true,
   "remove_chapters": true,
@@ -23,9 +31,20 @@
   "posters_limit": 5,
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
-  "Code_Version": "9.9.2",
   "bad_words": [".Hardcore"],
   "use_title": false,
+  "title_date_mode": "1",
+  "title_date_available_modes": {
+    "1": "2025-January-01",
+    "2": "25-January-01",
+    "3": "2025-01-01",
+    "4": "25-01-01",
+    "5": "2025.January.01",
+    "6": "25.January.01",
+    "7": "2025.01.01",
+    "8": "25.01.01"
+  },
+  "manual_mode_ask_suffix": true,
   "create_sub_folder": false,
   "imgbox_upload_cover": false,
   "imgbox_upload_thumbnails": false,
@@ -42,12 +61,14 @@
   "ignore_list": [""],
   "filename_ignore_part_x": true,
   "filename_ignore_performer_ID": true,
-  "free_string_parse": true,
+  "filename_ignore_res": false,
   "custom_name_format_mode": 1,
   "upload_mode": "single",
   "upload_to_tracker": false,
   "tracker_mode": ["emp"],
   "remove_extra_files_after_tracker_upload": false,
   "cover_regeneration_mode": "user input",
-  "available_regeneration_modes": ["user input", "force regenerate", "force keep"]
+  "available_regeneration_modes": ["user input", "force regenerate", "force keep"],
+  "use_notifier": false,
+  "notifier_name": "Notifier_TG.py"
 }
