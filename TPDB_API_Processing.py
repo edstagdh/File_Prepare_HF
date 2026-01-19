@@ -73,7 +73,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         # Safely extract fields from selected_entry
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
-        alt_image = selected_entry.get("background", {}).get("full")
+        tpdb_image_url = selected_entry.get("background", {}).get("full")
         scene_description = selected_entry.get('description')
         scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
@@ -125,11 +125,12 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+        # logger.debug(f"matched result: {tpdb_id} - {site} - {scene_date} - {title} - {female_performers}")
+        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")

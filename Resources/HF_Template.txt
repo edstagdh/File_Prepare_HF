@@ -5,11 +5,9 @@
 
 [img=700]{COVER_IMAGE}[/img]
 
-[img]{DESC_BUTTON}[/img]
-
 [img=100]{RESOLUTION}[/img] [img=100]{CODEC}[/img] [img=100]{EXTENSION}[/img] [img=100]{FPS}[/img]
 
-[table=nball,90%][tr][td=100%][size=4][b][u]Scene Description:[/u][/b][/size]
+[table=nball,100%][tr][td=100%][img]{DESC_BUTTON}[/img]
 
 [size=3]{SCENE_DESCRIPTION}[/size][BR][BR][/td][/tr]
 [BR][BR]

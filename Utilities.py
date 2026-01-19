@@ -476,6 +476,7 @@ async def generate_mediainfo_file(input_file_full_path, output_path):
 
 async def generate_template_video(
         new_title: str,
+        scene_title: str,
         scene_pretty_date: str,
         scene_description: str,
         scene_performers: str,
@@ -525,7 +526,7 @@ async def generate_template_video(
     # Additional information
     _, template_name = os.path.split(template_file_full_path)
     template_base_name, _ = os.path.splitext(template_name)
-    fps_icon_url = f"{resources_img_host_url}{json_map[fps]}"
+    fps_icon_url = f"{resources_img_host_url}{json_map[str(fps)]}"
     resolution_icon_url = f"{resources_img_host_url}{json_map[resolution]}"
     codec_icon_url = f"{resources_img_host_url}{json_map[codec]}"
     extension_icon_url = f"{resources_img_host_url}{json_map[extension.replace('.', '')]}"
@@ -760,7 +761,7 @@ async def generate_template_video(
         "{PERFORMERS_BUTTON}": performers_button_icon_url,
         "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
         "{SCREENS_BUTTON}": screens_button_icon_url,
-        "{NEW_TITLE}": new_title,
+        "{NEW_TITLE}": scene_title,
         "{SCENE_PRETTY_DATE}": scene_pretty_date if scene_pretty_date != "" else "N/A",
         "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
         "{FORMATTED_NAMES}": mapped_names,
@@ -920,20 +921,20 @@ async def full_manual_mode_input(file_base_name, manual_mode_ask_suffix):
         except ValueError:
             logger.error("Invalid date format. Use YYYY-MM-DD or 'none'.")
 
-    # --- new_title with validation ---
+    # --- scene_title with validation ---
     while True:
-        new_title = (await ainput("[REQUIRED]Enter new title:\n")).strip()
+        scene_title = (await ainput("[REQUIRED]Enter new title:\n")).strip()
 
         # Check for empty
-        if not new_title:
+        if not scene_title:
             logger.error("Title cannot be empty.")
             continue
 
         # Check filename validity
-        if is_valid_filename(new_title):
+        if is_valid_filename(scene_title):
             break
 
-        bad = [c for c in new_title if c in INVALID_CHARS]
+        bad = [c for c in scene_title if c in INVALID_CHARS]
         logger.error(f"Invalid characters in title: {bad}")
         logger.error("Please enter a valid title.")
 
@@ -984,7 +985,7 @@ async def full_manual_mode_input(file_base_name, manual_mode_ask_suffix):
         suffix = "." + ".".join(suffix_parts)
 
     return {
-        "new_title": new_title,
+        "scene_title": scene_title,
         "performers_names": performers_names,
         "image_url": None,
         "slug": None,

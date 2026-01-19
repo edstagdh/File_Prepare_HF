@@ -223,10 +223,7 @@ async def generate_thumbnails_sheet(image_dir, thumb_width, columns, padding, ou
             img = await add_timestamp_to_frame(img, timestamps[i], font_full_name)
             thumbs.append(img)
 
-        if is_vertical and fit_thumbs_in_less_rows and len(timestamps) >= 6:
-            rows = int(-(-len(thumbs) // columns / 2))
-        else:
-            rows = int(-(-len(thumbs) // columns))
+        rows = int(-(-len(thumbs) // columns))
 
         thumb_height = thumbs[0].height
 
@@ -789,7 +786,7 @@ async def process_thumbnails(input_video_file_name,
 
         # Adjust layout for vertical videos
         if is_vertical and fit_thumbs_in_less_rows and num_thumbs >= 6:
-            num_thumbs = int(num_thumbs * 2)
+            num_thumbs = int(num_thumbs)
             columns = int(columns * 2)
             thumb_width = int(thumb_width / 2)
 
@@ -808,7 +805,6 @@ async def process_thumbnails(input_video_file_name,
 
         timestamps = await generate_random_timestamps(duration, num_thumbs)
         font_path = f"Resources\\{font_full_name}"
-
         import tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:

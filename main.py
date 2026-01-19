@@ -295,7 +295,7 @@ async def process_files():
                 logger.warning(f"Warning - Full Manual mode selected, some features may not work.")
                 # User Input
                 manual_input_data = await full_manual_mode_input(file_base_name, manual_mode_ask_suffix)
-                new_title = manual_input_data["new_title"]
+                scene_title = manual_input_data["scene_title"]
                 performers_names = manual_input_data["performers_names"]
                 image_url = manual_input_data["image_url"]
                 slug = manual_input_data["slug"]
@@ -325,7 +325,7 @@ async def process_files():
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
-                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
+                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
                     file_base_name,
                     None,
                     None,
@@ -368,7 +368,7 @@ async def process_files():
                 scene_api_date = f"{year_full}-{month}-{day}"
 
                 # Query scene data from API
-                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
+                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
@@ -389,7 +389,7 @@ async def process_files():
 
             # Prepare critical fields dictionary
             critical_fields = {
-                "new_title": new_title,
+                "scene_title": scene_title,
                 "performers": performers_names,
                 "image_url": image_url,
                 "slug": slug,
@@ -458,14 +458,14 @@ async def process_files():
             error_prefix = f"File: {file_full_name} - Failed to get metadata via API"
 
             # Validate title
-            if not new_title or new_title == "Multiple results":
+            if not scene_title or scene_title == "Multiple results":
                 logger.error(f"{error_prefix} - missing or ambiguous title")
                 raise ValueError(f"Unable to find a valid title for {file_full_name}")
 
-            if new_title.endswith(" -"):
-                new_title = new_title[:-2]
-            if new_title.endswith(" - "):
-                new_title = new_title[:-3]
+            if scene_title.endswith(" -"):
+                scene_title = scene_title[:-2]
+            if scene_title.endswith(" - "):
+                scene_title = scene_title[:-3]
 
             # Validate performers (only if not using title as fallback)
             if (not performers_names or performers_names == "Invalid") and not use_title:
@@ -503,7 +503,7 @@ async def process_files():
         formatted_filename_performers_names = await format_performers(performers_names, 2)
 
         # Sanitize title
-        safe_title = await clean_filename(new_title, bad_words, mode=2)
+        safe_title = await clean_filename(scene_title, bad_words, mode=2)
 
         # Compose potential folder names
         if pre_suffix != "":
@@ -574,7 +574,7 @@ async def process_files():
         else:
             studio_info = tpdb_site
             studio_tag = [tpdb_site]
-        new_title_parts = [studio_info, scene_pretty_date, new_title, formatted_names]
+        new_title_parts = [studio_info, scene_pretty_date, scene_title, formatted_names]
 
         # Remove performers object if None/empty
         if new_title_parts and (new_title_parts[-1] is None or new_title_parts[-1] == ""):
@@ -586,6 +586,7 @@ async def process_files():
             new_title_parts.append(suffix)
 
         # Final filtered join
+
         new_title = " - ".join([p for p in new_title_parts if p])
 
         # Rename existing file to new file_full_name if needed
@@ -722,7 +723,7 @@ async def process_files():
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
-                 [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec, extension, output_directory, new_filename_base_name,
+                 [new_title, scene_title, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec, extension, output_directory, new_filename_base_name,
                   template_file_full_path, __version__, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
             ]
             failed = False

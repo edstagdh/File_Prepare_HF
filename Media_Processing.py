@@ -249,7 +249,7 @@ async def cover_image_output_file_exists(input_video_file_name,
 
 
 async def cover_image_download_and_conversion(image_url: str,
-                                              alt_image_url: str,
+                                              tpdb_image_url: str,
                                               input_video_file_name: str,
                                               original_video_file_name: str,
                                               output_path: str,
@@ -270,7 +270,7 @@ async def cover_image_download_and_conversion(image_url: str,
             sub_folder_path
         )
 
-        # If file exists and we’re not regenerating, skip download
+        # If file exists, and we’re not regenerating, skip download
         if exists and cover_regeneration_mode != "force regenerate":
             return True
 
@@ -293,7 +293,11 @@ async def cover_image_download_and_conversion(image_url: str,
         except Exception as e:
             # commented out to avoid log clutter, will always fall back to TPDB image url if exists.
             # logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
-            response = download_image(alt_image_url)
+            if tpdb_image_url:
+                response = download_image(tpdb_image_url)
+            else:
+                raise
+
 
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
         with open(temp_image_path, "wb") as f:
