@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import requests
 from num2words import num2words
@@ -10,8 +11,9 @@ from typing import Optional
 from Utilities import load_credentials
 
 
+
 async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_id, mode):
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, add_collection, mode):
     max_retries = 3
     delay = 5
 
@@ -23,9 +25,9 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             logger.error("API URL or auth token missing. Aborting API request.")
             return None, None, None, None, None, None, None, None, None, None, None, None
 
-        if existing_tpdb_id:
-            # logger.debug(f"using tpdb_id: {existing_tpdb_id}")
-            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_id, max_retries, delay, mode='id')
+        if existing_tpdb_uuid:
+            # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
+            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_uuid, max_retries, delay, mode='id')
             mode = 0
         else:
             if mode == 1:
@@ -63,7 +65,19 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             return None, None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
-            logger.warning("More than 1 scene returned in results, please be more specific")
+            # Duration from file
+            from Media_Processing import get_video_duration
+            duration, _ = await get_video_duration(file)
+            # Duration formatting
+            try:
+                hours, remainder = divmod(int(duration), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            except Exception as e:
+                logger.error(f"Error formatting duration: {e}")
+                timestamp_str = "N/A"
+            logger.warning(f"Filename: {file.name} | Duration: {timestamp_str}")
+
             selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
         else:
             selected_entry = valid_entries[0]
@@ -71,6 +85,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             logger.error("No matching entries selected by user.")
             return None, None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
+        _id = selected_entry.get("_id")
         title = selected_entry.get('title')
         image_url = selected_entry.get('image')
         tpdb_image_url = selected_entry.get("background", {}).get("full")
@@ -78,7 +93,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         scene_date = selected_entry.get('date')
         slug = selected_entry.get('slug')
         url = selected_entry.get('url')
-        tpdb_id = selected_entry.get('id')
+        tpdb_uuid = selected_entry.get('id')
         if generate_hf_template:
             scene_tags = await extract_scene_tags(selected_entry)
         else:
@@ -125,12 +140,16 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
 
-        # logger.debug(f"matched result: {tpdb_id} - {site} - {scene_date} - {title} - {female_performers}")
-        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+        # Add to TPDB Collection
+        if add_collection:
+            await ensure_scene_collected(_id, jav_api_mode)
+
+        # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {title} - {female_performers}")
+        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
@@ -302,7 +321,7 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
     """
     scene_title = selected_entry.get('title', '(No title available)')
     scene_slug = selected_entry.get('slug', '(No scene available)')
-    scene_url = f"{tpdb_scenes_url}/{scene_slug}"
+    scene_url = f"{tpdb_scenes_url}{scene_slug}"
     temp_performers = []
     while True:
         try:
@@ -611,3 +630,81 @@ async def remove_date_from_text(text: str) -> str:
     # Remove any duplicate or trailing dots caused by the removal
     cleaned = re.sub(r'\.{2,}', '.', cleaned).strip('.')
     return cleaned
+
+
+async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
+    """
+    Checks whether a scene is already collected.
+    If not collected, adds it to the collection.
+
+    This function is intentionally blocking and uses `requests`.
+    """
+
+    if not scene_id:
+        logger.error("Scene ID is required.")
+        return False
+
+    def _request(method: str, url: str, token: str) -> dict | None:
+        """
+        Internal request handler (unique to this function).
+        """
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout=15
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(
+                    f"{method} request failed [{response.status_code}]: {response.text}"
+                )
+                return None
+
+            return response.json()
+
+        except Exception:
+            logger.exception(f"{method} request failed")
+            return None
+
+    try:
+        api_auth, api_url, _ = await load_credentials(mode=8)
+
+        if not api_auth or not api_url:
+            logger.error("API auth token or URL missing (mode 8).")
+            return False
+        if jav_api_mode:
+            url = f"{api_url}?scene_id={scene_id}&type=JAV"
+        else:
+            url = f"{api_url}?scene_id={scene_id}&type=Scene"
+
+        # ---- 1. CHECK (GET) ----
+        check_response = _request("GET", url, api_auth)
+
+        if not isinstance(check_response, dict) or "value" not in check_response:
+            logger.error(f"Invalid check response for scene {scene_id}: {check_response}")
+            return False
+
+        if check_response["value"] is True:
+            logger.warning(f"Scene {scene_id} already collected.")
+            return True
+
+        # ---- 2. ADD (POST) ----
+        add_response = _request("POST", url, api_auth)
+
+        if add_response is not None:
+            logger.info(f"Scene added to collection.")
+            return True
+
+        logger.error(f"Failed to add scene {scene_id} to collection.")
+        return False
+
+    except Exception:
+        logger.exception("Unexpected error while ensuring scene is collected.")
+        return False

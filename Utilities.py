@@ -832,6 +832,8 @@ async def load_credentials(mode):
                 return secrets["trackers"], None, None
             elif mode == 7:
                 return secrets["hamster_site_url"], None, None
+            elif mode == 8:
+                return secrets["api_auth"], secrets["api_collection_url"], None
             else:
                 return None, None, None
 

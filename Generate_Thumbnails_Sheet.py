@@ -10,19 +10,13 @@ from Media_Processing import get_video_duration
 from pymediainfo import MediaInfo
 
 
-async def generate_random_timestamps(duration, count, preferred_min_gap=60, absolute_min_gap=5):
-    """
-    Generates a list of random timestamps within the video duration with a dynamic minimum gap between them.
-
-    Args:
-        duration (float): Duration of the video in seconds.
-        count (int): Number of random timestamps to generate.
-        preferred_min_gap (int): Preferred minimum gap in seconds between timestamps.
-        absolute_min_gap (int): Absolute minimum allowable gap in seconds.
-
-    Returns:
-        list: A sorted list of random timestamps (float).
-    """
+async def generate_random_timestamps(
+        duration,
+        count,
+        use_first_frame,
+        preferred_min_gap=60,
+        absolute_min_gap=5
+):
     if count < 1:
         raise ValueError("Count must be at least 1.")
     if duration <= 1:
@@ -36,6 +30,10 @@ async def generate_random_timestamps(duration, count, preferred_min_gap=60, abso
     attempts = 0
     max_attempts = 1000
 
+    # Force first frame if requested
+    if use_first_frame:
+        timestamps.append(0.0)
+
     while len(timestamps) < count and attempts < max_attempts:
         timestamp = random.uniform(1, duration - 1)
 
@@ -46,7 +44,8 @@ async def generate_random_timestamps(duration, count, preferred_min_gap=60, abso
 
     if len(timestamps) < count:
         raise RuntimeError(
-            f"Failed to generate {count} timestamps with a gap of at least {min_gap:.2f} seconds within duration {duration}."
+            f"Failed to generate {count} timestamps with a gap of at least "
+            f"{min_gap:.2f} seconds within duration {duration}."
         )
 
     return sorted(timestamps)
@@ -755,6 +754,7 @@ async def process_thumbnails(input_video_file_name,
         fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
         regeneration_mode = config["regeneration_mode"] if not contains_unwanted_metadata else "force regenerate"
         alternate_layout = config["alternate_layout"]
+        use_first_frame = config["use_first_frame"]
 
         # Check if output file already exists
         exists = await output_file_exists(
@@ -803,7 +803,7 @@ async def process_thumbnails(input_video_file_name,
             logger.error("Failed to extract video file metadata for thumbnails.")
             return False
 
-        timestamps = await generate_random_timestamps(duration, num_thumbs)
+        timestamps = await generate_random_timestamps(duration, num_thumbs, use_first_frame)
         font_path = f"Resources\\{font_full_name}"
         import tempfile
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -95,8 +95,25 @@ async def get_existing_description(input_file):
         return None
 
 
+async def get_existing_Encoder_Library(input_file):
+    try:
+        media_info = MediaInfo.parse(input_file)
 
-async def get_existing_TPDB_ID(input_file):
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                writing_library = track.writing_application
+                if writing_library:
+                    return writing_library.strip()
+                return None
+
+        return None
+
+    except Exception:
+        logger.exception(f"Error retrieving writing library from {input_file}")
+        return None
+
+
+async def get_existing_tpdb_uuid(input_file):
     try:
         media_info = MediaInfo.parse(input_file)
 
@@ -745,7 +762,7 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
 
 
 async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata,
-                          re_encode_hevc_CRF):
+                          re_encode_hevc_CRF, warn_CRF_match):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
@@ -753,7 +770,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         logger.error(f"processing failed for {file_path}, unexpected CRF value: {re_encode_hevc_CRF}")
         return False
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF, warn_CRF_match)
 
     # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
@@ -799,7 +816,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF, warn_CRF_match):
     """
     Re-encode the given file to HEVC and show progress with a tqdm bar.
 
@@ -808,7 +825,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         None : If already encoded in HEVC/AV1
         False: If encoding failed
     """
-    encode_results = await is_video_hevc_or_av1(file_path)
+    encode_results = await is_video_hevc_or_av1(file_path, warn_CRF_match, re_encode_hevc_CRF)
     if encode_results:  # Already encoded with HEVC/AV1
         return None
     if encode_results is None:
@@ -923,7 +940,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
     return temp_output
 
 
-async def is_video_hevc_or_av1(file_path: str) -> bool:
+async def is_video_hevc_or_av1(file_path: str, warn_CRF_match: bool, re_encode_hevc_CRF: int) -> bool:
     """
     Check if the video is encoded with HEVC or AV1 using pymediainfo.
     Log codec and CRF if detected.
@@ -968,8 +985,14 @@ async def is_video_hevc_or_av1(file_path: str) -> bool:
             crf_value = int(float(match.group(1)))
             logger.info(f"Detected CRF {crf_value} for {file_path}")
 
+
     # Log HEVC / AV1 detection
     if is_hevc:
+        if crf_value:
+            if crf_value != re_encode_hevc_CRF and warn_CRF_match:
+                logger.warning(f"CRF value of file: {file_path} does not match configured CRF value - file: {crf_value} vs Configured CRF value: {re_encode_hevc_CRF}")
+        else:
+            logger.warning(f"CRF value not found in file: {file_path}")
         # logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
         return True
 
@@ -1206,8 +1229,8 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
 
         # Clear encoder info (if not set by your tool)
         if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-            if "\xa9too" in video:
-                del video["\xa9too"]
+            video["\xa9too"] = ["File_Prepare_HF"]
+
 
         video.save()
         return True
