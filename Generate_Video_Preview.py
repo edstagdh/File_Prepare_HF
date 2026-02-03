@@ -49,6 +49,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         transition_duration = config["transition_duration"]
         fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
         preview_quality_resolution = config["preview_quality_resolution"]
+        scene_threshold = config["scene_threshold"]
 
     if new_file_full_path in excluded_files:
         logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
@@ -69,7 +70,7 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
-                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution)
+                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -262,7 +263,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
-                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold):
     if black_bars:
         new_filename_base_name = f"{new_filename_base_name}_black_bars"
 
@@ -423,7 +424,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         segment_cut_duration = segment_duration if segment_duration else 1.5
         temp_files_preview = await generate_cut_points(num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration,
                                                        temp_folder, is_vertical, black_bars, timestamps_mode, preview_sheet_required, video_path, new_filename_base_name,
-                                                       print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution)
+                                                       print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution, scene_threshold)
         concat_list = os.path.join(temp_folder, "concat_list.txt")
         with open(concat_list, "w") as f:
             for temp_file in temp_files_preview:
@@ -588,8 +589,8 @@ async def ask_delete_file(file_path, ignore_existing):
 
 async def generate_cut_points(
         num_of_segments, blacklisted_cut_points, confirm_cut_points_required, duration, segment_cut_duration, temp_folder, is_vertical, black_bars,
-        timestamps_mode, preview_sheet_required, video_path, filename_without_ext, print_cut_points, last_cut_point, font_path, width, height, preview_quality_resolution
-):
+        timestamps_mode, preview_sheet_required, video_path, filename_without_ext, print_cut_points, last_cut_point, font_path, width, height,
+        preview_quality_resolution, scene_threshold):
     """Generate unique evenly spaced cut points with random variations."""
     temp_files_preview = None
     calc_failed_counter = 0
@@ -654,6 +655,21 @@ async def generate_cut_points(
             calc_failed_counter += 1
             continue
 
+        # Convert percentages to absolute seconds (float for accuracy)
+        cut_points_seconds = [duration * pct for pct in unique_points]
+
+        # Check scene changes
+        scene_change_found = False
+        for ts in cut_points_seconds:
+            if await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration, scene_threshold):
+                # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
+                scene_change_found = True
+                break
+
+        if scene_change_found:
+            calc_failed_counter += 1
+            continue
+
         # Logging
         if confirm_cut_points_required or print_cut_points:
             logger.debug("Generated cut points with timestamp breakdown:")
@@ -666,26 +682,11 @@ async def generate_cut_points(
 
             if confirm_cut_points_required:
                 await asyncio.sleep(0.5)
-                confirmation = input("Do you want to use these cut points? (yes/no): ").strip().lower()
-                if confirmation != "yes":
+                confirmation = input("Do you want to keep and use these cut points? ([y]es/[n]o): ").strip().lower()
+                if confirmation in ["no", "n"]:
                     logger.debug("Regenerating cut points...\n")
                     calc_failed_counter += 1
                     continue
-
-        # Convert percentages to absolute seconds (float for accuracy)
-        cut_points_seconds = [duration * pct for pct in unique_points]
-
-        # Check scene changes
-        scene_change_found = False
-        for ts in cut_points_seconds:
-            if await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration):
-                # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
-                scene_change_found = True
-                break
-
-        if scene_change_found:
-            calc_failed_counter += 1
-            continue
 
         # Generate segments
         temp_files_preview = await generate_video_segments(
@@ -784,7 +785,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
     return temp_files_webp  # Return list of processed segments
 
 
-async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_duration):
+async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_duration, scene_threshold):
     """
     Check for a scene change around a specific timestamp in a video.
     Looks at a short window to detect abrupt changes, including frames that aren't keyframes.
@@ -794,7 +795,7 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
     :param timestamp: Time in seconds to check for scene change.
     :return: True if scene change detected, else False.
     """
-    scene_threshold = 0.2
+    # scene_threshold = 0.4
     try:
         # Run FFmpeg command to get the frame information
         probe_command = (

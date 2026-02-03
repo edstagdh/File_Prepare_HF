@@ -23,7 +23,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if existing_tpdb_uuid:
             # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
@@ -46,10 +46,10 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                         # logger.debug(string_advanced_parse_fallback)
                         response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None
+                return None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None, None
         if mode in [1,2]:
             valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
         else:
@@ -58,11 +58,11 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             if item:
                 valid_entries.append(item)
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None
+                return None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {query_string}")
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None, None
 
         if len(valid_entries) > 1:
             # Duration from file
@@ -83,7 +83,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         _id = selected_entry.get("_id")
         title = selected_entry.get('title')
@@ -149,7 +149,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 async def send_request(api_url, api_auth, query_string, max_retries, delay, mode="parse"):
