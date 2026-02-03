@@ -1087,6 +1087,8 @@ async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bo
             resolution = "1080p"
         elif width >= 720:
             resolution = "720p"
+        elif width <= 719:
+            resolution = "SD"
         else:
             resolution = f"{width}p"
     else:
@@ -1098,6 +1100,8 @@ async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bo
             resolution = "1080p"
         elif height >= 720:
             resolution = "720p"
+        elif height <= 719:
+            resolution = "SD"
         else:
             resolution = f"{height}p"
 

@@ -131,7 +131,7 @@ async def init_browser(config):
             from selenium.webdriver.chrome.options import Options as ChromeOptions
 
             logger.info("Launching Chrome...")
-            driver_path = config.get("chrome_driver_path")
+            driver_path = config.get("chromedriver_path")
             if not driver_path or not os.path.exists(driver_path):
                 raise ValueError(f"Invalid or missing Chrome driver path: {driver_path}")
 

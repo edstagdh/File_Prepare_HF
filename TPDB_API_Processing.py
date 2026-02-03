@@ -13,7 +13,7 @@ from Utilities import load_credentials
 
 
 async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, add_collection, mode):
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, mode):
     max_retries = 3
     delay = 5
 
@@ -140,16 +140,12 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
+            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
-
-        # Add to TPDB Collection
-        if add_collection:
-            await ensure_scene_collected(_id, jav_api_mode)
+            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
 
         # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {title} - {female_performers}")
-        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid
+        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")

@@ -9,7 +9,7 @@ from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
     generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input
-from TPDB_API_Processing import get_data_from_api
+from TPDB_API_Processing import get_data_from_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
     reset_all_metadata, get_existing_Encoder_Library
@@ -230,6 +230,7 @@ async def process_files():
         force_regen_thumbs = False
         pre_suffix = ""
         tpdb_uuid = None
+        tpdb__id = None
         await asyncio.sleep(0.1)
         file_full_name = str(file.name)  # Get the full file_full_name (with extension)
         file_base_name = str(file.stem)  # Get the file_full_name without extension
@@ -327,7 +328,8 @@ async def process_files():
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
-                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid = await get_data_from_api(
+                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id = \
+                    await get_data_from_api(
                     file_base_name,
                     None,
                     None,
@@ -339,7 +341,6 @@ async def process_files():
                     send_notification,
                     existing_tpdb_uuid,
                     file,
-                    add_scene_to_collection,
                     mode=1
                 )
 
@@ -374,7 +375,8 @@ async def process_files():
                 scene_api_date = f"{year_full}-{month}-{day}"
 
                 # Query scene data from API
-                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid = await get_data_from_api(
+                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id = \
+                    await get_data_from_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
@@ -386,7 +388,6 @@ async def process_files():
                     send_notification,
                     existing_tpdb_uuid,
                     file,
-                    add_scene_to_collection,
                     mode=2
                 )
             else:
@@ -826,6 +827,9 @@ async def process_files():
                         break
 
             processed_files += 1
+            # Add to TPDB Collection
+            if add_scene_to_collection:
+                await ensure_scene_collected(tpdb__id, jav_api_mode)
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:
