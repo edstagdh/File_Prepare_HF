@@ -766,6 +766,9 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
+    if is_vertical is None:
+        _, is_vertical = await get_video_resolution_and_orientation(str(file_path))
+
     if not isinstance(re_encode_hevc_CRF, int) or not (0 <= re_encode_hevc_CRF < 30):
         logger.error(f"processing failed for {file_path}, unexpected CRF value: {re_encode_hevc_CRF}")
         return False
@@ -1078,32 +1081,19 @@ async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bo
     # Determine orientation
     is_vertical = height > width
 
-    if is_vertical:
-        if width >= 2160:
-            resolution = "2160p"
-        elif width >= 1440:
-            resolution = "1440p"
-        elif width >= 1080:
-            resolution = "1080p"
-        elif width >= 720:
-            resolution = "720p"
-        elif width <= 719:
-            resolution = "SD"
-        else:
-            resolution = f"{width}p"
+    # Resolution is always based on **height**
+    if height >= 2160:
+        resolution = "2160p"
+    elif height >= 1440:
+        resolution = "1440p"
+    elif height >= 1080:
+        resolution = "1080p"
+    elif height >= 720:
+        resolution = "720p"
+    elif height <= 719:
+        resolution = "SD"
     else:
-        if height >= 2160:
-            resolution = "2160p"
-        elif height >= 1440:
-            resolution = "1440p"
-        elif height >= 1080:
-            resolution = "1080p"
-        elif height >= 720:
-            resolution = "720p"
-        elif height <= 719:
-            resolution = "SD"
-        else:
-            resolution = f"{height}p"
+        resolution = f"{height}p"
 
     return resolution, is_vertical
 

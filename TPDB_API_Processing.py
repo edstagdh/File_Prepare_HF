@@ -8,12 +8,12 @@ import time
 from loguru import logger
 from datetime import datetime
 from typing import Optional
-from Utilities import load_credentials
+from Utilities import load_credentials, remove_ignored_strings
 
 
 
 async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, mode):
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, mode):
     max_retries = 3
     delay = 5
 
@@ -86,7 +86,28 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             return None, None, None, None, None, None, None, None, None, None, None, None, None
         # Safely extract fields from selected_entry
         _id = selected_entry.get("_id")
+        if warn_length_match:
+            from Media_Processing import get_video_duration
+
+            duration, _ = await get_video_duration(file)
+            scene_duration = selected_entry.get("duration")
+
+            if duration is not None and scene_duration is not None:
+                delta = abs(duration - scene_duration)
+
+                if delta > 20:
+                    logger.warning(
+                        "Duration mismatch detected: file=%s | scene=%s | delta=%ss | file_path=%s",
+                        duration,
+                        scene_duration,
+                        delta,
+                        file,
+                    )
+
+        # "Clean" title
         title = selected_entry.get('title')
+        clean_title = await remove_ignored_strings(title, title_ignore_strings)
+
         image_url = selected_entry.get('image')
         tpdb_image_url = selected_entry.get("background", {}).get("full")
         scene_description = selected_entry.get('description')
@@ -140,12 +161,12 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+            return clean_title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+            return clean_title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
 
-        # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {title} - {female_performers}")
-        return title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+        # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {clean_title} - {female_performers}")
+        return clean_title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
@@ -156,40 +177,73 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
     if "performers" in api_url:
         url = f"{api_url}{query_string}"
     else:
-        if mode=='id':
+        if mode == "id":
             url = f"{api_url}/{query_string}"
         else:
-            # default to parse
-            url = f"{api_url}?orderBy=recently_released&parse={query_string}&per_page=40&page=1"
+            url = (
+                f"{api_url}?orderBy=recently_released"
+                f"&parse={query_string}&per_page=40&page=1"
+            )
+
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
     }
-    # Debug
+
     # logger.debug(f"Sending request to API: {url}")
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            response_data = response.json()
-            if 'data' in response_data:
-                if attempt > 0:
+
+    while True:  # allows user-triggered retry cycles
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.get(url, headers=headers)
+
+                # Retry only on 5xx
+                if 500 <= response.status_code < 600:
+                    raise requests.HTTPError(
+                        f"Server error {response.status_code}",
+                        response=response
+                    )
+
+                response.raise_for_status()
+                response_data = response.json()
+
+                if attempt > 1:
                     logger.info("Retry successful!")
-                # Debug
-                # logger.info(f"API data fetched successfully for file {query_string}")
-                # logger.debug(response_data)
-                return response_data
+
+                return response_data if "data" in response_data else None
+
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response else "N/A"
+
+                logger.error(
+                    f"Attempt {attempt}/{max_retries} failed "
+                    f"(HTTP {status}): "
+                    f"{str(e).replace(api_url, '**REDACTED**')}"
+                )
+
+                if attempt < max_retries:
+                    logger.warning(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("Maximum retries reached.")
+
+            except requests.RequestException as e:
+                # Non-5xx errors → don't retry automatically
+                logger.error(
+                    f"Non-retryable error: "
+                    f"{str(e).replace(api_url, '**REDACTED**')}"
+                )
+                return None
+
+        # If we reach here → max retries exhausted
+        user_input = input("Retry again? (y/n): ").strip().lower()
+
+        if user_input == "y":
+            logger.info("User chose to retry again.")
+            continue
+        else:
+            logger.warning("User chose to continue without retrying.")
             return None
-        except requests.RequestException as e:
-            logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
-            if attempt < max_retries - 1:
-                logger.warning(f"Retrying in {delay} seconds...")
-                await asyncio.sleep(delay)
-                return None
-            else:
-                logger.error("Maximum retries reached. Request failed.")
-                return None
-    return None
 
 
 async def filter_entries_by_user_choice(valid_entries, send_notification):

@@ -6,7 +6,7 @@
     "free_string_parse": "Filename will be matched according to filename.",
     "full_manual": "No matching is done, some functionalities are disabled, manual input required."
   },
-  "force_re_match_using_existing_TPDB_ID": true,
+  "force_re_match_using_existing_tpdb_uuid": true,
   "working_path": "G:\\temp8",
   "create_cover_image": false,
   "create_thumbnails": false,
@@ -17,6 +17,7 @@
   "re_encode_hevc": false,
   "re_encode_hevc_CRF": 24,
   "warn_crf_match": true,
+  "warn_length_match": false,
   "re_encode_downscale": false,
   "limit_cpu_usage": true,
   "remove_chapters": true,
@@ -72,5 +73,6 @@
   "available_regeneration_modes": ["user input", "force regenerate", "force keep"],
   "use_notifier": false,
   "notifier_name": "Notifier_TG.py",
-  "add_collection": false
+  "add_collection": false,
+  "title_ignore_strings": [" - BTS", " - Behind The Scenes"]
 }

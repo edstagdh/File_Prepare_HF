@@ -739,6 +739,10 @@ async def process_thumbnails(input_video_file_name,
         input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
         input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
 
+        if is_vertical is None:
+            from Media_Processing import get_video_resolution_and_orientation
+            _, is_vertical = await get_video_resolution_and_orientation(str(input_video_full_path))
+
         config, exit_code = await load_json_file("Configs/Config_Thumbnails.json")
         if not config:
             logger.error("Processing failed due to invalid configuration")

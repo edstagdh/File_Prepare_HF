@@ -477,15 +477,17 @@ async def generate_mediainfo_file(input_file_full_path, output_path):
 async def generate_template_video(
         new_title: str,
         scene_title: str,
+        studio_info: str,
         scene_pretty_date: str,
         scene_description: str,
         scene_performers: str,
         fps: float,
-        resolution: str,
+        resolution_template: str,
         is_vertical: bool,
         codec: str,
         extension: str,
-        directory: str,
+        output_directory: str,
+        new_file_full_path: str,
         new_filename_base_name: str,
         template_file_full_path: str,
         code_version: str,
@@ -496,9 +498,10 @@ async def generate_template_video(
         imgbox_file_path: str,
         imgbb_file_path: str,
         hamster_file_path: str,
-        suffix: str
+        suffix: str,
+        tpdb_scene_url: str
 ) -> bool:
-    media_info_file_path = os.path.join(directory, f"{new_filename_base_name}_mediainfo.txt")
+    media_info_file_path = os.path.join(output_directory, f"{new_filename_base_name}_mediainfo.txt")
 
     pattern = f"[{re.escape(CLEAN_CHARS)}]"
 
@@ -516,6 +519,12 @@ async def generate_template_video(
     with open(media_info_file_path, "r", encoding="utf-8") as f:
         media_info = f.read()
 
+    if any(v is None for v in (fps, resolution_template, is_vertical, codec)):
+        from Media_Processing import get_video_resolution_and_orientation, get_video_fps, get_video_codec
+        fps = await get_video_fps(new_file_full_path)
+        resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
+        codec = await get_video_codec(new_file_full_path)
+
     resources_img_host_url, _, _ = await load_credentials(7)
 
     # Load JSON config
@@ -527,7 +536,7 @@ async def generate_template_video(
     _, template_name = os.path.split(template_file_full_path)
     template_base_name, _ = os.path.splitext(template_name)
     fps_icon_url = f"{resources_img_host_url}{json_map[str(fps)]}"
-    resolution_icon_url = f"{resources_img_host_url}{json_map[resolution]}"
+    resolution_icon_url = f"{resources_img_host_url}{json_map[resolution_template]}"
     codec_icon_url = f"{resources_img_host_url}{json_map[codec]}"
     extension_icon_url = f"{resources_img_host_url}{json_map[extension.replace('.', '')]}"
     desc_button_icon_url = f"{resources_img_host_url}{json_map['desc_button']}"
@@ -536,6 +545,7 @@ async def generate_template_video(
     mediainfo_button_icon_url = f"{resources_img_host_url}{json_map['mediainfo_button']}"
     screens_button_icon_url = f"{resources_img_host_url}{json_map['screens_button']}"
     bg = f"{resources_img_host_url}{json_map['bg']}"
+    tpdb_button = f"{resources_img_host_url}{json_map['tpdb_button']}"
 
     # Default image paths
     cover_image = f"{new_filename_base_name}.{image_output_format}"
@@ -722,15 +732,15 @@ async def generate_template_video(
     if scene_tags:
         processed_string += " " + " ".join(scene_tags)
     processed_string += f" {fps}fps"
-    # logger.debug(resolution)
-    if resolution == "1080p":  # Currently, supports on 2160p/1080p/720p
-        processed_string += f" {resolution} FHD"
-    elif resolution == "2160p":  # Currently, supports on 2160p/1080p/720p
-        processed_string += f" {resolution} UHD 4K"
-    elif resolution == "720p":  # Currently, supports on 2160p/1080p/720p
-        processed_string += f" {resolution} HD"
+    # logger.debug(resolution_template)
+    if resolution_template == "1080p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution_template} FHD"
+    elif resolution_template == "2160p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution_template} UHD 4K"
+    elif resolution_template == "720p":  # Currently, supports on 2160p/1080p/720p
+        processed_string += f" {resolution_template} HD"
     else:
-        processed_string += f" {resolution}"
+        processed_string += f" {resolution_template}"
     if codec == "hevc":
         processed_string += f" {codec} h265"
     else:
@@ -743,7 +753,7 @@ async def generate_template_video(
         processed_string += f" {suffix}"
     # Build output filename and path
     tags_filename = f"{new_filename_base_name}_tags.txt"
-    tags_path = os.path.join(directory, tags_filename)
+    tags_path = os.path.join(output_directory, tags_filename)
 
     # Write the string to the file
     try:
@@ -753,17 +763,30 @@ async def generate_template_video(
     except Exception as e:
         logger.error(f"Failed to save tags: {e}")
 
+    def trim_description(desc: str, max_len: int = 200) -> str:
+        if len(desc) <= max_len:
+            return desc
+
+        trimmed = desc[:max_len]
+        last_space = trimmed.rfind(" ")
+        if last_space != -1:
+            trimmed = trimmed[:last_space]
+
+        return trimmed.rstrip() + "..."
+
     # Create replacement dictionary
     replacements = {
         "{BG}": bg,
         "{DESC_BUTTON}": desc_button_icon_url,
+        "{SCENE_STUDIO}": studio_info,
         "{RELEASE_DATE_BUTTON}": release_date_button_icon_url,
         "{PERFORMERS_BUTTON}": performers_button_icon_url,
         "{MEDIAINFO_BUTTON}": mediainfo_button_icon_url,
         "{SCREENS_BUTTON}": screens_button_icon_url,
         "{NEW_TITLE}": scene_title,
+        "{TPDB_LINK}": f"[url={tpdb_scene_url}][img=100]{tpdb_button}[/img][/url]" if tpdb_scene_url != "" else "",
         "{SCENE_PRETTY_DATE}": scene_pretty_date if scene_pretty_date != "" else "N/A",
-        "{SCENE_DESCRIPTION}": scene_description if len(scene_description) <= 200 else f"[spoiler=Full Description]{scene_description}[/spoiler]",
+        "{SCENE_DESCRIPTION}": trim_description(scene_description),
         "{FORMATTED_NAMES}": mapped_names,
         "{FPS}": fps_icon_url,
         "{RESOLUTION}": resolution_icon_url,
@@ -783,13 +806,13 @@ async def generate_template_video(
                 template_content = template_content.replace(placeholder, value)
 
         # Make sure the target directory exists
-        os.makedirs(directory, exist_ok=True)
+        os.makedirs(output_directory, exist_ok=True)
 
         # build template filename
         output_filename = f"{new_filename_base_name}_template.txt"
 
         # Save the modified file
-        output_path = os.path.join(directory, output_filename)
+        output_path = os.path.join(output_directory, output_filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(template_content)
@@ -1000,3 +1023,32 @@ async def full_manual_mode_input(file_base_name, manual_mode_ask_suffix):
         "scene_tags": scene_tags,
         "suffix": suffix
     }
+
+
+async def remove_ignored_strings(title: str, title_ignore_strings: list[str]) -> str:
+    original_title = title
+
+    try:
+        for s in title_ignore_strings:
+            if s:
+                title = title.replace(s, "").strip()
+
+        if not title:
+            logger.error(
+                "Title became empty after removing ignore strings. "
+                "Original title: {!r} | Ignore strings: {!r}",
+                original_title,
+                title_ignore_strings,
+            )
+            return original_title
+
+        return title
+
+    except Exception as e:
+        logger.exception(
+            "Failed while removing ignore strings from title. "
+            "Original title: {!r} | Ignore strings: {!r}",
+            original_title,
+            title_ignore_strings,
+        )
+        return original_title

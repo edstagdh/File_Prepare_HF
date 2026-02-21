@@ -64,6 +64,7 @@ async def process_files():
         re_encode_hevc = config["re_encode_hevc"]
         re_encode_hevc_CRF = config["re_encode_hevc_CRF"]
         warn_CRF_match = config["warn_crf_match"]
+        warn_length_match = config["warn_length_match"]
         re_encode_downscale = config["re_encode_downscale"]
         keep_original_file = config["keep_original_file"]
         posters_limit = config["posters_limit"]
@@ -75,6 +76,7 @@ async def process_files():
         bad_words = config["bad_words"]
         use_title = config["use_title"]
         title_date_mode = config["title_date_mode"]
+        title_ignore_strings = config["title_ignore_strings"]
         manual_mode_ask_suffix = config["manual_mode_ask_suffix"]
         performer_image_output_format = config["performer_image_output_format"].lower()
         font_full_name = config["font_full_name"]
@@ -328,7 +330,8 @@ async def process_files():
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
-                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id = \
+                (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id) = \
                     await get_data_from_api(
                     file_base_name,
                     None,
@@ -341,6 +344,8 @@ async def process_files():
                     send_notification,
                     existing_tpdb_uuid,
                     file,
+                        title_ignore_strings,
+                        warn_length_match,
                     mode=1
                 )
 
@@ -375,7 +380,8 @@ async def process_files():
                 scene_api_date = f"{year_full}-{month}-{day}"
 
                 # Query scene data from API
-                scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id = \
+                (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id) = \
                     await get_data_from_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
@@ -388,6 +394,8 @@ async def process_files():
                     send_notification,
                     existing_tpdb_uuid,
                     file,
+                        title_ignore_strings,
+                        warn_length_match,
                     mode=2
                 )
             else:
@@ -671,9 +679,14 @@ async def process_files():
                     force_regen_thumbs = True
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
-            fps = await get_video_fps(new_file_full_path)
-            resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
-            codec = await get_video_codec(new_file_full_path)
+
+            # Avoid checking video data if re-encoding is required and create_template_file is enabled
+            if (not re_encode_hevc) and create_template_file:
+                fps = await get_video_fps(new_file_full_path)
+                resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
+                codec = await get_video_codec(new_file_full_path)
+            else:
+                fps, resolution_template, is_vertical, codec = None, None, None, None
 
             # Disable uploading to imgbox
             if imgbox_upload_thumbnails or imgbox_upload_cover:
@@ -746,8 +759,9 @@ async def process_files():
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
-                 [new_title, scene_title, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec, extension, output_directory, new_filename_base_name,
-                  template_file_full_path, __version__, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
+                 [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
+                  extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,
+                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix, tpdb_scene_url]),
             ]
             failed = False
             where_failed = None
