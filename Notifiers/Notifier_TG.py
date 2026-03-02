@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import socket
 from loguru import logger
 
 
@@ -52,14 +53,19 @@ async def send_notification(message: str) -> bool:
     """
     # logger.debug("Send notification running")
 
+    max_retries = 3
+
     bot_token, chat_id = await load_credentials()
     if not bot_token or not chat_id:
         logger.error("Telegram bot token or chat ID is missing.")
         return False
 
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={message}"
+    # Get hostname (cross-platform)
+    hostname = socket.gethostname()
 
-    max_retries = 3
+    # Prepend hostname to message
+    full_message = f"[{hostname}] {message}"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={full_message}"
 
     for attempt in range(1, max_retries + 1):
         try:

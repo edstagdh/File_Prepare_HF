@@ -12,7 +12,7 @@ from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_fil
 from TPDB_API_Processing import get_data_from_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
-    reset_all_metadata, get_existing_Encoder_Library
+    reset_all_metadata, get_existing_Encoder_Library, chapters_need_update
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
@@ -70,7 +70,7 @@ async def process_files():
         posters_limit = config["posters_limit"]
         template_file_name = config["template_name"]
         limit_cpu_usage = config["limit_cpu_usage"]
-        remove_chapters = config["remove_chapters"]
+        remove_existing_chapters = config["remove_existing_chapters"]
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
@@ -230,6 +230,7 @@ async def process_files():
     for file in mp4_files:
         # logger.debug(f"Processing file: {file}")
         force_regen_thumbs = False
+        add_timestamps_markers = config["add_timestamps_markers"]
         pre_suffix = ""
         tpdb_uuid = None
         tpdb__id = None
@@ -311,6 +312,7 @@ async def process_files():
                 scene_description = manual_input_data["scene_description"]
                 scene_date = manual_input_data["scene_date"]
                 scene_tags = manual_input_data["scene_tags"]
+
                 if manual_mode_ask_suffix:
                     manual_suffix = manual_input_data["suffix"]
                 else:
@@ -318,6 +320,7 @@ async def process_files():
 
 
                 # Reset flags due to full manual mode.
+                markers_list = None
                 create_cover_image = False
                 create_face_portrait_pic = False
                 imgbox_upload_cover = False
@@ -331,7 +334,7 @@ async def process_files():
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
                 (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
-                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id) = \
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
                     await get_data_from_api(
                     file_base_name,
                     None,
@@ -381,7 +384,7 @@ async def process_files():
 
                 # Query scene data from API
                 (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
-                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id) = \
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
                     await get_data_from_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
@@ -519,6 +522,9 @@ async def process_files():
         else:
             suffix = ""
 
+        if not markers_list:
+            add_timestamps_markers = False
+
         # Sanitize and format performers
         formatted_filename_performers_names = await format_performers(performers_names, 2)
 
@@ -635,11 +641,14 @@ async def process_files():
             # Always check metadata — but only *apply* it now if not re-encoding
             existing_description = await get_existing_description(new_file_full_path)
             missing_encoder = await get_existing_Encoder_Library(new_file_full_path)
+            existing_chapters = await chapters_need_update(new_file_full_path, markers_list)
+
 
             metadata_mismatch = (
                     changed_title or
                     existing_description != description or
                     contains_unwanted_metadata or
+                    existing_chapters or
                     not missing_encoder
             )
             if re_match_existing_tpdb_uuid:
@@ -659,7 +668,7 @@ async def process_files():
                             failed_files.append(new_file_full_path)
                             processed_files += 1
                             continue
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode)
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
                         failed_files.append(new_file_full_path)
@@ -670,7 +679,7 @@ async def process_files():
                 # If we will re-encode, just log if metadata mismatch exists (for debugging)
                 if metadata_mismatch:
                     # logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode)
+                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
                         failed_files.append(new_file_full_path)
@@ -728,11 +737,11 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters,
+                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters,
                                                    contains_unwanted_metadata, re_encode_hevc_CRF, warn_CRF_match]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode]),
+                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,

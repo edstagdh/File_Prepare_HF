@@ -16,6 +16,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                             filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, mode):
     max_retries = 3
     delay = 5
+    EMPTY_RESULT = (None,) * 14
 
     try:
         work_mode = 4 if jav_api_mode else 1
@@ -23,7 +24,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
 
         if existing_tpdb_uuid:
             # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
@@ -46,10 +47,10 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                         # logger.debug(string_advanced_parse_fallback)
                         response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None, None
+                return EMPTY_RESULT
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
         if mode in [1,2]:
             valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
         else:
@@ -58,11 +59,11 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             if item:
                 valid_entries.append(item)
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None, None
+                return EMPTY_RESULT
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {query_string}")
-            return None, None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
 
         if len(valid_entries) > 1:
             # Duration from file
@@ -83,14 +84,22 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None, None, None, None
-        # Safely extract fields from selected_entry
-        _id = selected_entry.get("_id")
+            return EMPTY_RESULT
+        else:
+            tpdb_uuid = selected_entry.get('id')
+            scene_response_data = await send_request(api_scenes_url, api_auth, tpdb_uuid, max_retries, delay, mode='id')
+            if scene_response_data is None:
+                logger.error("Failed to retrieve scene specific data.")
+                return EMPTY_RESULT
+        # Safely extract fields from scene_data
+        scene_data = scene_response_data.get('data')
+
+        _id = scene_data.get("_id")
         if warn_length_match:
             from Media_Processing import get_video_duration
 
             duration, _ = await get_video_duration(file)
-            scene_duration = selected_entry.get("duration")
+            scene_duration = scene_data.get("duration")
 
             if duration is not None and scene_duration is not None:
                 delta = abs(duration - scene_duration)
@@ -105,21 +114,22 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     )
 
         # "Clean" title
-        title = selected_entry.get('title')
+        title = scene_data.get('title')
         clean_title = await remove_ignored_strings(title, title_ignore_strings)
 
-        image_url = selected_entry.get('image')
-        tpdb_image_url = selected_entry.get("background", {}).get("full")
-        scene_description = selected_entry.get('description')
-        scene_date = selected_entry.get('date')
-        slug = selected_entry.get('slug')
-        url = selected_entry.get('url')
-        tpdb_uuid = selected_entry.get('id')
+        image_url = scene_data.get('image')
+        tpdb_image_url = scene_data.get("background", {}).get("full")
+        scene_description = scene_data.get('description')
+        scene_date = scene_data.get('date')
+        slug = scene_data.get('slug')
+        url = scene_data.get('url')
+        tpdb_uuid = scene_data.get('id')
+        markers = scene_data.get('markers')
         if generate_hf_template:
-            scene_tags = await extract_scene_tags(selected_entry)
+            scene_tags = await extract_scene_tags(scene_data)
         else:
             scene_tags = None
-        site = selected_entry.get("site", {}).get("name")
+        site = scene_data.get("site", {}).get("name")
         if "onlyfans" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (onlyfans)", "")
@@ -133,7 +143,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             site = site.replace(" (fansly)", "")
             site = "Fansly-" + site
 
-        site_parent = selected_entry.get("site", {}).get("parent")
+        site_parent = scene_data.get("site", {}).get("parent")
         if site_parent and site_parent.get("name", None) == 'ManyVids' and not "Manyvids:" in site:
             site = "Manyvids: " + site
 
@@ -145,7 +155,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
+            female_performers = await extract_female_performers(scene_data, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
@@ -161,16 +171,16 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return clean_title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+            return clean_title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
         elif "Unknown" in female_performers:
-            return clean_title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+            return clean_title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
 
         # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {clean_title} - {female_performers}")
-        return clean_title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id
+        return clean_title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None, None, None, None
+        return EMPTY_RESULT
 
 
 async def send_request(api_url, api_auth, query_string, max_retries, delay, mode="parse"):

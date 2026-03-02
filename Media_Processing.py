@@ -11,6 +11,8 @@ import subprocess
 import textwrap
 import time
 import asyncio
+import tempfile
+from typing import List, Dict
 from io import BytesIO
 from loguru import logger
 from mutagen.mp4 import MP4
@@ -110,6 +112,101 @@ async def get_existing_Encoder_Library(input_file):
 
     except Exception:
         logger.exception(f"Error retrieving writing library from {input_file}")
+        return None
+
+
+async def chapters_need_update(input_file, markers_list):
+    """
+    Returns:
+        True  -> if no chapters exist OR they differ from markers_list
+        False -> if chapters exist and match markers_list
+        None  -> on error
+    """
+    try:
+        # logger.debug(f"Checking chapters for: {input_file}")
+        # logger.debug(f"Incoming markers_list: {markers_list}")
+
+        media_info = MediaInfo.parse(input_file)
+
+        existing_chapters = []
+
+        menu_tracks = [t for t in media_info.tracks if t.track_type == "Menu"]
+
+        # logger.debug(f"Total tracks found: {len(media_info.tracks)}")
+        # logger.debug(f"Menu tracks found: {len(menu_tracks)}")
+
+        if not menu_tracks:
+            logger.warning("No Menu tracks detected → returning True")
+            return True
+
+        track_dict = menu_tracks[0].to_data()
+
+        # logger.debug(f"Menu track raw keys: {list(track_dict.keys())}")
+
+        for key, value in track_dict.items():
+            if isinstance(key, str) and re.match(r"\d{2}_\d{2}_\d{5}", key):
+
+                # logger.debug(f"Chapter key matched: {key} -> {value}")
+
+                try:
+                    h, m, ms = key.split("_")
+                    total_seconds = (
+                            int(h) * 3600 +
+                            int(m) * 60 +
+                            int(ms) / 1000
+                    )
+                except Exception as e:
+                    logger.error(f"Time parse failed for {key}: {e}")
+                    continue
+
+                existing_chapters.append({
+                    "title": (value or "").strip(),
+                    "start_time": round(total_seconds)
+                })
+
+        existing_chapters.sort(key=lambda x: x["start_time"])
+
+        # logger.debug(f"Parsed existing chapters: {existing_chapters}")
+
+        if not markers_list:
+            logger.warning("Markers list is empty → returning True")
+            return True
+
+        normalized_markers = sorted(
+            [
+                {
+                    "title": (m.get("title") or "").strip(),
+                    "start_time": int(m.get("start_time", 0))
+                }
+                for m in markers_list
+            ],
+            key=lambda x: x["start_time"]
+        )
+
+        # logger.debug(f"Existing count: {len(existing_chapters)}")
+        # logger.debug(f"Markers count: {len(normalized_markers)}")
+
+        if len(existing_chapters) != (len(normalized_markers)):
+            logger.warning("Chapter count mismatch → returning True")
+            return True
+
+        for i, (existing, marker) in enumerate(zip(existing_chapters, normalized_markers)):
+            # logger.debug(f"Comparing chapter {i}")
+            # logger.debug(f"Existing: {existing}")
+            # logger.debug(f"Marker:   {marker}")
+
+            if (
+                    existing["start_time"] != marker["start_time"]
+                    or existing["title"] != marker["title"]
+            ):
+                logger.warning("Mismatch detected → returning True")
+                return True
+
+        # logger.debug("Chapters fully match → returning False")
+        return False
+
+    except Exception:
+        logger.exception(f"Error checking chapters for {input_file}")
         return None
 
 
@@ -1202,11 +1299,161 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description, tpdb_id, matching_mode):
+async def add_mp4_chapters(
+        input_file: str,
+        chapters_list: List[Dict],
+        run_command_func
+) -> bool:
+    # logger.debug(f"add_mp4_chapters called for: {input_file}")
+    # logger.debug(f"Incoming chapters_list: {chapters_list}")
+
+    if not chapters_list:
+        # logger.debug("No chapters provided → returning True")
+        return True
+
+    input_path = Path(input_file)
+    output_path = input_path.with_suffix(".chapters_tmp.mp4")
+
+    try:
+        # Sort chapters
+        sorted_chapters = sorted(
+            chapters_list,
+            key=lambda x: x["start_time"]
+        )
+
+        # logger.debug(f"Sorted chapters: {sorted_chapters}")
+
+        # Insert beginning chapter if needed
+        if sorted_chapters and sorted_chapters[0]["start_time"] > 0:
+            # logger.debug("Inserting synthetic 0-start beginning chapter")
+            sorted_chapters.insert(0, {
+                "title": "",
+                "start_time": 0
+            })
+
+        # logger.debug(f"Chapters after beginning check: {sorted_chapters}")
+
+        # Get duration
+        probe_cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(input_path)
+        ]
+
+        # logger.debug(f"Running ffprobe: {probe_cmd}")
+
+        stdout, stderr, rc = await run_command_func(probe_cmd)
+
+        # logger.debug(f"ffprobe rc={rc}")
+        # logger.debug(f"ffprobe stdout={stdout}")
+        # logger.debug(f"ffprobe stderr={stderr}")
+
+        if rc != 0:
+            logger.error(f"Failed to get duration: {stderr}")
+            return False
+
+        duration = float(stdout.strip())
+        # logger.debug(f"Video duration: {duration}")
+
+        # Build metadata
+        metadata_lines = [";FFMETADATA1"]
+
+        for i, chapter in enumerate(sorted_chapters):
+            start = float(chapter["start_time"])
+
+            if i + 1 < len(sorted_chapters):
+                end = float(sorted_chapters[i + 1]["start_time"])
+            else:
+                end = duration
+
+            # logger.debug(f"Chapter {i}: start={start}, end={end}, title={chapter['title']}")
+
+            metadata_lines.extend([
+                "[CHAPTER]",
+                "TIMEBASE=1/1",
+                f"START={int(start)}",
+                f"END={int(end)}",
+                f"title={chapter['title']}",
+            ])
+
+        metadata_content = "\n".join(metadata_lines)
+
+        # logger.debug("Generated ffmetadata content:")
+        # logger.debug(metadata_content)
+
+        # Write temp metadata file
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".txt",
+                mode="w",
+                encoding="utf-8"
+        ) as tmp_meta:
+            tmp_meta.write(metadata_content)
+            tmp_meta_path = tmp_meta.name
+
+        # logger.debug(f"Temporary metadata file created: {tmp_meta_path}")
+
+        # ffmpeg command
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-i", tmp_meta_path,
+            "-map_metadata", "0",
+            "-map_chapters", "1",
+            "-codec", "copy",
+            str(output_path)
+        ]
+
+        # logger.debug(f"Running ffmpeg command: {ffmpeg_cmd}")
+
+        stdout, stderr, rc = await run_command_func(ffmpeg_cmd)
+
+        # logger.debug(f"ffmpeg rc={rc}")
+        # logger.debug(f"ffmpeg stdout={stdout}")
+        # logger.debug(f"ffmpeg stderr={stderr}")
+
+        if rc != 0:
+            logger.error(f"ffmpeg failed: {stderr}")
+            return False
+
+        if not output_path.exists():
+            logger.error("Output file was not created!")
+            return False
+
+        os.replace(output_path, input_path)
+        # logger.debug("Chapter file successfully replaced original")
+
+        return True
+
+    except Exception:
+        logger.exception(f"Failed to add chapters to {input_file}")
+        return False
+
+    finally:
+        try:
+            if 'tmp_meta_path' in locals() and os.path.exists(tmp_meta_path):
+                # logger.debug(f"Cleaning up temp file: {tmp_meta_path}")
+                for attempt in range(3):
+                    try:
+                        os.remove(tmp_meta_path)
+                        # logger.debug("Temp file removed successfully")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Temp cleanup attempt {attempt + 1} failed: {e}")
+                        await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+
+async def update_metadata(input_file, title, description, tpdb_id, matching_mode, add_timestamps_markers, chapters_list):
     """
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
     """
+
     try:
         video = MP4(input_file)
 
@@ -1214,7 +1461,7 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
         video["\xa9nam"] = [title]  # Title
         if matching_mode != "full_manual":
             video["\xa9cmt"] = [description]  # Comment/Description
-            video["\xa9alb"] = [tpdb_id]  # TPDB ID
+            video["\xa9alb"] = [tpdb_id]  # TPDB UUID
 
         # --- Remove unwanted ---
         for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
@@ -1227,6 +1474,17 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
 
 
         video.save()
+
+        if add_timestamps_markers and chapters_list:
+            success = await add_mp4_chapters(
+                input_file,
+                chapters_list,
+                run_command
+            )
+            if not success:
+                return False
+
+
         return True
 
     except Exception as e:
