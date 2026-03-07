@@ -651,7 +651,7 @@ async def process_files():
                     existing_description != description or
                     contains_unwanted_metadata or
                     existing_chapters or
-                    not check_encoder
+                    check_encoder
             )
             if re_match_existing_tpdb_uuid:
                 if existing_tpdb_uuid != tpdb_uuid:
