@@ -416,12 +416,23 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
             if response in ("yes", "y"):
                 while True:
-                    name = input("Enter Performer (leave blank to finish): ").strip()
-                    if not name:
-                        break
-                    temp_performers.append(name)
-                if temp_performers:
-                    return temp_performers
+                    temp_performers = []  # reset the list at the start of the loop
+                    while True:
+                        name = input("Enter Performer (leave blank to finish, type 'restart' to start over): ").strip()
+
+                        if name.lower() == "restart":
+                            print("Restarting performer entry...")
+                            break  # break inner loop to start over
+
+                        if not name:
+                            break  # finish entering names
+
+                        temp_performers.append(name)
+
+                    # If the inner loop finished normally (not via 'restart'), return the list
+                    if temp_performers and name.lower() != "restart":
+                        return temp_performers
+
             elif response in ("no", "n"):
                 return None
             else:
