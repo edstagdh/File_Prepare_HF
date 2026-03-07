@@ -644,7 +644,8 @@ async def process_files():
             existing_description = await get_existing_description(new_file_full_path)
             check_encoder = await check_existing_Encoder_Library(new_file_full_path)
             existing_chapters = await chapters_need_update(new_file_full_path, add_timestamps_markers, markers_list)
-
+            if not existing_chapters:
+                add_timestamps_markers = False
 
             metadata_mismatch = (
                     changed_title or
