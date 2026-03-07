@@ -427,7 +427,7 @@ async def rename_file(file_path, new_filename):
         else:
             os.rename(file_path, new_file_path)
 
-        logger.info(f"Renamed file: {file_path} -> {new_file_path}")
+        logger.debug(f"Renamed file: {file_path} -> {new_file_path}")
         return True, None
 
     except FileNotFoundError as e:

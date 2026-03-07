@@ -13,7 +13,8 @@ from Utilities import load_credentials, remove_ignored_strings
 
 
 async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, mode):
+                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
+                            mode):
     max_retries = 3
     delay = 5
     EMPTY_RESULT = (None,) * 14
@@ -95,7 +96,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         scene_data = scene_response_data.get('data')
 
         _id = scene_data.get("_id")
-        if warn_length_match:
+        if warn_length_match or add_timestamps_markers:
             from Media_Processing import get_video_duration
 
             duration, _ = await get_video_duration(file)
@@ -113,6 +114,25 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                         file,
                     )
 
+            markers = scene_data.get("markers") or None
+
+            if duration is not None and markers:
+                # Determine the effective timestamp for each marker
+                # Prefer end_time if it exists, otherwise use start_time
+                def marker_timestamp(marker):
+                    return marker.get("end_time") or marker.get("start_time") or 0
+
+                # Get marker with the highest timestamp
+                last_marker = max(markers, key=marker_timestamp)
+
+                last_timestamp = marker_timestamp(last_marker)
+
+                if last_timestamp > duration:
+                    logger.warning(
+                        "A timestamp marker exceeds video duration: marker_id=%s | marker_time=%ss | "
+                        "video_duration=%ss | file_path=%s", last_marker.get("id"), last_timestamp, duration, file)
+                    markers = None
+
         # "Clean" title
         title = scene_data.get('title')
         clean_title = await remove_ignored_strings(title, title_ignore_strings)
@@ -124,7 +144,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         slug = scene_data.get('slug')
         url = scene_data.get('url')
         tpdb_uuid = scene_data.get('id')
-        markers = scene_data.get('markers')
+
         if generate_hf_template:
             scene_tags = await extract_scene_tags(scene_data)
         else:
@@ -719,7 +739,7 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
                 method=method,
                 url=url,
                 headers=headers,
-                timeout=15
+                timeout=60
             )
 
             if response.status_code not in (200, 201):

@@ -97,25 +97,30 @@ async def get_existing_description(input_file):
         return None
 
 
-async def get_existing_Encoder_Library(input_file):
+async def check_existing_Encoder_Library(input_file):
     try:
         media_info = MediaInfo.parse(input_file)
 
         for track in media_info.tracks:
             if track.track_type == "General":
                 writing_library = track.writing_application
-                if writing_library:
-                    return writing_library.strip()
-                return None
 
-        return None
+                if not writing_library:
+                    return True
+
+                if writing_library.strip() == "File_Prepare_HF":
+                    return False
+
+                return True
+
+        return True
 
     except Exception:
         logger.exception(f"Error retrieving writing library from {input_file}")
-        return None
+        return True
 
 
-async def chapters_need_update(input_file, markers_list):
+async def chapters_need_update(input_file, add_timestamps_markers, markers_list):
     """
     Returns:
         True  -> if no chapters exist OR they differ from markers_list
@@ -136,8 +141,11 @@ async def chapters_need_update(input_file, markers_list):
         # logger.debug(f"Menu tracks found: {len(menu_tracks)}")
 
         if not menu_tracks:
-            logger.warning("No Menu tracks detected → returning True")
-            return True
+            if add_timestamps_markers:
+                # logger.info("No Menu tracks detected → returning True")
+                return True
+            else:
+                return False
 
         track_dict = menu_tracks[0].to_data()
 
@@ -169,8 +177,11 @@ async def chapters_need_update(input_file, markers_list):
         # logger.debug(f"Parsed existing chapters: {existing_chapters}")
 
         if not markers_list:
-            logger.warning("Markers list is empty → returning True")
-            return True
+            if add_timestamps_markers:
+                # logger.warning("Markers list is empty → returning True")
+                return True
+            else:
+                return False
 
         normalized_markers = sorted(
             [

@@ -12,7 +12,7 @@ from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_fil
 from TPDB_API_Processing import get_data_from_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
-    reset_all_metadata, get_existing_Encoder_Library, chapters_need_update
+    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
@@ -349,6 +349,7 @@ async def process_files():
                     file,
                         title_ignore_strings,
                         warn_length_match,
+                        add_timestamps_markers,
                     mode=1
                 )
 
@@ -399,6 +400,7 @@ async def process_files():
                     file,
                         title_ignore_strings,
                         warn_length_match,
+                        add_timestamps_markers,
                     mode=2
                 )
             else:
@@ -640,8 +642,8 @@ async def process_files():
 
             # Always check metadata — but only *apply* it now if not re-encoding
             existing_description = await get_existing_description(new_file_full_path)
-            missing_encoder = await get_existing_Encoder_Library(new_file_full_path)
-            existing_chapters = await chapters_need_update(new_file_full_path, markers_list)
+            check_encoder = await check_existing_Encoder_Library(new_file_full_path)
+            existing_chapters = await chapters_need_update(new_file_full_path, add_timestamps_markers, markers_list)
 
 
             metadata_mismatch = (
@@ -649,7 +651,7 @@ async def process_files():
                     existing_description != description or
                     contains_unwanted_metadata or
                     existing_chapters or
-                    not missing_encoder
+                    not check_encoder
             )
             if re_match_existing_tpdb_uuid:
                 if existing_tpdb_uuid != tpdb_uuid:
@@ -665,12 +667,14 @@ async def process_files():
                         remove_metadata_result = await reset_all_metadata(new_file_full_path)
                         if not remove_metadata_result:
                             logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
+                            logger.warning(f"End file: {new_file_full_path}")
                             failed_files.append(new_file_full_path)
                             processed_files += 1
                             continue
                     results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
+                        logger.warning(f"End file: {new_file_full_path}")
                         failed_files.append(new_file_full_path)
                         processed_files += 1
                         continue
@@ -682,6 +686,7 @@ async def process_files():
                     results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
                     if not results_metadata:
                         logger.error(f"Failed to update metadata for: {new_full_filename}")
+                        logger.warning(f"End file: {new_file_full_path}")
                         failed_files.append(new_file_full_path)
                         processed_files += 1
                         continue
