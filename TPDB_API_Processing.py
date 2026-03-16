@@ -101,37 +101,119 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
             duration, _ = await get_video_duration(file)
             scene_duration = scene_data.get("duration")
+            temp_duration = time.strftime('%H:%M:%S', time.gmtime(duration)) if duration is not None else "N/A"
+            formatted_duration = f"{temp_duration} ({scene_duration})"
 
-            if duration is not None and scene_duration is not None:
+            if duration is not None and scene_duration is not None and formatted_duration != "N/A":
                 delta = abs(duration - scene_duration)
 
                 if delta > 20:
                     logger.warning(
-                        "Duration mismatch detected: file=%s | scene=%s | delta=%ss | file_path=%s",
+                        "Duration mismatch detected: file={} | scene={} | delta={}s ({}) | file_path={}",
                         duration,
                         scene_duration,
                         delta,
+                        formatted_duration,
                         file,
                     )
 
             markers = scene_data.get("markers") or None
 
             if duration is not None and markers:
-                # Determine the effective timestamp for each marker
-                # Prefer end_time if it exists, otherwise use start_time
-                def marker_timestamp(marker):
-                    return marker.get("end_time") or marker.get("start_time") or 0
 
-                # Get marker with the highest timestamp
-                last_marker = max(markers, key=marker_timestamp)
+                fixed_markers = []
 
-                last_timestamp = marker_timestamp(last_marker)
+                for marker in markers:
+                    start = marker.get("start_time")
+                    end = marker.get("end_time")
+                    temp_start = time.strftime('%H:%M:%S', time.gmtime(start)) if start is not None else "N/A"
+                    formatted_start = f"{temp_start} ({start})"
+                    temp_end = time.strftime('%H:%M:%S', time.gmtime(end)) if end is not None else "N/A"
+                    formatted_end = f"{temp_end} ({end})"
 
-                if last_timestamp > duration:
+                    invalid = False
+                    if start is not None and start > duration:
+                        invalid = True
+                    if end is not None and end > duration:
+                        invalid = True
+
+                    if not invalid:
+                        fixed_markers.append(marker)
+                        continue
+
+                    # Show numbers + timestamp
                     logger.warning(
-                        "A timestamp marker exceeds video duration: marker_id=%s | marker_time=%ss | "
-                        "video_duration=%ss | file_path=%s", last_marker.get("id"), last_timestamp, duration, file)
-                    markers = None
+                        "Invalid marker detected: id={} | start={} ({}) | end={} ({}) | video_duration={} ({}) | file={}",
+                        marker.get("id"),
+                        start,
+                        formatted_start if start is not None else "N/A",
+                        end,
+                        formatted_end if end is not None else "N/A",
+                        duration,
+                        formatted_duration,
+                        file
+                    )
+
+                    while True:
+                        await asyncio.sleep(0.5)
+                        choice = input(
+                            f"Marker '{marker.get('title')}' exceeds duration, would you like to (F)ix / (R)emove marker: \n"
+                        ).strip().lower()
+
+                        if choice == "f":
+                            # Fix start_time
+                            if start is not None and start > duration:
+                                while True:
+                                    logger.warning(
+                                        "Marker '{}' start_time ({}) exceeds duration ({}).",
+                                        marker.get("title"), formatted_start, formatted_duration
+                                    )
+                                    await asyncio.sleep(0.5)
+                                    new_start_str = input("Enter corrected start_time in HH:MM:SS\n").strip()
+                                    try:
+                                        # Parse HH:MM:SS to seconds
+                                        h, m, s = map(int, new_start_str.split(":"))
+                                        new_start = h * 3600 + m * 60 + s
+                                        if new_start > duration:
+                                            logger.error("start_time still exceeds video duration.")
+                                            continue
+                                        marker["start_time"] = new_start
+                                        break
+                                    except (ValueError, TypeError):
+                                        logger.error("Invalid timestamp. Format must be HH:MM:SS.")
+
+                            # Fix end_time
+                            if end is not None and end > duration:
+                                while True:
+                                    logger.warning(
+                                        "Marker '{}' end_time ({}) exceeds duration ({}).",
+                                        marker.get("title"), formatted_end, formatted_duration
+                                    )
+                                    await asyncio.sleep(0.5)
+                                    new_end_str = input("Enter corrected end_time in HH:MM:SS\n").strip()
+                                    try:
+                                        # Parse HH:MM:SS to seconds
+                                        h, m, s = map(int, new_end_str.split(":"))
+                                        new_end = h * 3600 + m * 60 + s
+                                        if new_end > duration:
+                                            logger.error("end_time still exceeds video duration.")
+                                            continue
+                                        marker["end_time"] = new_end
+                                        break
+                                    except (ValueError, TypeError):
+                                        logger.error("Invalid timestamp. Format must be HH:MM:SS.")
+
+                            fixed_markers.append(marker)
+                            break
+
+                        elif choice == "r":
+                            logger.info("Removed marker id={}", marker.get("id"))
+                            break
+
+                        else:
+                            logger.error("Invalid choice. Use F/R/S.")
+
+                markers = fixed_markers or None
 
         # "Clean" title
         title = scene_data.get('title')

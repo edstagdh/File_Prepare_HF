@@ -1313,7 +1313,12 @@ async def get_video_codec(file_path):
 async def add_mp4_chapters(
         input_file: str,
         chapters_list: List[Dict],
-        run_command_func
+        run_command_func,
+        title,
+        description,
+        tpdb_id,
+        matching_mode,
+        video
 ) -> bool:
     # logger.debug(f"add_mp4_chapters called for: {input_file}")
     # logger.debug(f"Incoming chapters_list: {chapters_list}")
@@ -1344,29 +1349,12 @@ async def add_mp4_chapters(
 
         # logger.debug(f"Chapters after beginning check: {sorted_chapters}")
 
-        # Get duration
-        probe_cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(input_path)
-        ]
-
-        # logger.debug(f"Running ffprobe: {probe_cmd}")
-
-        stdout, stderr, rc = await run_command_func(probe_cmd)
-
-        # logger.debug(f"ffprobe rc={rc}")
-        # logger.debug(f"ffprobe stdout={stdout}")
-        # logger.debug(f"ffprobe stderr={stderr}")
-
-        if rc != 0:
-            logger.error(f"Failed to get duration: {stderr}")
+        duration = getattr(video.info, "length", None)
+        if not duration:
+            logger.error("Could not read duration from media info")
             return False
 
-        duration = float(stdout.strip())
-        # logger.debug(f"Video duration: {duration}")
+        duration = float(duration)
 
         # Build metadata
         metadata_lines = [";FFMETADATA1"]
@@ -1437,6 +1425,23 @@ async def add_mp4_chapters(
         os.replace(output_path, input_path)
         # logger.debug("Chapter file successfully replaced original")
 
+        # --- update scene data ---
+        video["\xa9nam"] = [title]  # Title
+        if matching_mode != "full_manual":
+            video["\xa9cmt"] = [description]  # Comment/Description
+            video["\xa9alb"] = [tpdb_id]  # TPDB UUID
+
+        # --- Remove unwanted ---
+        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+            if key in video:
+                del video[key]
+
+        # Clear encoder info (if not set by your tool)
+        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
+            video["\xa9too"] = ["File_Prepare_HF"]
+
+        video.save()
+
         return True
 
     except Exception:
@@ -1465,36 +1470,41 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
     and removes unwanted fields completely.
     """
 
+    video = MP4(input_file)
+
     try:
-        video = MP4(input_file)
-
-        # --- update scene data ---
-        video["\xa9nam"] = [title]  # Title
-        if matching_mode != "full_manual":
-            video["\xa9cmt"] = [description]  # Comment/Description
-            video["\xa9alb"] = [tpdb_id]  # TPDB UUID
-
-        # --- Remove unwanted ---
-        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
-            if key in video:
-                del video[key]
-
-        # Clear encoder info (if not set by your tool)
-        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-            video["\xa9too"] = ["File_Prepare_HF"]
-
-
-        video.save()
-
         if add_timestamps_markers and chapters_list:
             success = await add_mp4_chapters(
                 input_file,
                 chapters_list,
-                run_command
+                run_command,
+                title,
+                description,
+                tpdb_id,
+                matching_mode,
+                video
             )
             if not success:
                 return False
 
+        else:
+
+            # --- update scene data ---
+            video["\xa9nam"] = [title]  # Title
+            if matching_mode != "full_manual":
+                video["\xa9cmt"] = [description]  # Comment/Description
+                video["\xa9alb"] = [tpdb_id]  # TPDB UUID
+
+            # --- Remove unwanted ---
+            for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+                if key in video:
+                    del video[key]
+
+            # Clear encoder info (if not set by your tool)
+            if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
+                video["\xa9too"] = ["File_Prepare_HF"]
+
+            video.save()
 
         return True
 

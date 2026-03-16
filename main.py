@@ -658,12 +658,14 @@ async def process_files():
                 if existing_tpdb_uuid != tpdb_uuid:
                     metadata_mismatch = True
 
+            metadata_update_required = False
+
             if not re_encode_hevc:
                 if not metadata_mismatch:
-                    # logger.debug(f"File: {file.name} - Metadata is up to date.")
                     pass
                 else:
-                    # logger.debug(f"File: {file.name} - Metadata differs or unwanted metadata detected.")
+                    logger.debug(f"File: {file.name} - Metadata differs or unwanted metadata detected.")
+
                     if contains_unwanted_metadata:
                         remove_metadata_result = await reset_all_metadata(new_file_full_path)
                         if not remove_metadata_result:
@@ -672,25 +674,14 @@ async def process_files():
                             failed_files.append(new_file_full_path)
                             processed_files += 1
                             continue
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
-                    if not results_metadata:
-                        logger.error(f"Failed to update metadata for: {new_full_filename}")
-                        logger.warning(f"End file: {new_file_full_path}")
-                        failed_files.append(new_file_full_path)
-                        processed_files += 1
-                        continue
+
+                    metadata_update_required = True
                     force_regen_thumbs = True
+
             else:
-                # If we will re-encode, just log if metadata mismatch exists (for debugging)
                 if metadata_mismatch:
-                    # logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list)
-                    if not results_metadata:
-                        logger.error(f"Failed to update metadata for: {new_full_filename}")
-                        logger.warning(f"End file: {new_file_full_path}")
-                        failed_files.append(new_file_full_path)
-                        processed_files += 1
-                        continue
+                    metadata_update_required = True
+                    logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
                     force_regen_thumbs = True
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
@@ -747,7 +738,7 @@ async def process_files():
                                                    contains_unwanted_metadata, re_encode_hevc_CRF, warn_CRF_match]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),
+                (metadata_update_required, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,
