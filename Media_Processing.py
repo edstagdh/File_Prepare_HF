@@ -1317,8 +1317,7 @@ async def add_mp4_chapters(
         title,
         description,
         tpdb_id,
-        matching_mode,
-        video
+        matching_mode
 ) -> bool:
     # logger.debug(f"add_mp4_chapters called for: {input_file}")
     # logger.debug(f"Incoming chapters_list: {chapters_list}")
@@ -1349,12 +1348,10 @@ async def add_mp4_chapters(
 
         # logger.debug(f"Chapters after beginning check: {sorted_chapters}")
 
-        duration = getattr(video.info, "length", None)
+        duration, _ = await get_video_duration(input_file)
         if not duration:
             logger.error("Could not read duration from media info")
             return False
-
-        duration = float(duration)
 
         # Build metadata
         metadata_lines = [";FFMETADATA1"]
@@ -1425,6 +1422,8 @@ async def add_mp4_chapters(
         os.replace(output_path, input_path)
         # logger.debug("Chapter file successfully replaced original")
 
+        video = MP4(input_file)
+
         # --- update scene data ---
         video["\xa9nam"] = [title]  # Title
         if matching_mode != "full_manual":
@@ -1470,7 +1469,7 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
     and removes unwanted fields completely.
     """
 
-    video = MP4(input_file)
+
 
     try:
         if add_timestamps_markers and chapters_list:
@@ -1481,13 +1480,14 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
                 title,
                 description,
                 tpdb_id,
-                matching_mode,
-                video
+                matching_mode
             )
             if not success:
                 return False
 
         else:
+
+            video = MP4(input_file)
 
             # --- update scene data ---
             video["\xa9nam"] = [title]  # Title
