@@ -12,7 +12,7 @@ from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_fil
 from TPDB_API_Processing import get_data_from_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
-    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update
+    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update, is_video_hevc_or_av1
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
@@ -61,7 +61,6 @@ async def process_files():
         target_size = (target_size_width, target_size_height)
         zoom_factor = config["zoom_factor"]
         blur_kernel_size = config["blur_kernel_size"]
-        re_encode_hevc = config["re_encode_hevc"]
         re_encode_hevc_CRF = config["re_encode_hevc_CRF"]
         warn_CRF_match = config["warn_crf_match"]
         warn_length_match = config["warn_length_match"]
@@ -232,8 +231,10 @@ async def process_files():
         force_regen_thumbs = False
         add_timestamps_markers = config["add_timestamps_markers"]
         pre_suffix = ""
+        re_encode_hevc = config["re_encode_hevc"]
         tpdb_uuid = None
         tpdb__id = None
+        rename_result = None
         await asyncio.sleep(0.1)
         file_full_name = str(file.name)  # Get the full file_full_name (with extension)
         file_base_name = str(file.stem)  # Get the file_full_name without extension
@@ -633,17 +634,16 @@ async def process_files():
 
         existing_title = await get_existing_title(new_file_full_path)
         changed_title = True if existing_title != new_title else False
-        # logger.debug(existing_title)
-        # logger.debug(new_title)
 
         try:
             contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
             description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
 
-            # Always check metadata — but only *apply* it now if not re-encoding
+            # Always check metadata
             existing_description = await get_existing_description(new_file_full_path)
             check_encoder = await check_existing_Encoder_Library(new_file_full_path)
             existing_chapters = await chapters_need_update(new_file_full_path, add_timestamps_markers, markers_list)
+
             if not existing_chapters:
                 add_timestamps_markers = False
 
@@ -652,42 +652,63 @@ async def process_files():
                     existing_description != description or
                     contains_unwanted_metadata or
                     existing_chapters or
-                    check_encoder
+                    check_encoder or
+                    (rename_result is True)
             )
+
             if re_match_existing_tpdb_uuid:
                 if existing_tpdb_uuid != tpdb_uuid:
                     metadata_mismatch = True
 
-            metadata_update_required = False
-
-            if not re_encode_hevc:
-                if not metadata_mismatch:
-                    pass
-                else:
-                    logger.debug(f"File: {file.name} - Metadata differs or unwanted metadata detected.")
-
-                    if contains_unwanted_metadata:
-                        remove_metadata_result = await reset_all_metadata(new_file_full_path)
-                        if not remove_metadata_result:
-                            logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
-                            logger.warning(f"End file: {new_file_full_path}")
-                            failed_files.append(new_file_full_path)
-                            processed_files += 1
-                            continue
-
-                    metadata_update_required = True
-                    force_regen_thumbs = True
-
+            # -----------------------------
+            # RE-ENCODE DECISION FIRST
+            # -----------------------------
+            if re_encode_hevc:
+                is_file_already_re_encoded = await is_video_hevc_or_av1(
+                    new_file_full_path,
+                    warn_CRF_match,
+                    re_encode_hevc_CRF
+                )
             else:
-                if metadata_mismatch:
-                    metadata_update_required = True
-                    logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
-                    force_regen_thumbs = True
+                is_file_already_re_encoded = False
+
+            if is_file_already_re_encoded:
+                re_encode_hevc = False
+
+            re_encode_required = re_encode_hevc
+
+            # -----------------------------
+            # FINAL DECISION (SINGLE SOURCE OF TRUTH)
+            # -----------------------------
+            metadata_update_required = metadata_mismatch or re_encode_required
+
+            # -----------------------------
+            # SIDE EFFECTS (NO LOGIC HERE)
+            # -----------------------------
+            if metadata_mismatch:
+                logger.debug(f"File: {new_full_filename} - Metadata mismatch detected.")
+
+                if contains_unwanted_metadata:
+                    remove_metadata_result = await reset_all_metadata(new_file_full_path)
+                    if not remove_metadata_result:
+                        logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
+                        logger.warning(f"End file: {new_file_full_path}")
+                        failed_files.append(new_file_full_path)
+                        processed_files += 1
+                        continue
+
+                force_regen_thumbs = True
+
+            if re_encode_required:
+                logger.debug(f"File: {new_full_filename} - Will re-encode and reapply metadata.")
+                force_regen_thumbs = True
+
+            # logger.debug(metadata_update_required)
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
 
             # Avoid checking video data if re-encoding is required and create_template_file is enabled
-            if (not re_encode_hevc) and create_template_file:
+            if (not re_encode_required) and create_template_file:
                 fps = await get_video_fps(new_file_full_path)
                 resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
                 codec = await get_video_codec(new_file_full_path)
@@ -700,10 +721,12 @@ async def process_files():
                     imgbox_upload_cover = False
                     imgbox_upload_thumbnails = False
                     logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
+
             if not create_cover_image:
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
                 hamster_upload_cover = False
+
             if not create_thumbnails:
                 imgbox_upload_thumbnails = False
                 imgbb_upload_thumbnails = False
@@ -711,6 +734,7 @@ async def process_files():
 
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
+
             thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
             thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
 
@@ -720,13 +744,13 @@ async def process_files():
 
             if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails or hamster_upload_cover or hamster_upload_thumbnails:
                 fill_img_urls = True
-                # Check if the imgbox file exists and delete it
+
                 if os.path.exists(imgbox_file_path):
                     os.remove(imgbox_file_path)
-                # Check if the imgbb file exists and delete it
+
                 if os.path.exists(imgbb_file_path):
                     os.remove(imgbb_file_path)
-                # Check if the hamster file exists and delete it
+
                 if os.path.exists(hamster_file_path):
                     os.remove(hamster_file_path)
             else:
@@ -735,7 +759,7 @@ async def process_files():
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
                 (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters,
-                                                   contains_unwanted_metadata, re_encode_hevc_CRF, warn_CRF_match]),
+                                                   re_encode_hevc_CRF]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
                 (metadata_update_required, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),

@@ -8,6 +8,7 @@
   },
   "force_re_match_using_existing_tpdb_uuid": true,
   "working_path": "G:\\temp8",
+  "use_title": false,
   "create_cover_image": false,
   "create_thumbnails": false,
   "create_video_preview" : false,
@@ -35,7 +36,6 @@
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
   "bad_words": [".Hardcore"],
-  "use_title": false,
   "title_date_mode": "1",
   "title_date_available_modes": {
     "1": "2025-January-01",

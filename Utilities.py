@@ -10,8 +10,8 @@ from loguru import logger
 from pymediainfo import MediaInfo
 from typing import Union, Sequence, Tuple
 
-CLEAN_CHARS = "!@#$%^&*()_+=’' :?"
-INVALID_CHARS = set('\\/:*?"<>|')
+CLEAN_CHARS = "!@#$%^&*()_+=’/' :\?"
+INVALID_CHARS = set('\:*/?"<>|')
 RUN_DEBUG_MODE = False
 
 

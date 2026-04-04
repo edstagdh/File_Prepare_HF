@@ -36,7 +36,7 @@ async def has_unwanted_metadata(file_path) -> bool:
             # for attr, value in track.__dict__.items():
             #     logger.debug(f"{attr} = {value}")
 
-            title = (track, "encoded_date", None)
+
             # ✅ Check Encoded/Tagged date everywhere
             if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
                 return True
@@ -869,8 +869,8 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata,
-                          re_encode_hevc_CRF, warn_CRF_match):
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters,
+                          re_encode_hevc_CRF):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
 
@@ -881,20 +881,12 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         logger.error(f"processing failed for {file_path}, unexpected CRF value: {re_encode_hevc_CRF}")
         return False
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF, warn_CRF_match)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters, re_encode_hevc_CRF)
 
     # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
         # logger.debug(f"The file is already encoded with HEVC/AV1: {file_path}")
-        if contains_unwanted_metadata:
-            # logger.debug(f"The file requires metadata stripping due to unwanted metadata: {file_path}")
-            remove_metadata_result = await reset_all_metadata(file_path)
-            if remove_metadata_result:
-                return True
-            else:
-                return False
-        else:
-            return True
+        return True
 
     # Return False if the re encoding failed
     if temp_output is False:
@@ -912,11 +904,6 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
 
             final_output = os.path.join(directory, new_filename)
             shutil.move(temp_output, final_output)
-            encoder_change = await update_encoder_metadata(final_output)
-
-            if encoder_change is False:
-                logger.error(f"processing failed for {file_path}")
-                return False
 
             logger.info(f"Replaced original file with HEVC version: {final_output}")
             return True
@@ -927,7 +914,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF, warn_CRF_match):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters, re_encode_hevc_CRF):
     """
     Re-encode the given file to HEVC and show progress with a tqdm bar.
 
@@ -936,11 +923,6 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         None : If already encoded in HEVC/AV1
         False: If encoding failed
     """
-    encode_results = await is_video_hevc_or_av1(file_path, warn_CRF_match, re_encode_hevc_CRF)
-    if encode_results:  # Already encoded with HEVC/AV1
-        return None
-    if encode_results is None:
-        return False
 
     width, height, bit_rate = await get_video_resolution(file_path)
     directory, filename = os.path.split(file_path)
@@ -976,7 +958,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         "-map_metadata", "-1",
     ]
 
-    ffmpeg_cmd += ["-map_chapters", "-1" if remove_chapters else "0"]
+    ffmpeg_cmd += ["-map_chapters", "-1" if remove_existing_chapters else "0"]
     ffmpeg_cmd += ["-dn", "-sn", ]
 
     if re_encode_downscale and width and height:
@@ -1104,11 +1086,11 @@ async def is_video_hevc_or_av1(file_path: str, warn_CRF_match: bool, re_encode_h
                 logger.warning(f"CRF value of file: {file_path} does not match configured CRF value - file: {crf_value} vs Configured CRF value: {re_encode_hevc_CRF}")
         else:
             logger.warning(f"CRF value not found in file: {file_path}")
-        # logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
+        logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
         return True
 
     if is_av1:
-        # logger.info(f"{file_path} detected as AV1. CRF={crf_value}")
+        logger.info(f"{file_path} detected as AV1. CRF={crf_value}")
         return True
 
     # logger.info(f"{file_path} codec is '{codec}', not HEVC/AV1")
@@ -1319,6 +1301,7 @@ async def add_mp4_chapters(
         tpdb_id,
         matching_mode
 ) -> bool:
+    logger.debug("Chapters detected, Chapters will be applied and only then metadata will be applied.")
     # logger.debug(f"add_mp4_chapters called for: {input_file}")
     # logger.debug(f"Incoming chapters_list: {chapters_list}")
 
@@ -1423,22 +1406,7 @@ async def add_mp4_chapters(
         # logger.debug("Chapter file successfully replaced original")
 
         video = MP4(input_file)
-
-        # --- update scene data ---
-        video["\xa9nam"] = [title]  # Title
-        if matching_mode != "full_manual":
-            video["\xa9cmt"] = [description]  # Comment/Description
-            video["\xa9alb"] = [tpdb_id]  # TPDB UUID
-
-        # --- Remove unwanted ---
-        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
-            if key in video:
-                del video[key]
-
-        # Clear encoder info (if not set by your tool)
-        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-            video["\xa9too"] = ["File_Prepare_HF"]
-
+        await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
         video.save()
 
         return True
@@ -1468,8 +1436,8 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
     """
-
-
+    await asyncio.sleep(0.5)
+    # logger.debug(input_file)
 
     try:
         if add_timestamps_markers and chapters_list:
@@ -1486,24 +1454,10 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
                 return False
 
         else:
+            logger.debug("No chapters detected, metadata will be applied.")
 
             video = MP4(input_file)
-
-            # --- update scene data ---
-            video["\xa9nam"] = [title]  # Title
-            if matching_mode != "full_manual":
-                video["\xa9cmt"] = [description]  # Comment/Description
-                video["\xa9alb"] = [tpdb_id]  # TPDB UUID
-
-            # --- Remove unwanted ---
-            for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
-                if key in video:
-                    del video[key]
-
-            # Clear encoder info (if not set by your tool)
-            if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-                video["\xa9too"] = ["File_Prepare_HF"]
-
+            await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
             video.save()
 
         return True
@@ -1513,32 +1467,18 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
         return False
 
 
-async def update_encoder_metadata(input_file):
-    """
-    Updates the metadata of an MP4 video file, Encoder
+async def apply_mp4_metadata(video, title, description, tpdb_id, matching_mode):
+    video["\xa9nam"] = [title]
 
-    Args:
-        input_file (str): Path to the video file.
+    if matching_mode != "full_manual":
+        video["\xa9cmt"] = [description]
+        video["\xa9alb"] = [tpdb_id]
 
-    Returns:
-        bool: True if the metadata update was successful, False otherwise.
-        param input_file:
-    """
-    try:
-        # Load the MP4 file
-        video = MP4(input_file)
+    for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+        if key in video:
+            del video[key]
 
-        # Update metadata fields
-        video["\xa9too"] = "File_Prepare_HF"  # Encoder
-
-        # Save changes
-        video.save()
-
-        # logger.info(f"Metadata updated successfully for: {input_file}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to update metadata for {input_file}: {e}")
-        return False
+    video["\xa9too"] = ["File_Prepare_HF"]
 
 
 async def reset_all_metadata(file_path: str) -> bool:

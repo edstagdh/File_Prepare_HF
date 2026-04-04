@@ -67,13 +67,19 @@ async def extract_frame_at_timestamps(video_path, timestamps, output_dir):
         os.makedirs(output_dir, exist_ok=True)
         tasks = []
 
+        semaphore = asyncio.Semaphore(2)  # or 1–4 depending on CPU
+
+        async def run_limited(cmd):
+            async with semaphore:
+                return await run_command(cmd)
+
         for i, ts in enumerate(timestamps, 1):
             output_file = os.path.join(output_dir, f"thumb_{i:04d}.jpg")
             command = (
                 f'ffmpeg -hide_banner -loglevel error -ss {ts:.3f} -i "{video_path}" '
                 f'-frames:v 1 "{output_file}"'
             )
-            tasks.append(run_command(command))
+            tasks.append(run_limited(command))
 
         results = await asyncio.gather(*tasks)
         for idx, (_, stderr, code) in enumerate(results):
@@ -85,14 +91,14 @@ async def extract_frame_at_timestamps(video_path, timestamps, output_dir):
         raise
 
 
-async def add_timestamp_to_frame(image, timestamp, font_full_name):
+async def add_timestamp_to_frame(image, timestamp, font):
     """
     Adds a timestamp to the top-right corner of an image.
 
     Args:
         :param image: The image to which the timestamp will be added.
         :param timestamp: The timestamp to display on the image.
-        :param font_full_name:
+        :param font:
 
     Returns:
         PIL.Image.Image: The image with the added timestamp.
@@ -106,12 +112,6 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
 
         # Draw the timestamp in the top right corner
         draw = ImageDraw.Draw(image)
-
-        try:
-            font_path = f"{font_full_name}"
-            font = ImageFont.truetype(font_path, size=32)  # Adjust size here
-        except IOError:
-            font = ImageFont.load_default()  # Fallback if font is not available
 
         # Use textbbox to get the size of the text
         text_bbox = draw.textbbox((0, 0), timestamp_str, font=font)
@@ -213,13 +213,21 @@ async def generate_thumbnails_sheet(image_dir, thumb_width, columns, padding, ou
             image_files = [first_image_file] + remaining_images
             timestamps = [timestamps[0]] + [timestamps[i + 1] for i in random_indexes]
 
+        try:
+            font_path = f"{font_full_name}"
+            font = ImageFont.truetype(font_path, size=32)  # Adjust size here
+        except IOError:
+            font = ImageFont.load_default()  # Fallback if font is not available
+
         for i, file in enumerate(image_files):
-            img = Image.open(file)
+            with Image.open(file) as img:
+                img = img.copy()  # fully load into memory
+
             ratio = thumb_width / img.width
             new_size = (thumb_width, int(img.height * ratio))
-            img = img.resize(new_size)
+            img = img.resize(new_size, Image.Resampling.BILINEAR)
 
-            img = await add_timestamp_to_frame(img, timestamps[i], font_full_name)
+            img = await add_timestamp_to_frame(img, timestamps[i], font)
             thumbs.append(img)
 
         rows = int(-(-len(thumbs) // columns))
