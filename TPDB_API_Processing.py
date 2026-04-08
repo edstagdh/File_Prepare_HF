@@ -94,6 +94,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                 return EMPTY_RESULT
         # Safely extract fields from scene_data
         scene_data = scene_response_data.get('data')
+        markers = scene_data.get("markers") or None
 
         _id = scene_data.get("_id")
         if warn_length_match or add_timestamps_markers:
@@ -116,8 +117,6 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                         formatted_duration,
                         file,
                     )
-
-            markers = scene_data.get("markers") or None
 
             if duration is not None and markers:
 
