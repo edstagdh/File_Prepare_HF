@@ -68,8 +68,9 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
         if len(valid_entries) > 1:
             # Duration from file
-            from Media_Processing import get_video_duration
+            from Media_Processing import get_video_duration, get_existing_title
             duration, _ = await get_video_duration(file)
+            existing_title = await get_existing_title(file)
             # Duration formatting
             try:
                 hours, remainder = divmod(int(duration), 3600)
@@ -78,7 +79,10 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             except Exception as e:
                 logger.error(f"Error formatting duration: {e}")
                 timestamp_str = "N/A"
-            logger.warning(f"Filename: {file.name} | Duration: {timestamp_str}")
+            file_info = f"Filename: {file.name} | Duration: {timestamp_str}"
+            if existing_title:
+                file_info += f" | {existing_title}"
+            logger.debug(file_info)
 
             selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
         else:
