@@ -11,10 +11,9 @@ from typing import Optional
 from Utilities import load_credentials, remove_ignored_strings
 
 
-
-async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
-                            mode):
+async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+                    filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
+                    mode):
     max_retries = 3
     delay = 5
     EMPTY_RESULT = (None,) * 14
@@ -84,7 +83,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                 file_info += f" | {existing_title}"
             logger.debug(file_info)
 
-            selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
+            selected_entry = await select_entry(valid_entries, send_notification)
         else:
             selected_entry = valid_entries[0]
         if selected_entry is None:
@@ -110,7 +109,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             formatted_duration = f"{temp_duration} ({scene_duration})"
 
             if duration is not None and scene_duration is not None and formatted_duration != "N/A":
-                delta = abs(duration - scene_duration)
+                delta = int(abs(duration - scene_duration))
 
                 if delta > 20:
                     logger.warning(
@@ -361,7 +360,8 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
             return None
 
 
-async def filter_entries_by_user_choice(valid_entries, send_notification):
+async def select_entry(valid_entries, send_notification):
+    advanced_mode = False
     if len(valid_entries) > 1:
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
@@ -373,9 +373,14 @@ async def filter_entries_by_user_choice(valid_entries, send_notification):
             )
             performers = ", ".join([p.get('name', 'Unknown') for p in item.get('performers', [])])
             try:
-                logger.info(
-                    f"{index}. UUID: {item['id']} | Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date'].replace('-', '.')} | Duration: {formatted_duration} | Performers: {performers}"
-                            f"\n{item['url']} | {base_url}{item['slug']}")
+                if advanced_mode:
+                    logger.info(
+                        f"{index}. UUID: {item['id']} | Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date'].replace('-', '.')} | Duration: {formatted_duration} | Performers: {performers}"
+                        f"\n{item['url']} | {base_url}{item['slug']}")
+                else:
+                    logger.info(
+                        f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date'].replace('-', '.')} | Duration: {formatted_duration} | Performers: {performers}"
+                        f"\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 

@@ -18,7 +18,7 @@ from loguru import logger
 from mutagen.mp4 import MP4
 from pymediainfo import MediaInfo
 from Utilities import run_command, load_json_file
-from TPDB_API_Processing import get_performer_profile_picture
+from TPDB_API import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 from tqdm import tqdm

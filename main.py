@@ -9,7 +9,7 @@ from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
     generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input
-from TPDB_API_Processing import get_data_from_api, ensure_scene_collected
+from TPDB_API import query_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
     reset_all_metadata, check_existing_Encoder_Library, chapters_need_update, is_video_hevc_or_av1
@@ -259,7 +259,7 @@ async def process_files():
             file_flags = {flag: False for flag in flag_names}
 
             # Prepare lowercase filename and split by '.'
-            file_lower = str(file).lower()
+            file_lower = file.name.lower()
             file_parts = file_lower.split(".")
 
             # Detect flags based on exact token matches
@@ -278,12 +278,11 @@ async def process_files():
             )
 
             # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
-            match_part = re.search(r"\bPart\s*(\d+)\b", clean_tpdb_check_filename, re.IGNORECASE)
+            match_part = re.search(r"\bPart[\s._-]*(\d+)\b", clean_tpdb_check_filename, re.IGNORECASE)
             if match_part and not filename_ignore_part_x:
                 part_number = match_part.group(1)  # the number after 'Part'
-                pre_suffix += f"Part.{part_number}"
+                pre_suffix += f".Part.{part_number}"
                 logger.info(f"Detected Part in title: {pre_suffix}")
-
             match_res = re.search(r"\.(480p|720p|1080p|1440p|2160p)(?=[\W_]|$)", clean_tpdb_check_filename, re.IGNORECASE)
             if match_res and not filename_ignore_res:
                 resolution = match_res.group(1).lower()
@@ -336,7 +335,7 @@ async def process_files():
                 # Query scene data from API
                 (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
                  scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
-                    await get_data_from_api(
+                    await query_api(
                     file_base_name,
                     None,
                     None,
@@ -387,7 +386,7 @@ async def process_files():
                 # Query scene data from API
                 (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
                  scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
-                    await get_data_from_api(
+                    await query_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
