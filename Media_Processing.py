@@ -11,12 +11,14 @@ import subprocess
 import textwrap
 import time
 import asyncio
+import tempfile
+from typing import List, Dict
 from io import BytesIO
 from loguru import logger
 from mutagen.mp4 import MP4
 from pymediainfo import MediaInfo
 from Utilities import run_command, load_json_file
-from TPDB_API_Processing import get_performer_profile_picture
+from TPDB_API import get_performer_profile_picture
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 from tqdm import tqdm
@@ -34,7 +36,7 @@ async def has_unwanted_metadata(file_path) -> bool:
             # for attr, value in track.__dict__.items():
             #     logger.debug(f"{attr} = {value}")
 
-            title = (track, "encoded_date", None)
+
             # ✅ Check Encoded/Tagged date everywhere
             if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
                 return True
@@ -95,8 +97,131 @@ async def get_existing_description(input_file):
         return None
 
 
+async def check_existing_Encoder_Library(input_file):
+    try:
+        media_info = MediaInfo.parse(input_file)
 
-async def get_existing_TPDB_ID(input_file):
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                writing_library = track.writing_application
+
+                if not writing_library:
+                    return True
+
+                if writing_library.strip() == "File_Prepare_HF":
+                    return False
+
+                return True
+
+        return True
+
+    except Exception:
+        logger.exception(f"Error retrieving writing library from {input_file}")
+        return True
+
+
+async def chapters_need_update(input_file, add_timestamps_markers, markers_list):
+    """
+    Returns:
+        True  -> if no chapters exist OR they differ from markers_list
+        False -> if chapters exist and match markers_list
+        None  -> on error
+    """
+    try:
+        # logger.debug(f"Checking chapters for: {input_file}")
+        # logger.debug(f"Incoming markers_list: {markers_list}")
+
+        media_info = MediaInfo.parse(input_file)
+
+        existing_chapters = []
+
+        menu_tracks = [t for t in media_info.tracks if t.track_type == "Menu"]
+
+        # logger.debug(f"Total tracks found: {len(media_info.tracks)}")
+        # logger.debug(f"Menu tracks found: {len(menu_tracks)}")
+
+        if not menu_tracks:
+            if add_timestamps_markers:
+                # logger.info("No Menu tracks detected → returning True")
+                return True
+            else:
+                return False
+
+        track_dict = menu_tracks[0].to_data()
+
+        # logger.debug(f"Menu track raw keys: {list(track_dict.keys())}")
+
+        for key, value in track_dict.items():
+            if isinstance(key, str) and re.match(r"\d{2}_\d{2}_\d{5}", key):
+
+                # logger.debug(f"Chapter key matched: {key} -> {value}")
+
+                try:
+                    h, m, ms = key.split("_")
+                    total_seconds = (
+                            int(h) * 3600 +
+                            int(m) * 60 +
+                            int(ms) / 1000
+                    )
+                except Exception as e:
+                    logger.error(f"Time parse failed for {key}: {e}")
+                    continue
+
+                existing_chapters.append({
+                    "title": (value or "").strip(),
+                    "start_time": round(total_seconds)
+                })
+
+        existing_chapters.sort(key=lambda x: x["start_time"])
+
+        # logger.debug(f"Parsed existing chapters: {existing_chapters}")
+
+        if not markers_list:
+            if add_timestamps_markers:
+                # logger.warning("Markers list is empty → returning True")
+                return True
+            else:
+                return False
+
+        normalized_markers = sorted(
+            [
+                {
+                    "title": (m.get("title") or "").strip(),
+                    "start_time": int(m.get("start_time", 0))
+                }
+                for m in markers_list
+            ],
+            key=lambda x: x["start_time"]
+        )
+
+        # logger.debug(f"Existing count: {len(existing_chapters)}")
+        # logger.debug(f"Markers count: {len(normalized_markers)}")
+
+        if len(existing_chapters) != (len(normalized_markers)):
+            logger.warning("Chapter count mismatch → returning True")
+            return True
+
+        for i, (existing, marker) in enumerate(zip(existing_chapters, normalized_markers)):
+            # logger.debug(f"Comparing chapter {i}")
+            # logger.debug(f"Existing: {existing}")
+            # logger.debug(f"Marker:   {marker}")
+
+            if (
+                    existing["start_time"] != marker["start_time"]
+                    or existing["title"] != marker["title"]
+            ):
+                logger.warning("Mismatch detected → returning True")
+                return True
+
+        # logger.debug("Chapters fully match → returning False")
+        return False
+
+    except Exception:
+        logger.exception(f"Error checking chapters for {input_file}")
+        return None
+
+
+async def get_existing_tpdb_uuid(input_file):
     try:
         media_info = MediaInfo.parse(input_file)
 
@@ -249,7 +374,7 @@ async def cover_image_output_file_exists(input_video_file_name,
 
 
 async def cover_image_download_and_conversion(image_url: str,
-                                              alt_image_url: str,
+                                              tpdb_image_url: str,
                                               input_video_file_name: str,
                                               original_video_file_name: str,
                                               output_path: str,
@@ -270,7 +395,7 @@ async def cover_image_download_and_conversion(image_url: str,
             sub_folder_path
         )
 
-        # If file exists and we’re not regenerating, skip download
+        # If file exists, and we’re not regenerating, skip download
         if exists and cover_regeneration_mode != "force regenerate":
             return True
 
@@ -293,7 +418,11 @@ async def cover_image_download_and_conversion(image_url: str,
         except Exception as e:
             # commented out to avoid log clutter, will always fall back to TPDB image url if exists.
             # logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
-            response = download_image(alt_image_url)
+            if tpdb_image_url:
+                response = download_image(tpdb_image_url)
+            else:
+                raise
+
 
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
         with open(temp_image_path, "wb") as f:
@@ -740,29 +869,24 @@ async def save_face_image_with_rounded_corners(face, mask, output_path, target_s
     cv2.imwrite(output_path, result_resized)
 
 
-async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, contains_unwanted_metadata,
+async def re_encode_video(new_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters,
                           re_encode_hevc_CRF):
     file_path = os.path.join(directory, new_filename)
     # logger.debug(f"Processing file: {file_path}")
+
+    if is_vertical is None:
+        _, is_vertical = await get_video_resolution_and_orientation(str(file_path))
 
     if not isinstance(re_encode_hevc_CRF, int) or not (0 <= re_encode_hevc_CRF < 30):
         logger.error(f"processing failed for {file_path}, unexpected CRF value: {re_encode_hevc_CRF}")
         return False
 
-    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF)
+    temp_output = await re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters, re_encode_hevc_CRF)
 
     # Return True if the file is already encoded with HEVC/AV1
     if temp_output is None:
         # logger.debug(f"The file is already encoded with HEVC/AV1: {file_path}")
-        if contains_unwanted_metadata:
-            # logger.debug(f"The file requires metadata stripping due to unwanted metadata: {file_path}")
-            remove_metadata_result = await reset_all_metadata(file_path)
-            if remove_metadata_result:
-                return True
-            else:
-                return False
-        else:
-            return True
+        return True
 
     # Return False if the re encoding failed
     if temp_output is False:
@@ -780,11 +904,6 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
 
             final_output = os.path.join(directory, new_filename)
             shutil.move(temp_output, final_output)
-            encoder_change = await update_encoder_metadata(final_output)
-
-            if encoder_change is False:
-                logger.error(f"processing failed for {file_path}")
-                return False
 
             logger.info(f"Replaced original file with HEVC version: {final_output}")
             return True
@@ -795,7 +914,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
         return False
 
 
-async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters, re_encode_hevc_CRF):
+async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters, re_encode_hevc_CRF):
     """
     Re-encode the given file to HEVC and show progress with a tqdm bar.
 
@@ -804,11 +923,6 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         None : If already encoded in HEVC/AV1
         False: If encoding failed
     """
-    encode_results = await is_video_hevc_or_av1(file_path)
-    if encode_results:  # Already encoded with HEVC/AV1
-        return None
-    if encode_results is None:
-        return False
 
     width, height, bit_rate = await get_video_resolution(file_path)
     directory, filename = os.path.split(file_path)
@@ -844,7 +958,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
         "-map_metadata", "-1",
     ]
 
-    ffmpeg_cmd += ["-map_chapters", "-1" if remove_chapters else "0"]
+    ffmpeg_cmd += ["-map_chapters", "-1" if remove_existing_chapters else "0"]
     ffmpeg_cmd += ["-dn", "-sn", ]
 
     if re_encode_downscale and width and height:
@@ -919,7 +1033,7 @@ async def re_encode_to_hevc(file_path, is_vertical, re_encode_downscale, limit_c
     return temp_output
 
 
-async def is_video_hevc_or_av1(file_path: str) -> bool:
+async def is_video_hevc_or_av1(file_path: str, warn_CRF_match: bool, re_encode_hevc_CRF: int) -> bool:
     """
     Check if the video is encoded with HEVC or AV1 using pymediainfo.
     Log codec and CRF if detected.
@@ -964,13 +1078,19 @@ async def is_video_hevc_or_av1(file_path: str) -> bool:
             crf_value = int(float(match.group(1)))
             logger.info(f"Detected CRF {crf_value} for {file_path}")
 
+
     # Log HEVC / AV1 detection
     if is_hevc:
-        # logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
+        if crf_value:
+            if crf_value != re_encode_hevc_CRF and warn_CRF_match:
+                logger.warning(f"CRF value of file: {file_path} does not match configured CRF value - file: {crf_value} vs Configured CRF value: {re_encode_hevc_CRF}")
+        else:
+            logger.warning(f"CRF value not found in file: {file_path}")
+        logger.info(f"{file_path} detected as HEVC (H.265). CRF={crf_value}")
         return True
 
     if is_av1:
-        # logger.info(f"{file_path} detected as AV1. CRF={crf_value}")
+        logger.info(f"{file_path} detected as AV1. CRF={crf_value}")
         return True
 
     # logger.info(f"{file_path} codec is '{codec}', not HEVC/AV1")
@@ -1051,28 +1171,19 @@ async def get_video_resolution_and_orientation(video_path: str) -> tuple[str, bo
     # Determine orientation
     is_vertical = height > width
 
-    if is_vertical:
-        if width >= 2160:
-            resolution = "2160p"
-        elif width >= 1440:
-            resolution = "1440p"
-        elif width >= 1080:
-            resolution = "1080p"
-        elif width >= 720:
-            resolution = "720p"
-        else:
-            resolution = f"{width}p"
+    # Resolution is always based on **height**
+    if height >= 2160:
+        resolution = "2160p"
+    elif height >= 1440:
+        resolution = "1440p"
+    elif height >= 1080:
+        resolution = "1080p"
+    elif height >= 720:
+        resolution = "720p"
+    elif height <= 719:
+        resolution = "SD"
     else:
-        if height >= 2160:
-            resolution = "2160p"
-        elif height >= 1440:
-            resolution = "1440p"
-        elif height >= 1080:
-            resolution = "1080p"
-        elif height >= 720:
-            resolution = "720p"
-        else:
-            resolution = f"{height}p"
+        resolution = f"{height}p"
 
     return resolution, is_vertical
 
@@ -1181,31 +1292,174 @@ async def get_video_codec(file_path):
         return None
 
 
-async def update_metadata(input_file, title, description, tpdb_id, matching_mode):
+async def add_mp4_chapters(
+        input_file: str,
+        chapters_list: List[Dict],
+        run_command_func,
+        title,
+        description,
+        tpdb_id,
+        matching_mode
+) -> bool:
+    logger.debug("Chapters detected, Chapters will be applied and only then metadata will be applied.")
+    # logger.debug(f"add_mp4_chapters called for: {input_file}")
+    # logger.debug(f"Incoming chapters_list: {chapters_list}")
+
+    if not chapters_list:
+        # logger.debug("No chapters provided → returning True")
+        return True
+
+    input_path = Path(input_file)
+    output_path = input_path.with_suffix(".chapters_tmp.mp4")
+
+    try:
+        # Sort chapters
+        sorted_chapters = sorted(
+            chapters_list,
+            key=lambda x: x["start_time"]
+        )
+
+        # logger.debug(f"Sorted chapters: {sorted_chapters}")
+
+        # Insert beginning chapter if needed
+        if sorted_chapters and sorted_chapters[0]["start_time"] > 0:
+            # logger.debug("Inserting synthetic 0-start beginning chapter")
+            sorted_chapters.insert(0, {
+                "title": "",
+                "start_time": 0
+            })
+
+        # logger.debug(f"Chapters after beginning check: {sorted_chapters}")
+
+        duration, _ = await get_video_duration(input_file)
+        if not duration:
+            logger.error("Could not read duration from media info")
+            return False
+
+        # Build metadata
+        metadata_lines = [";FFMETADATA1"]
+
+        for i, chapter in enumerate(sorted_chapters):
+            start = float(chapter["start_time"])
+
+            if i + 1 < len(sorted_chapters):
+                end = float(sorted_chapters[i + 1]["start_time"])
+            else:
+                end = duration
+
+            # logger.debug(f"Chapter {i}: start={start}, end={end}, title={chapter['title']}")
+
+            metadata_lines.extend([
+                "[CHAPTER]",
+                "TIMEBASE=1/1",
+                f"START={int(start)}",
+                f"END={int(end)}",
+                f"title={chapter['title']}",
+            ])
+
+        metadata_content = "\n".join(metadata_lines)
+
+        # logger.debug("Generated ffmetadata content:")
+        # logger.debug(metadata_content)
+
+        # Write temp metadata file
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".txt",
+                mode="w",
+                encoding="utf-8"
+        ) as tmp_meta:
+            tmp_meta.write(metadata_content)
+            tmp_meta_path = tmp_meta.name
+
+        # logger.debug(f"Temporary metadata file created: {tmp_meta_path}")
+
+        # ffmpeg command
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", str(input_path),
+            "-i", tmp_meta_path,
+            "-map_metadata", "0",
+            "-map_chapters", "1",
+            "-codec", "copy",
+            str(output_path)
+        ]
+
+        # logger.debug(f"Running ffmpeg command: {ffmpeg_cmd}")
+
+        stdout, stderr, rc = await run_command_func(ffmpeg_cmd)
+
+        # logger.debug(f"ffmpeg rc={rc}")
+        # logger.debug(f"ffmpeg stdout={stdout}")
+        # logger.debug(f"ffmpeg stderr={stderr}")
+
+        if rc != 0:
+            logger.error(f"ffmpeg failed: {stderr}")
+            return False
+
+        if not output_path.exists():
+            logger.error("Output file was not created!")
+            return False
+
+        os.replace(output_path, input_path)
+        # logger.debug("Chapter file successfully replaced original")
+
+        video = MP4(input_file)
+        await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
+        video.save()
+
+        return True
+
+    except Exception:
+        logger.exception(f"Failed to add chapters to {input_file}")
+        return False
+
+    finally:
+        try:
+            if 'tmp_meta_path' in locals() and os.path.exists(tmp_meta_path):
+                # logger.debug(f"Cleaning up temp file: {tmp_meta_path}")
+                for attempt in range(3):
+                    try:
+                        os.remove(tmp_meta_path)
+                        # logger.debug("Temp file removed successfully")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Temp cleanup attempt {attempt + 1} failed: {e}")
+                        await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+
+async def update_metadata(input_file, title, description, tpdb_id, matching_mode, add_timestamps_markers, chapters_list):
     """
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
     """
+    await asyncio.sleep(0.5)
+    # logger.debug(input_file)
+
     try:
-        video = MP4(input_file)
+        if add_timestamps_markers and chapters_list:
+            success = await add_mp4_chapters(
+                input_file,
+                chapters_list,
+                run_command,
+                title,
+                description,
+                tpdb_id,
+                matching_mode
+            )
+            if not success:
+                return False
 
-        # --- update scene data ---
-        video["\xa9nam"] = [title]  # Title
-        if matching_mode != "full_manual":
-            video["\xa9cmt"] = [description]  # Comment/Description
-            video["\xa9alb"] = [tpdb_id]  # TPDB ID
+        else:
+            logger.debug("No chapters detected, metadata will be applied.")
 
-        # --- Remove unwanted ---
-        for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
-            if key in video:
-                del video[key]
+            video = MP4(input_file)
+            await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
+            video.save()
 
-        # Clear encoder info (if not set by your tool)
-        if video.get("\xa9too", [""]) != ["File_Prepare_HF"]:
-            if "\xa9too" in video:
-                del video["\xa9too"]
-
-        video.save()
         return True
 
     except Exception as e:
@@ -1213,32 +1467,18 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
         return False
 
 
-async def update_encoder_metadata(input_file):
-    """
-    Updates the metadata of an MP4 video file, Encoder
+async def apply_mp4_metadata(video, title, description, tpdb_id, matching_mode):
+    video["\xa9nam"] = [title]
 
-    Args:
-        input_file (str): Path to the video file.
+    if matching_mode != "full_manual":
+        video["\xa9cmt"] = [description]
+        video["\xa9alb"] = [tpdb_id]
 
-    Returns:
-        bool: True if the metadata update was successful, False otherwise.
-        param input_file:
-    """
-    try:
-        # Load the MP4 file
-        video = MP4(input_file)
+    for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+        if key in video:
+            del video[key]
 
-        # Update metadata fields
-        video["\xa9too"] = "File_Prepare_HF"  # Encoder
-
-        # Save changes
-        video.save()
-
-        # logger.info(f"Metadata updated successfully for: {input_file}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to update metadata for {input_file}: {e}")
-        return False
+    video["\xa9too"] = ["File_Prepare_HF"]
 
 
 async def reset_all_metadata(file_path: str) -> bool:

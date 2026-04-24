@@ -10,6 +10,7 @@
   "1440p": "/images/2025/11/02/1440p_small.png",
   "1080p": "/images/2025/10/03/1080p_small77cdb8aab8ac9b6f.png",
   "720p": "/images/2025/10/03/720p_small71347d5e6545043b.png",
+  "SD": "/images/2026/01/29/SD_small.png",
   "hevc": "/images/2025/10/03/codec_hevc.png",
   "avc": "/images/2025/10/03/codec_avc.png",
   "av1": "/images/2025/10/03/codec_av1.png",
@@ -18,5 +19,6 @@
   "release_date_button": "/images/2025/10/03/release_date_small.png",
   "performers_button": "/images/2025/10/03/Performers_small0f5b35082edb2ede.png",
   "mediainfo_button": "/images/2025/10/03/mediainfo_small.png",
-  "screens_button": "/images/2025/10/03/screens_button_half.png"
+  "screens_button": "/images/2025/10/03/screens_button_half.png",
+  "tpdb_button": "/images/2026/02/10/tpdb_link_small.png"
 }

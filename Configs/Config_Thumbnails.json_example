@@ -9,5 +9,6 @@
   "fit_thumbs_in_less_rows": true,
   "regeneration_mode": "user input",
   "available_regeneration_modes": ["user input", "force regenerate", "force keep"],
-  "alternate_layout": false
+  "alternate_layout": false,
+  "use_first_frame": false
 }

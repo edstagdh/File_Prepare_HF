@@ -131,7 +131,7 @@ async def init_browser(config):
             from selenium.webdriver.chrome.options import Options as ChromeOptions
 
             logger.info("Launching Chrome...")
-            driver_path = config.get("chrome_driver_path")
+            driver_path = config.get("chromedriver_path")
             if not driver_path or not os.path.exists(driver_path):
                 raise ValueError(f"Invalid or missing Chrome driver path: {driver_path}")
 
@@ -161,7 +161,7 @@ async def init_browser(config):
 
 
 async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files,
-                                    resolution, codec, is_last_tracker):
+                                    resolution_template, codec, is_last_tracker):
     driver = None
     try:
         # Load Config_Tracker.json
@@ -178,6 +178,12 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         if not username or not password or not p_ann_url:
             logger.error("Credentials missing or invalid.")
             return False
+
+        if (codec is None) or (resolution_template is None):
+            from Media_Processing import get_video_resolution_and_orientation, get_video_codec
+            full_file_path = os.path.join(output_dir, f"{new_filename_base_name}.mp4")
+            resolution_template, _ = await get_video_resolution_and_orientation(str(full_file_path))
+            codec = await get_video_codec(full_file_path)
 
         # Additional information
         _, template_name = os.path.split(template_file_full_path)
@@ -275,7 +281,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         driver.get(form_url)
         logger.info(f"Navigated to form page: {form_url}")
         custom_codecs = ["av1", "hevc"]
-        updated_title = f"{new_title} - {codec.upper()} - {resolution}" if codec in custom_codecs else f"{new_title} - {resolution}"
+        updated_title = f"{new_title} - {codec.upper()} - {resolution_template}" if codec in custom_codecs else f"{new_title} - {resolution_template}"
 
         # --- Fill form fields ---
         for field in config.get("form_fields", []):

@@ -10,19 +10,13 @@ from Media_Processing import get_video_duration
 from pymediainfo import MediaInfo
 
 
-async def generate_random_timestamps(duration, count, preferred_min_gap=60, absolute_min_gap=5):
-    """
-    Generates a list of random timestamps within the video duration with a dynamic minimum gap between them.
-
-    Args:
-        duration (float): Duration of the video in seconds.
-        count (int): Number of random timestamps to generate.
-        preferred_min_gap (int): Preferred minimum gap in seconds between timestamps.
-        absolute_min_gap (int): Absolute minimum allowable gap in seconds.
-
-    Returns:
-        list: A sorted list of random timestamps (float).
-    """
+async def generate_random_timestamps(
+        duration,
+        count,
+        use_first_frame,
+        preferred_min_gap=60,
+        absolute_min_gap=5
+):
     if count < 1:
         raise ValueError("Count must be at least 1.")
     if duration <= 1:
@@ -36,6 +30,10 @@ async def generate_random_timestamps(duration, count, preferred_min_gap=60, abso
     attempts = 0
     max_attempts = 1000
 
+    # Force first frame if requested
+    if use_first_frame:
+        timestamps.append(0.0)
+
     while len(timestamps) < count and attempts < max_attempts:
         timestamp = random.uniform(1, duration - 1)
 
@@ -46,7 +44,8 @@ async def generate_random_timestamps(duration, count, preferred_min_gap=60, abso
 
     if len(timestamps) < count:
         raise RuntimeError(
-            f"Failed to generate {count} timestamps with a gap of at least {min_gap:.2f} seconds within duration {duration}."
+            f"Failed to generate {count} timestamps with a gap of at least "
+            f"{min_gap:.2f} seconds within duration {duration}."
         )
 
     return sorted(timestamps)
@@ -68,13 +67,19 @@ async def extract_frame_at_timestamps(video_path, timestamps, output_dir):
         os.makedirs(output_dir, exist_ok=True)
         tasks = []
 
+        semaphore = asyncio.Semaphore(2)  # or 1–4 depending on CPU
+
+        async def run_limited(cmd):
+            async with semaphore:
+                return await run_command(cmd)
+
         for i, ts in enumerate(timestamps, 1):
             output_file = os.path.join(output_dir, f"thumb_{i:04d}.jpg")
             command = (
                 f'ffmpeg -hide_banner -loglevel error -ss {ts:.3f} -i "{video_path}" '
                 f'-frames:v 1 "{output_file}"'
             )
-            tasks.append(run_command(command))
+            tasks.append(run_limited(command))
 
         results = await asyncio.gather(*tasks)
         for idx, (_, stderr, code) in enumerate(results):
@@ -86,14 +91,14 @@ async def extract_frame_at_timestamps(video_path, timestamps, output_dir):
         raise
 
 
-async def add_timestamp_to_frame(image, timestamp, font_full_name):
+async def add_timestamp_to_frame(image, timestamp, font):
     """
     Adds a timestamp to the top-right corner of an image.
 
     Args:
         :param image: The image to which the timestamp will be added.
         :param timestamp: The timestamp to display on the image.
-        :param font_full_name:
+        :param font:
 
     Returns:
         PIL.Image.Image: The image with the added timestamp.
@@ -107,12 +112,6 @@ async def add_timestamp_to_frame(image, timestamp, font_full_name):
 
         # Draw the timestamp in the top right corner
         draw = ImageDraw.Draw(image)
-
-        try:
-            font_path = f"{font_full_name}"
-            font = ImageFont.truetype(font_path, size=32)  # Adjust size here
-        except IOError:
-            font = ImageFont.load_default()  # Fallback if font is not available
 
         # Use textbbox to get the size of the text
         text_bbox = draw.textbbox((0, 0), timestamp_str, font=font)
@@ -214,19 +213,24 @@ async def generate_thumbnails_sheet(image_dir, thumb_width, columns, padding, ou
             image_files = [first_image_file] + remaining_images
             timestamps = [timestamps[0]] + [timestamps[i + 1] for i in random_indexes]
 
+        try:
+            font_path = f"{font_full_name}"
+            font = ImageFont.truetype(font_path, size=32)  # Adjust size here
+        except IOError:
+            font = ImageFont.load_default()  # Fallback if font is not available
+
         for i, file in enumerate(image_files):
-            img = Image.open(file)
+            with Image.open(file) as img:
+                img = img.copy()  # fully load into memory
+
             ratio = thumb_width / img.width
             new_size = (thumb_width, int(img.height * ratio))
-            img = img.resize(new_size)
+            img = img.resize(new_size, Image.Resampling.BILINEAR)
 
-            img = await add_timestamp_to_frame(img, timestamps[i], font_full_name)
+            img = await add_timestamp_to_frame(img, timestamps[i], font)
             thumbs.append(img)
 
-        if is_vertical and fit_thumbs_in_less_rows and len(timestamps) >= 6:
-            rows = int(-(-len(thumbs) // columns / 2))
-        else:
-            rows = int(-(-len(thumbs) // columns))
+        rows = int(-(-len(thumbs) // columns))
 
         thumb_height = thumbs[0].height
 
@@ -743,6 +747,10 @@ async def process_thumbnails(input_video_file_name,
         input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
         input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
 
+        if is_vertical is None:
+            from Media_Processing import get_video_resolution_and_orientation
+            _, is_vertical = await get_video_resolution_and_orientation(str(input_video_full_path))
+
         config, exit_code = await load_json_file("Configs/Config_Thumbnails.json")
         if not config:
             logger.error("Processing failed due to invalid configuration")
@@ -758,6 +766,7 @@ async def process_thumbnails(input_video_file_name,
         fit_thumbs_in_less_rows = config["fit_thumbs_in_less_rows"]
         regeneration_mode = config["regeneration_mode"] if not contains_unwanted_metadata else "force regenerate"
         alternate_layout = config["alternate_layout"]
+        use_first_frame = config["use_first_frame"]
 
         # Check if output file already exists
         exists = await output_file_exists(
@@ -789,7 +798,7 @@ async def process_thumbnails(input_video_file_name,
 
         # Adjust layout for vertical videos
         if is_vertical and fit_thumbs_in_less_rows and num_thumbs >= 6:
-            num_thumbs = int(num_thumbs * 2)
+            num_thumbs = int(num_thumbs)
             columns = int(columns * 2)
             thumb_width = int(thumb_width / 2)
 
@@ -806,9 +815,8 @@ async def process_thumbnails(input_video_file_name,
             logger.error("Failed to extract video file metadata for thumbnails.")
             return False
 
-        timestamps = await generate_random_timestamps(duration, num_thumbs)
+        timestamps = await generate_random_timestamps(duration, num_thumbs, use_first_frame)
         font_path = f"Resources\\{font_full_name}"
-
         import tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
             if add_file_info:

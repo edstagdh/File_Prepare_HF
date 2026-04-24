@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import requests
 from num2words import num2words
@@ -7,13 +8,15 @@ import time
 from loguru import logger
 from datetime import datetime
 from typing import Optional
-from Utilities import load_credentials
+from Utilities import load_credentials, remove_ignored_strings
 
 
-async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
-                            filename_ignore_performer_ID, send_notification, existing_tpdb_id, mode):
+async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+                    filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
+                    mode):
     max_retries = 3
     delay = 5
+    EMPTY_RESULT = (None,) * 14
 
     try:
         work_mode = 4 if jav_api_mode else 1
@@ -21,11 +24,11 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
 
         if not api_scenes_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
 
-        if existing_tpdb_id:
-            # logger.debug(f"using tpdb_id: {existing_tpdb_id}")
-            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_id, max_retries, delay, mode='id')
+        if existing_tpdb_uuid:
+            # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
+            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_uuid, max_retries, delay, mode='id')
             mode = 0
         else:
             if mode == 1:
@@ -44,10 +47,10 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                         # logger.debug(string_advanced_parse_fallback)
                         response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None
+                return EMPTY_RESULT
 
         if response_data is None or not response_data.get('data'):
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
         if mode in [1,2]:
             valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
         else:
@@ -56,34 +59,181 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             if item:
                 valid_entries.append(item)
             else:
-                return None, None, None, None, None, None, None, None, None, None, None, None
+                return EMPTY_RESULT
 
         if not valid_entries:
             logger.error(f"No matching entries for the provided date for string: {query_string}")
-            return None, None, None, None, None, None, None, None, None, None, None, None
+            return EMPTY_RESULT
 
         if len(valid_entries) > 1:
-            logger.warning("More than 1 scene returned in results, please be more specific")
-            selected_entry = await filter_entries_by_user_choice(valid_entries, send_notification)
+            # Duration from file
+            from Media_Processing import get_video_duration, get_existing_title
+            duration, _ = await get_video_duration(file)
+            existing_title = await get_existing_title(file)
+            # Duration formatting
+            try:
+                hours, remainder = divmod(int(duration), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            except Exception as e:
+                logger.error(f"Error formatting duration: {e}")
+                timestamp_str = "N/A"
+            file_info = f"Filename: {file.name} | Duration: {timestamp_str}"
+            if existing_title:
+                file_info += f" | {existing_title}"
+            logger.debug(file_info)
+
+            selected_entry = await select_entry(valid_entries, send_notification)
         else:
             selected_entry = valid_entries[0]
         if selected_entry is None:
             logger.error("No matching entries selected by user.")
-            return None, None, None, None, None, None, None, None, None, None, None, None
-        # Safely extract fields from selected_entry
-        title = selected_entry.get('title')
-        image_url = selected_entry.get('image')
-        alt_image = selected_entry.get("background", {}).get("full")
-        scene_description = selected_entry.get('description')
-        scene_date = selected_entry.get('date')
-        slug = selected_entry.get('slug')
-        url = selected_entry.get('url')
-        tpdb_id = selected_entry.get('id')
+            return EMPTY_RESULT
+        else:
+            tpdb_uuid = selected_entry.get('id')
+            scene_response_data = await send_request(api_scenes_url, api_auth, tpdb_uuid, max_retries, delay, mode='id')
+            if scene_response_data is None:
+                logger.error("Failed to retrieve scene specific data.")
+                return EMPTY_RESULT
+        # Safely extract fields from scene_data
+        scene_data = scene_response_data.get('data')
+        markers = scene_data.get("markers") or None
+
+        _id = scene_data.get("_id")
+        if warn_length_match or add_timestamps_markers:
+            from Media_Processing import get_video_duration
+
+            duration, _ = await get_video_duration(file)
+            scene_duration = scene_data.get("duration")
+            temp_duration = time.strftime('%H:%M:%S', time.gmtime(duration)) if duration is not None else "N/A"
+            formatted_duration = f"{temp_duration} ({scene_duration})"
+
+            if duration is not None and scene_duration is not None and formatted_duration != "N/A":
+                delta = int(abs(duration - scene_duration))
+
+                if delta > 20:
+                    logger.warning(
+                        "Duration mismatch detected: file={} | scene={} | delta={}s ({}) | file_path={}",
+                        duration,
+                        scene_duration,
+                        delta,
+                        formatted_duration,
+                        file,
+                    )
+
+            if duration is not None and markers:
+
+                fixed_markers = []
+
+                for marker in markers:
+                    start = marker.get("start_time")
+                    end = marker.get("end_time")
+                    temp_start = time.strftime('%H:%M:%S', time.gmtime(start)) if start is not None else "N/A"
+                    formatted_start = f"{temp_start} ({start})"
+                    temp_end = time.strftime('%H:%M:%S', time.gmtime(end)) if end is not None else "N/A"
+                    formatted_end = f"{temp_end} ({end})"
+
+                    invalid = False
+                    if start is not None and start > duration:
+                        invalid = True
+                    if end is not None and end > duration:
+                        invalid = True
+
+                    if not invalid:
+                        fixed_markers.append(marker)
+                        continue
+
+                    # Show numbers + timestamp
+                    logger.warning(
+                        "Invalid marker detected: id={} | start={} ({}) | end={} ({}) | video_duration={} ({}) | file={}",
+                        marker.get("id"),
+                        start,
+                        formatted_start if start is not None else "N/A",
+                        end,
+                        formatted_end if end is not None else "N/A",
+                        duration,
+                        formatted_duration,
+                        file
+                    )
+
+                    while True:
+                        await asyncio.sleep(0.5)
+                        choice = input(
+                            f"Marker '{marker.get('title')}' exceeds duration, would you like to (F)ix / (R)emove marker: \n"
+                        ).strip().lower()
+
+                        if choice == "f":
+                            # Fix start_time
+                            if start is not None and start > duration:
+                                while True:
+                                    logger.warning(
+                                        "Marker '{}' start_time ({}) exceeds duration ({}).",
+                                        marker.get("title"), formatted_start, formatted_duration
+                                    )
+                                    await asyncio.sleep(0.5)
+                                    new_start_str = input("Enter corrected start_time in HH:MM:SS\n").strip()
+                                    try:
+                                        # Parse HH:MM:SS to seconds
+                                        h, m, s = map(int, new_start_str.split(":"))
+                                        new_start = h * 3600 + m * 60 + s
+                                        if new_start > duration:
+                                            logger.error("start_time still exceeds video duration.")
+                                            continue
+                                        marker["start_time"] = new_start
+                                        break
+                                    except (ValueError, TypeError):
+                                        logger.error("Invalid timestamp. Format must be HH:MM:SS.")
+
+                            # Fix end_time
+                            if end is not None and end > duration:
+                                while True:
+                                    logger.warning(
+                                        "Marker '{}' end_time ({}) exceeds duration ({}).",
+                                        marker.get("title"), formatted_end, formatted_duration
+                                    )
+                                    await asyncio.sleep(0.5)
+                                    new_end_str = input("Enter corrected end_time in HH:MM:SS\n").strip()
+                                    try:
+                                        # Parse HH:MM:SS to seconds
+                                        h, m, s = map(int, new_end_str.split(":"))
+                                        new_end = h * 3600 + m * 60 + s
+                                        if new_end > duration:
+                                            logger.error("end_time still exceeds video duration.")
+                                            continue
+                                        marker["end_time"] = new_end
+                                        break
+                                    except (ValueError, TypeError):
+                                        logger.error("Invalid timestamp. Format must be HH:MM:SS.")
+
+                            fixed_markers.append(marker)
+                            break
+
+                        elif choice == "r":
+                            logger.info("Removed marker id={}", marker.get("id"))
+                            break
+
+                        else:
+                            logger.error("Invalid choice. Use F/R/S.")
+
+                markers = fixed_markers or None
+
+        # "Clean" title
+        title = scene_data.get('title')
+        clean_title = await remove_ignored_strings(title, title_ignore_strings)
+
+        image_url = scene_data.get('image')
+        tpdb_image_url = scene_data.get("background", {}).get("full")
+        scene_description = scene_data.get('description')
+        scene_date = scene_data.get('date')
+        slug = scene_data.get('slug')
+        url = scene_data.get('url')
+        tpdb_uuid = scene_data.get('id')
+
         if generate_hf_template:
-            scene_tags = await extract_scene_tags(selected_entry)
+            scene_tags = await extract_scene_tags(scene_data)
         else:
             scene_tags = None
-        site = selected_entry.get("site", {}).get("name")
+        site = scene_data.get("site", {}).get("name")
         if "onlyfans" in site.lower() and "fansdb" in site.lower():
             site = site.replace("FansDB: ", "")
             site = site.replace(" (onlyfans)", "")
@@ -97,7 +247,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
             site = site.replace(" (fansly)", "")
             site = "Fansly-" + site
 
-        site_parent = selected_entry.get("site", {}).get("parent")
+        site_parent = scene_data.get("site", {}).get("parent")
         if site_parent and site_parent.get("name", None) == 'ManyVids' and not "Manyvids:" in site:
             site = "Manyvids: " + site
 
@@ -109,7 +259,7 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
         if not manual_mode:
-            female_performers = await extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
+            female_performers = await extract_female_performers(scene_data, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
@@ -125,58 +275,93 @@ async def get_data_from_api(query_string, scene_date, manual_mode, tpdb_scenes_u
                     break
                 female_performers.append((user_input, ""))
         if not female_performers:
-            return title, None, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return clean_title, None, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
         elif "Unknown" in female_performers:
-            return title, "Invalid", image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+            return clean_title, "Invalid", image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
 
-        return title, female_performers, image_url, slug, url, alt_image, site, site_owner, scene_description, scene_date, scene_tags, tpdb_id
+        # logger.debug(f"matched result: {tpdb_uuid} - {site} - {scene_date} - {clean_title} - {female_performers}")
+        return clean_title, female_performers, image_url, slug, url, tpdb_image_url, site, site_owner, scene_description, scene_date, scene_tags, tpdb_uuid, _id, markers
 
     except Exception as e:
         logger.exception(f"An unexpected error occurred in get_data_from_api: {str(e)}")
-        return None, None, None, None, None, None, None, None, None, None, None, None
+        return EMPTY_RESULT
 
 
 async def send_request(api_url, api_auth, query_string, max_retries, delay, mode="parse"):
     if "performers" in api_url:
         url = f"{api_url}{query_string}"
     else:
-        if mode=='id':
+        if mode == "id":
             url = f"{api_url}/{query_string}"
         else:
-            # default to parse
-            url = f"{api_url}?orderBy=recently_released&parse={query_string}&per_page=40&page=1"
+            url = (
+                f"{api_url}?orderBy=recently_released"
+                f"&parse={query_string}&per_page=40&page=1"
+            )
+
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
     }
-    # Debug
+
     # logger.debug(f"Sending request to API: {url}")
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            response_data = response.json()
-            if 'data' in response_data:
-                if attempt > 0:
+
+    while True:  # allows user-triggered retry cycles
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.get(url, headers=headers)
+
+                # Retry only on 5xx
+                if 500 <= response.status_code < 600:
+                    raise requests.HTTPError(
+                        f"Server error {response.status_code}",
+                        response=response
+                    )
+
+                response.raise_for_status()
+                response_data = response.json()
+
+                if attempt > 1:
                     logger.info("Retry successful!")
-                # Debug
-                # logger.info(f"API data fetched successfully for file {query_string}")
-                # logger.debug(response_data)
-                return response_data
+
+                return response_data if "data" in response_data else None
+
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response else "N/A"
+
+                logger.error(
+                    f"Attempt {attempt}/{max_retries} failed "
+                    f"(HTTP {status}): "
+                    f"{str(e).replace(api_url, '**REDACTED**')}"
+                )
+
+                if attempt < max_retries:
+                    logger.warning(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("Maximum retries reached.")
+
+            except requests.RequestException as e:
+                # Non-5xx errors → don't retry automatically
+                logger.error(
+                    f"Non-retryable error: "
+                    f"{str(e).replace(api_url, '**REDACTED**')}"
+                )
+                return None
+
+        # If we reach here → max retries exhausted
+        user_input = input("Retry again? (y/n): ").strip().lower()
+
+        if user_input == "y":
+            logger.info("User chose to retry again.")
+            continue
+        else:
+            logger.warning("User chose to continue without retrying.")
             return None
-        except requests.RequestException as e:
-            logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
-            if attempt < max_retries - 1:
-                logger.warning(f"Retrying in {delay} seconds...")
-                await asyncio.sleep(delay)
-                return None
-            else:
-                logger.error("Maximum retries reached. Request failed.")
-                return None
-    return None
 
 
-async def filter_entries_by_user_choice(valid_entries, send_notification):
+async def select_entry(valid_entries, send_notification):
+    advanced_mode = False
     if len(valid_entries) > 1:
         logger.warning("More than 1 scene returned in results. Please select the one to keep (or choose 0 to select nothing):")
         base_url = "https://theporndb.net/scenes/"
@@ -188,8 +373,14 @@ async def filter_entries_by_user_choice(valid_entries, send_notification):
             )
             performers = ", ".join([p.get('name', 'Unknown') for p in item.get('performers', [])])
             try:
-                logger.info(f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date']} | Duration: {formatted_duration} | Performers: {performers}"
-                            f"\n{item['url']} | {base_url}{item['slug']}")
+                if advanced_mode:
+                    logger.info(
+                        f"{index}. UUID: {item['id']} | Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date'].replace('-', '.')} | Duration: {formatted_duration} | Performers: {performers}"
+                        f"\n{item['url']} | {base_url}{item['slug']}")
+                else:
+                    logger.info(
+                        f"{index}. Studio: {item['site']['name']} | Title: {item['title']} | Date: {item['date'].replace('-', '.')} | Duration: {formatted_duration} | Performers: {performers}"
+                        f"\n{item['url']} | {base_url}{item['slug']}")
             except KeyError:
                 logger.warning(f"{index}. (No title available)")
 
@@ -301,7 +492,7 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
     """
     scene_title = selected_entry.get('title', '(No title available)')
     scene_slug = selected_entry.get('slug', '(No scene available)')
-    scene_url = f"{tpdb_scenes_url}/{scene_slug}"
+    scene_url = f"{tpdb_scenes_url}{scene_slug}"
     temp_performers = []
     while True:
         try:
@@ -315,12 +506,23 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
             response = input("Do you want to provide Manual Performers? (yes/no): ").strip().lower()
             if response in ("yes", "y"):
                 while True:
-                    name = input("Enter Performer (leave blank to finish): ").strip()
-                    if not name:
-                        break
-                    temp_performers.append(name)
-                if temp_performers:
-                    return temp_performers
+                    temp_performers = []  # reset the list at the start of the loop
+                    while True:
+                        name = input("Enter Performer (leave blank to finish, type 'restart' to start over): ").strip()
+
+                        if name.lower() == "restart":
+                            print("Restarting performer entry...")
+                            break  # break inner loop to start over
+
+                        if not name:
+                            break  # finish entering names
+
+                        temp_performers.append(name)
+
+                    # If the inner loop finished normally (not via 'restart'), return the list
+                    if temp_performers and name.lower() != "restart":
+                        return temp_performers
+
             elif response in ("no", "n"):
                 return None
             else:
@@ -610,3 +812,81 @@ async def remove_date_from_text(text: str) -> str:
     # Remove any duplicate or trailing dots caused by the removal
     cleaned = re.sub(r'\.{2,}', '.', cleaned).strip('.')
     return cleaned
+
+
+async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
+    """
+    Checks whether a scene is already collected.
+    If not collected, adds it to the collection.
+
+    This function is intentionally blocking and uses `requests`.
+    """
+
+    if not scene_id:
+        logger.error("Scene ID is required.")
+        return False
+
+    def _request(method: str, url: str, token: str) -> dict | None:
+        """
+        Internal request handler (unique to this function).
+        """
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            response = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout=60
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(
+                    f"{method} request failed [{response.status_code}]: {response.text}"
+                )
+                return None
+
+            return response.json()
+
+        except Exception:
+            logger.exception(f"{method} request failed")
+            return None
+
+    try:
+        api_auth, api_url, _ = await load_credentials(mode=8)
+
+        if not api_auth or not api_url:
+            logger.error("API auth token or URL missing (mode 8).")
+            return False
+        if jav_api_mode:
+            url = f"{api_url}?scene_id={scene_id}&type=JAV"
+        else:
+            url = f"{api_url}?scene_id={scene_id}&type=Scene"
+
+        # ---- 1. CHECK (GET) ----
+        check_response = _request("GET", url, api_auth)
+
+        if not isinstance(check_response, dict) or "value" not in check_response:
+            logger.error(f"Invalid check response for scene {scene_id}: {check_response}")
+            return False
+
+        if check_response["value"] is True:
+            logger.warning(f"Scene {scene_id} already collected.")
+            return True
+
+        # ---- 2. ADD (POST) ----
+        add_response = _request("POST", url, api_auth)
+
+        if add_response is not None:
+            logger.info(f"Scene added to collection.")
+            return True
+
+        logger.error(f"Failed to add scene {scene_id} to collection.")
+        return False
+
+    except Exception:
+        logger.exception("Unexpected error while ensuring scene is collected.")
+        return False

@@ -9,10 +9,10 @@ from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
     generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input
-from TPDB_API_Processing import get_data_from_api
-from Media_Processing import get_existing_title, get_existing_description, get_existing_TPDB_ID, cover_image_download_and_conversion, \
+from TPDB_API import query_api, ensure_scene_collected
+from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
-    reset_all_metadata
+    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update, is_video_hevc_or_av1
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
@@ -40,7 +40,8 @@ async def process_files():
 
         # Matching mode:
         matching_mode = config["scene_matching_mode"]
-        re_match_existing_TPDB_ID = config["force_re_match_using_existing_TPDB_ID"]
+        re_match_existing_tpdb_uuid = config["force_re_match_using_existing_tpdb_uuid"]
+        add_scene_to_collection = config["add_collection"]
 
         # Generate flags, Note - HF Template generation will not work if mediainfo file is set to not generate
         create_cover_image = config["create_cover_image"]
@@ -60,19 +61,21 @@ async def process_files():
         target_size = (target_size_width, target_size_height)
         zoom_factor = config["zoom_factor"]
         blur_kernel_size = config["blur_kernel_size"]
-        re_encode_hevc = config["re_encode_hevc"]
         re_encode_hevc_CRF = config["re_encode_hevc_CRF"]
+        warn_CRF_match = config["warn_crf_match"]
+        warn_length_match = config["warn_length_match"]
+        re_encode_downscale = config["re_encode_downscale"]
         keep_original_file = config["keep_original_file"]
         posters_limit = config["posters_limit"]
         template_file_name = config["template_name"]
-        re_encode_downscale = config["re_encode_downscale"]
         limit_cpu_usage = config["limit_cpu_usage"]
-        remove_chapters = config["remove_chapters"]
+        remove_existing_chapters = config["remove_existing_chapters"]
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
         use_title = config["use_title"]
         title_date_mode = config["title_date_mode"]
+        title_ignore_strings = config["title_ignore_strings"]
         manual_mode_ask_suffix = config["manual_mode_ask_suffix"]
         performer_image_output_format = config["performer_image_output_format"].lower()
         font_full_name = config["font_full_name"]
@@ -226,8 +229,12 @@ async def process_files():
     for file in mp4_files:
         # logger.debug(f"Processing file: {file}")
         force_regen_thumbs = False
+        add_timestamps_markers = config["add_timestamps_markers"]
         pre_suffix = ""
-        tpdb_id = None
+        re_encode_hevc = config["re_encode_hevc"]
+        tpdb_uuid = None
+        tpdb__id = None
+        rename_result = None
         await asyncio.sleep(0.1)
         file_full_name = str(file.name)  # Get the full file_full_name (with extension)
         file_base_name = str(file.stem)  # Get the file_full_name without extension
@@ -236,6 +243,7 @@ async def process_files():
             logger.error(f"Failed to find file: {file_full_name}, moving to next file")
             logger.error(f"End file: {file_full_name}")
             failed_files.append(file_full_name)
+            processed_files += 1
             continue  # Skip to the next file
 
         try:
@@ -251,7 +259,7 @@ async def process_files():
             file_flags = {flag: False for flag in flag_names}
 
             # Prepare lowercase filename and split by '.'
-            file_lower = str(file).lower()
+            file_lower = file.name.lower()
             file_parts = file_lower.split(".")
 
             # Detect flags based on exact token matches
@@ -270,12 +278,11 @@ async def process_files():
             )
 
             # Regex: match 'Part' (case-insensitive), optional spaces, then capture digits
-            match_part = re.search(r"\bPart\s*(\d+)\b", clean_tpdb_check_filename, re.IGNORECASE)
+            match_part = re.search(r"\bPart[\s._-]*(\d+)\b", clean_tpdb_check_filename, re.IGNORECASE)
             if match_part and not filename_ignore_part_x:
                 part_number = match_part.group(1)  # the number after 'Part'
-                pre_suffix += f"Part.{part_number}"
+                pre_suffix += f".Part.{part_number}"
                 logger.info(f"Detected Part in title: {pre_suffix}")
-
             match_res = re.search(r"\.(480p|720p|1080p|1440p|2160p)(?=[\W_]|$)", clean_tpdb_check_filename, re.IGNORECASE)
             if match_res and not filename_ignore_res:
                 resolution = match_res.group(1).lower()
@@ -284,18 +291,17 @@ async def process_files():
                 pre_suffix += f".{resolution.lower()}"
                 logger.info(f"Detected resolution in title: {pre_suffix}")
 
-
-            if re_match_existing_TPDB_ID:
-                existing_tpdb_id = await get_existing_TPDB_ID(file)
+            if re_match_existing_tpdb_uuid:
+                existing_tpdb_uuid = await get_existing_tpdb_uuid(file)
             else:
-                existing_tpdb_id = None
+                existing_tpdb_uuid = None
 
             # Continue with your logic
             if matching_mode == "full_manual":
                 logger.warning(f"Warning - Full Manual mode selected, some features may not work.")
                 # User Input
                 manual_input_data = await full_manual_mode_input(file_base_name, manual_mode_ask_suffix)
-                new_title = manual_input_data["new_title"]
+                scene_title = manual_input_data["scene_title"]
                 performers_names = manual_input_data["performers_names"]
                 image_url = manual_input_data["image_url"]
                 slug = manual_input_data["slug"]
@@ -306,6 +312,7 @@ async def process_files():
                 scene_description = manual_input_data["scene_description"]
                 scene_date = manual_input_data["scene_date"]
                 scene_tags = manual_input_data["scene_tags"]
+
                 if manual_mode_ask_suffix:
                     manual_suffix = manual_input_data["suffix"]
                 else:
@@ -313,6 +320,7 @@ async def process_files():
 
 
                 # Reset flags due to full manual mode.
+                markers_list = None
                 create_cover_image = False
                 create_face_portrait_pic = False
                 imgbox_upload_cover = False
@@ -325,7 +333,9 @@ async def process_files():
                 if any(file_flags.values()):
                     file_base_name = clean_tpdb_check_filename
                 # Query scene data from API
-                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
+                (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
+                    await query_api(
                     file_base_name,
                     None,
                     None,
@@ -335,7 +345,11 @@ async def process_files():
                     jav_api_mode,
                     filename_ignore_performer_ID,
                     send_notification,
-                    existing_tpdb_id,
+                    existing_tpdb_uuid,
+                    file,
+                        title_ignore_strings,
+                        warn_length_match,
+                        add_timestamps_markers,
                     mode=1
                 )
 
@@ -352,6 +366,7 @@ async def process_files():
                     logger.error(f"Invalid file_full_name format: {file_base_name}, moving to next file")
                     logger.warning(f"End file: {file_full_name}")
                     failed_files.append(file_full_name)
+                    processed_files += 1
                     continue  # Skip to the next file
 
                 year, month, day = parts[1], parts[2], parts[3]
@@ -361,6 +376,7 @@ async def process_files():
                     logger.error(f"Invalid date in file_full_name: {file_base_name}, moving to next file")
                     logger.warning(f"End file: {file_full_name}")
                     failed_files.append(file_full_name)
+                    processed_files += 1
                     continue  # Skip to the next file
 
                 # Convert to 4-digit year for scene identification
@@ -368,7 +384,9 @@ async def process_files():
                 scene_api_date = f"{year_full}-{month}-{day}"
 
                 # Query scene data from API
-                new_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio, scene_description, scene_date, scene_tags, tpdb_id = await get_data_from_api(
+                (scene_title, performers_names, image_url, slug, scene_url, tpdb_image_url, tpdb_site, site_studio,
+                 scene_description, scene_date, scene_tags, tpdb_uuid, tpdb__id, markers_list) = \
+                    await query_api(
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
@@ -378,18 +396,23 @@ async def process_files():
                     jav_api_mode,
                     filename_ignore_performer_ID,
                     send_notification,
-                    existing_tpdb_id,
+                    existing_tpdb_uuid,
+                    file,
+                        title_ignore_strings,
+                        warn_length_match,
+                        add_timestamps_markers,
                     mode=2
                 )
             else:
                 logger.error(f"Invalid matching mode: {matching_mode}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
+                processed_files += 1
                 exit(47)
 
             # Prepare critical fields dictionary
             critical_fields = {
-                "new_title": new_title,
+                "scene_title": scene_title,
                 "performers": performers_names,
                 "image_url": image_url,
                 "slug": slug,
@@ -421,6 +444,7 @@ async def process_files():
                 logger.error(f"Failed to find a match via TPDB for file: {file_full_name}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
+                processed_files += 1
                 continue  # Skip to the next file
 
             # Provide fallback for missing description
@@ -458,14 +482,14 @@ async def process_files():
             error_prefix = f"File: {file_full_name} - Failed to get metadata via API"
 
             # Validate title
-            if not new_title or new_title == "Multiple results":
+            if not scene_title or scene_title == "Multiple results":
                 logger.error(f"{error_prefix} - missing or ambiguous title")
                 raise ValueError(f"Unable to find a valid title for {file_full_name}")
 
-            if new_title.endswith(" -"):
-                new_title = new_title[:-2]
-            if new_title.endswith(" - "):
-                new_title = new_title[:-3]
+            if scene_title.endswith(" -"):
+                scene_title = scene_title[:-2]
+            if scene_title.endswith(" - "):
+                scene_title = scene_title[:-3]
 
             # Validate performers (only if not using title as fallback)
             if (not performers_names or performers_names == "Invalid") and not use_title:
@@ -476,6 +500,7 @@ async def process_files():
             logger.error(f"Error in API data for file: {file} - {str(e)}")
             logger.warning(f"End file: {file_full_name}")
             failed_files.append(file_full_name)
+            processed_files += 1
             continue  # Skip to the next file
 
         # Sanitize site name
@@ -499,11 +524,14 @@ async def process_files():
         else:
             suffix = ""
 
+        if not markers_list:
+            add_timestamps_markers = False
+
         # Sanitize and format performers
         formatted_filename_performers_names = await format_performers(performers_names, 2)
 
         # Sanitize title
-        safe_title = await clean_filename(new_title, bad_words, mode=2)
+        safe_title = await clean_filename(scene_title, bad_words, mode=2)
 
         # Compose potential folder names
         if pre_suffix != "":
@@ -559,6 +587,7 @@ async def process_files():
             logger.error(f"Failed to handle folder creation/renaming: {e}")
             logger.warning(f"End file: {file_full_name}")
             failed_files.append(file_full_name)
+            processed_files += 1
             continue  # Skip to the next file
 
         # Format performer names for display/use
@@ -574,7 +603,7 @@ async def process_files():
         else:
             studio_info = tpdb_site
             studio_tag = [tpdb_site]
-        new_title_parts = [studio_info, scene_pretty_date, new_title, formatted_names]
+        new_title_parts = [studio_info, scene_pretty_date, scene_title, formatted_names]
 
         # Remove performers object if None/empty
         if new_title_parts and (new_title_parts[-1] is None or new_title_parts[-1] == ""):
@@ -586,6 +615,7 @@ async def process_files():
             new_title_parts.append(suffix)
 
         # Final filtered join
+
         new_title = " - ".join([p for p in new_title_parts if p])
 
         # Rename existing file to new file_full_name if needed
@@ -598,6 +628,7 @@ async def process_files():
                 # logger.error(f"An error has occurred while attempting to rename the file: {error_msg}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
+                processed_files += 1
                 continue  # Skip to the next file
 
         existing_title = await get_existing_title(new_file_full_path)
@@ -607,49 +638,81 @@ async def process_files():
             contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
             description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
 
-            # Always check metadata — but only *apply* it now if not re-encoding
+            # Always check metadata
             existing_description = await get_existing_description(new_file_full_path)
+            check_encoder = await check_existing_Encoder_Library(new_file_full_path)
+            existing_chapters = await chapters_need_update(new_file_full_path, add_timestamps_markers, markers_list)
+
+            if not existing_chapters:
+                add_timestamps_markers = False
 
             metadata_mismatch = (
                     changed_title or
                     existing_description != description or
-                    existing_tpdb_id != tpdb_id or
-                    contains_unwanted_metadata
+                    contains_unwanted_metadata or
+                    existing_chapters or
+                    check_encoder or
+                    (rename_result is True)
             )
 
-            if not re_encode_hevc:
-                if not metadata_mismatch:
-                    # logger.debug(f"File: {file.name} - Metadata is up to date.")
-                    pass
-                else:
-                    # logger.debug(f"File: {file.name} - Metadata differs or unwanted metadata detected.")
-                    if contains_unwanted_metadata:
-                        remove_metadata_result = await reset_all_metadata(new_file_full_path)
-                        if not remove_metadata_result:
-                            logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
-                            failed_files.append(new_file_full_path)
-                            continue
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id, matching_mode)
-                    if not results_metadata:
-                        logger.error(f"Failed to update metadata for: {new_full_filename}")
-                        failed_files.append(new_file_full_path)
-                        continue
-                    force_regen_thumbs = True
+            if re_match_existing_tpdb_uuid:
+                if existing_tpdb_uuid != tpdb_uuid:
+                    metadata_mismatch = True
+
+            # -----------------------------
+            # RE-ENCODE DECISION FIRST
+            # -----------------------------
+            if re_encode_hevc:
+                is_file_already_re_encoded = await is_video_hevc_or_av1(
+                    new_file_full_path,
+                    warn_CRF_match,
+                    re_encode_hevc_CRF
+                )
             else:
-                # If we will re-encode, just log if metadata mismatch exists (for debugging)
-                if metadata_mismatch:
-                    # logger.debug(f"File: {file.name} - Metadata mismatch detected will be reapplied.")
-                    results_metadata = await update_metadata(new_file_full_path, new_title, description, tpdb_id, matching_mode)
-                    if not results_metadata:
-                        logger.error(f"Failed to update metadata for: {new_full_filename}")
+                is_file_already_re_encoded = False
+
+            if is_file_already_re_encoded:
+                re_encode_hevc = False
+
+            re_encode_required = re_encode_hevc
+
+            # -----------------------------
+            # FINAL DECISION (SINGLE SOURCE OF TRUTH)
+            # -----------------------------
+            metadata_update_required = metadata_mismatch or re_encode_required
+
+            # -----------------------------
+            # SIDE EFFECTS (NO LOGIC HERE)
+            # -----------------------------
+            if metadata_mismatch:
+                logger.debug(f"File: {new_full_filename} - Metadata mismatch detected.")
+
+                if contains_unwanted_metadata:
+                    remove_metadata_result = await reset_all_metadata(new_file_full_path)
+                    if not remove_metadata_result:
+                        logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
+                        logger.warning(f"End file: {new_file_full_path}")
                         failed_files.append(new_file_full_path)
+                        processed_files += 1
                         continue
-                    force_regen_thumbs = True
+
+                force_regen_thumbs = True
+
+            if re_encode_required:
+                logger.debug(f"File: {new_full_filename} - Will re-encode and reapply metadata.")
+                force_regen_thumbs = True
+
+            # logger.debug(metadata_update_required)
 
             new_filename_base_name, extension = os.path.splitext(new_full_filename)
-            fps = await get_video_fps(new_file_full_path)
-            resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
-            codec = await get_video_codec(new_file_full_path)
+
+            # Avoid checking video data if re-encoding is required and create_template_file is enabled
+            if (not re_encode_required) and create_template_file:
+                fps = await get_video_fps(new_file_full_path)
+                resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
+                codec = await get_video_codec(new_file_full_path)
+            else:
+                fps, resolution_template, is_vertical, codec = None, None, None, None
 
             # Disable uploading to imgbox
             if imgbox_upload_thumbnails or imgbox_upload_cover:
@@ -657,10 +720,12 @@ async def process_files():
                     imgbox_upload_cover = False
                     imgbox_upload_thumbnails = False
                     logger.warning(f"upload to imgbox failed due to unsupported image output format on their side")
+
             if not create_cover_image:
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
                 hamster_upload_cover = False
+
             if not create_thumbnails:
                 imgbox_upload_thumbnails = False
                 imgbb_upload_thumbnails = False
@@ -668,6 +733,7 @@ async def process_files():
 
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
+
             thumbnails_file_name = f"{new_filename}.{suffix}_thumbnails.{image_output_format}" if suffix else f"{new_filename}_thumbnails.{image_output_format}"
             thumbnails_file_path = os.path.join(output_directory, thumbnails_file_name)
 
@@ -677,13 +743,13 @@ async def process_files():
 
             if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails or hamster_upload_cover or hamster_upload_thumbnails:
                 fill_img_urls = True
-                # Check if the imgbox file exists and delete it
+
                 if os.path.exists(imgbox_file_path):
                     os.remove(imgbox_file_path)
-                # Check if the imgbb file exists and delete it
+
                 if os.path.exists(imgbb_file_path):
                     os.remove(imgbb_file_path)
-                # Check if the hamster file exists and delete it
+
                 if os.path.exists(hamster_file_path):
                     os.remove(hamster_file_path)
             else:
@@ -691,11 +757,11 @@ async def process_files():
 
             # Define all optional steps and their corresponding conditions and functions
             optional_steps = [
-                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_chapters,
-                                                   contains_unwanted_metadata, re_encode_hevc_CRF]),
+                (re_encode_hevc, re_encode_video, [new_full_filename, directory, keep_original_file, is_vertical, re_encode_downscale, limit_cpu_usage, remove_existing_chapters,
+                                                   re_encode_hevc_CRF]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (re_encode_hevc, update_metadata, [new_file_full_path, new_title, description, tpdb_id, matching_mode]),
+                (metadata_update_required, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,
@@ -722,8 +788,9 @@ async def process_files():
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
-                 [new_title, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec, extension, output_directory, new_filename_base_name,
-                  template_file_full_path, __version__, scene_tags, studio_tag, image_output_format, fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix]),
+                 [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
+                  extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,
+                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix, tpdb_scene_url]),
             ]
             failed = False
             where_failed = None
@@ -742,6 +809,7 @@ async def process_files():
                 logger.error(f"Processing failed for file: {new_file_full_path}, error in: {where_failed}")
                 logger.warning(f"End file: {new_file_full_path}")
                 failed_files.append(new_file_full_path)
+                processed_files += 1
                 continue  # Skip to the next file
             if create_sub_folder:
                 try:
@@ -758,6 +826,7 @@ async def process_files():
                     logger.error(f"Error moving file: {e}")
                     logger.warning(f"End file: {new_file_full_path}")
                     failed_files.append(file_full_name)
+                    processed_files += 1
                     continue  # Skip to the next file
 
             if scene_description == "Scene description not found" and create_template_file:
@@ -797,15 +866,20 @@ async def process_files():
                         logger.error(f"Error uploading to tracker {tracker_name}: {e}")
                         logger.warning(f"End file: {new_file_full_path}")
                         failed_files.append(file_full_name)
+                        processed_files += 1
                         break
 
             processed_files += 1
+            # Add to TPDB Collection
+            if add_scene_to_collection:
+                await ensure_scene_collected(tpdb__id, jav_api_mode)
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:
             logger.exception(f"Error in Data manipulation for file: {new_file_full_path} - {str(e)}")
             logger.warning(f"End file: {new_file_full_path}")
             failed_files.append(file_full_name)
+            processed_files += 1
             continue  # Skip to the next file
 
     # Finished processing
