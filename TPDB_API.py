@@ -269,7 +269,7 @@ async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part
                     result = await send_notification("User input required - Manual Performer Entry")
                     if not result:
                         logger.warning("Notifier failed to send user input request.")
-                    await asyncio.sleep(0.5)
+                await asyncio.sleep(0.5)
                 user_input = input("Enter a value (or type 'exit' to stop): ")
                 if user_input.lower() == 'exit':
                     break
@@ -350,6 +350,7 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
                 return None
 
         # If we reach here → max retries exhausted
+        await asyncio.sleep(0.5)
         user_input = input("Retry again? (y/n): ").strip().lower()
 
         if user_input == "y":
@@ -508,6 +509,7 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
                 while True:
                     temp_performers = []  # reset the list at the start of the loop
                     while True:
+                        await asyncio.sleep(0.5)
                         name = input("Enter Performer (leave blank to finish, type 'restart' to start over): ").strip()
 
                         if name.lower() == "restart":
@@ -553,7 +555,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
                         result = await send_notification(f"User input required - Filter Entries by Date")
                         if not result:
                             logger.warning("Notifier failed to send user input request.")
-                        await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.5)
                     user_input = input(f"The scene title '{item.get('title')}' contains 'interview'. Do you want to exclude it from processing? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
                         logger.info(f"Ignoring scene: {item.get('title')}")
@@ -571,7 +573,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
                         result = await send_notification("User input required - Filter Entries by Date")
                         if not result:
                             logger.warning("Notifier failed to send user input request.")
-                        await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.5)
                     user_input = input(f"The scene '{item.get('title')}' has a date that is {abs((item_date - scene_date).days)} day(s) away from the target date. Do you want to "
                                        f"include it in the results? (y/n): ").strip().lower()
                     if user_input in ["y", "yes"]:
@@ -591,7 +593,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
                     result = await send_notification("User input required - Manual Selection of Entries")
                     if not result:
                         logger.warning("Notifier failed to send user input request.")
-                    await asyncio.sleep(0.5)
+                await asyncio.sleep(0.5)
                 user_input = input("Enter the number of the entry you'd like to select (or press Enter to skip): ").strip()
                 if user_input.isdigit():
                     selection_index = int(user_input) - 1
@@ -655,7 +657,7 @@ async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ig
                     result = await send_notification("User input required - Approve Performer Gender")
                     if not result:
                         logger.warning("Notifier failed to send user input request.")
-                    await asyncio.sleep(0.5)
+                await asyncio.sleep(0.5)
                 user_input = input(f"Treat performer '{performer.get('name', 'Unknown')}' as Female? (yes/no): ").strip().lower()
 
 
