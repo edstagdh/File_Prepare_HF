@@ -11,7 +11,7 @@ from pymediainfo import MediaInfo
 from typing import Union, Sequence, Tuple
 
 CLEAN_CHARS = "!@#$%^&*()_+=’/' :\?"
-INVALID_CHARS = set('\:*/?"<>|')
+INVALID_CHARS = set('\:*/?"<>|’')
 RUN_DEBUG_MODE = False
 
 
@@ -257,7 +257,7 @@ async def sanitize_site_filename_part(input_str):
     Returns:
         str: The sanitized string.
     """
-    translation_table = str.maketrans("", "", ":!@#$%^&*()_+=' ")
+    translation_table = str.maketrans("", "", ":!@#$%^&*()_+='’ ")
     sanitized = input_str.replace(":", "-").replace(".", " ").replace("/", "-")
     sanitized = sanitized.translate(translation_table)
     return sanitized
