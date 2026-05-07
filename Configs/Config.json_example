@@ -7,8 +7,14 @@
     "full_manual": "No matching is done, some functionalities are disabled, manual input required."
   },
   "force_re_match_using_existing_tpdb_uuid": true,
-  "working_path": "G:\\temp8",
-  "use_title": false,
+  "working_path": "G:\\ffmpeg\\Sites\\test2",
+  "filename_mode": "names",
+  "filename_available_modes":
+  {
+    "names": "Names of the performers only.",
+    "title": "The title of the scene only.",
+    "both": "applies both unless too long, then defaults to names."
+  },
   "create_cover_image": false,
   "create_thumbnails": false,
   "create_video_preview" : false,
@@ -19,7 +25,7 @@
   "re_encode_hevc_CRF": 24,
   "add_timestamps_markers": false,
   "warn_crf_match": true,
-  "warn_length_match": false,
+  "warn_length_match": true,
   "re_encode_downscale": false,
   "limit_cpu_usage": true,
   "remove_existing_chapters": true,

@@ -14,7 +14,7 @@ from Image_Uploaders.Upload_IMGBB import imgbb_upload_single_image
 from Image_Uploaders.Upload_Hamster import hamster_upload_single_image
 
 
-async def process_video_preview(new_file_full_path, directory, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode, hamster_upload_previews):
+async def process_video_preview(input_video_file_name, input_video_file_path, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode, hamster_upload_previews):
     # Load Preview Config
     config, exit_code = await load_json_file("Configs/Config_Video_Preview.json")
     if not config:
@@ -51,8 +51,10 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
         preview_quality_resolution = config["preview_quality_resolution"]
         scene_threshold = config["scene_threshold"]
 
-    if new_file_full_path in excluded_files:
-        logger.warning(f"File {new_file_full_path} is in excluded files list and will be ignored - Special Case.")
+    input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
+    input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
+    if input_video_file_name in excluded_files:
+        logger.warning(f"File {input_video_full_path} is in excluded files list and will be ignored - Special Case.")
         return True
 
     font_path = f"Resources/{font_full_name}"
@@ -66,7 +68,8 @@ async def process_video_preview(new_file_full_path, directory, new_filename_base
 
     # Start processing
     # logger.debug(f"processing previews for file: {new_file_full_path}")
-    results = await process_video(new_file_full_path, directory, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments,
+    results = await process_video(input_video_full_path, input_video_file_path, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration,
+                                  num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
@@ -382,7 +385,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 if skip_video:
                     return False
             else:
-                logger.error(f"Could not determine codec for {video_path}")
+                logger.error(f"Could not determine codec for {video_path}\nFFProbe Output: {ffprobe_output}\nError: {stderr}\nExit Code: {exit_code}")
                 return False
 
         except Exception as e:

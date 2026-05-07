@@ -73,7 +73,6 @@ async def process_files():
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
-        use_title = config["use_title"]
         title_date_mode = config["title_date_mode"]
         title_ignore_strings = config["title_ignore_strings"]
         manual_mode_ask_suffix = config["manual_mode_ask_suffix"]
@@ -108,6 +107,16 @@ async def process_files():
         # Notifiers Configuration
         use_notifier = config["use_notifier"]
         notifier_name = config["notifier_name"]
+
+        filename_mode = config.get("filename_mode")
+
+        filename_mode = filename_mode.lower().strip()
+
+        valid_filename_modes = {"title", "names", "both"}
+
+        if filename_mode not in valid_filename_modes:
+            logger.error(f"Invalid filename_mode: {filename_mode}")
+            exit(48)
 
     if await is_supported_major_minor(python_min_version_supported, python_max_version_supported):
         logger.debug(f"✅ Python {sys.version.split()[0]} is within supported range {python_min_version_supported} to {python_max_version_supported}.")
@@ -491,10 +500,13 @@ async def process_files():
             if scene_title.endswith(" - "):
                 scene_title = scene_title[:-3]
 
-            # Validate performers (only if not using title as fallback)
-            if (not performers_names or performers_names == "Invalid") and not use_title:
-                logger.error(f"{error_prefix} - missing or invalid performers")
-                raise ValueError(f"Unable to find valid performers for {file_full_name}")
+            # Validate performers when performer names may be required
+            requires_performer_names = filename_mode in ["names", "both"]
+
+            if requires_performer_names:
+                if not performers_names or performers_names == "Invalid":
+                    logger.error(f"{error_prefix} - missing or invalid performers")
+                    raise ValueError(f"Unable to find valid performers for {file_full_name}")
 
         except Exception as e:
             logger.error(f"Error in API data for file: {file} - {str(e)}")
@@ -533,55 +545,196 @@ async def process_files():
         # Sanitize title
         safe_title = await clean_filename(scene_title, bad_words, mode=2)
 
-        # Compose potential folder names
+        # -------------------------------------------------
+        # Compose filename variants
+        # -------------------------------------------------
+
+        MAX_FILENAME_LENGTH = 200
+
         if pre_suffix != "":
             if scene_date != "0000-00-00":
-                new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}{pre_suffix}"
-                temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}{pre_suffix}"
+                title_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}."
+                    f"{safe_title}{pre_suffix}"
+                )
+
+                names_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}."
+                    f"{formatted_filename_performers_names}{pre_suffix}"
+                )
+
+                both_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}."
+                    f"{formatted_filename_performers_names}."
+                    f"{safe_title}{pre_suffix}"
+                )
+
             else:
-                new_filename = f"{formatted_site}.{safe_title}{pre_suffix}"
-                temp_filename_check = f"{formatted_site}.{formatted_filename_performers_names}{pre_suffix}"
+                title_filename = (
+                    f"{formatted_site}.{safe_title}{pre_suffix}"
+                )
+
+                names_filename = (
+                    f"{formatted_site}.{formatted_filename_performers_names}{pre_suffix}"
+                )
+
+                both_filename = (
+                    f"{formatted_site}."
+                    f"{formatted_filename_performers_names}."
+                    f"{safe_title}{pre_suffix}"
+                )
+
         else:
             if scene_date != "0000-00-00":
-                new_filename = f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
-                temp_filename_check = f"{formatted_site}.{year}.{month}.{day}.{formatted_filename_performers_names}"
-            else:
-                new_filename = f"{formatted_site}.{safe_title}"
-                temp_filename_check = f"{formatted_site}.{formatted_filename_performers_names}"
 
+                title_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}.{safe_title}"
+                )
+
+                names_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}."
+                    f"{formatted_filename_performers_names}"
+                )
+
+                both_filename = (
+                    f"{formatted_site}.{year}.{month}.{day}."
+                    f"{formatted_filename_performers_names}."
+                    f"{safe_title}"
+                )
+
+            else:
+                title_filename = (
+                    f"{formatted_site}.{safe_title}"
+                )
+
+                names_filename = (
+                    f"{formatted_site}.{formatted_filename_performers_names}"
+                )
+
+                both_filename = (
+                    f"{formatted_site}."
+                    f"{formatted_filename_performers_names}."
+                    f"{safe_title}"
+                )
+
+        # Manual suffix support
         if manual_mode_ask_suffix:
-            new_filename += manual_suffix
-            temp_filename_check += manual_suffix
-        # Decide whether to use title-based naming
-        use_title_mode = use_title or len(temp_filename_check) > 200
-        try:
-            if use_title_mode:
-                if create_sub_folder:
-                    # Use title-based folder name
-                    new_folder_name = f"{new_filename}.{suffix}" if suffix else new_filename
-                    new_folder_full_path = os.path.join(directory, new_folder_name)
+            title_filename += manual_suffix
+            names_filename += manual_suffix
+            both_filename += manual_suffix
 
-                    if not os.path.exists(output_directory):
-                        logger.error(f"The folder '{output_directory}' does not exist.")
-                    else:
-                        shutil.rmtree(output_directory)
-                        os.makedirs(new_folder_full_path, exist_ok=True)
-                        logger.success(f"Folder successfully renamed to: '{new_folder_full_path}'")
-                        output_directory = new_folder_full_path
+        # -------------------------------------------------
+        # Filename mode selection
+        # -------------------------------------------------
+
+        if filename_mode == "title":
+
+            selected_filename = title_filename
+
+        elif filename_mode == "names":
+
+            if len(names_filename) > MAX_FILENAME_LENGTH:
+                logger.error(
+                    f"Names filename exceeded max length "
+                    f"({MAX_FILENAME_LENGTH})"
+                )
+
+                logger.error(f"Length: {len(names_filename)}")
+                logger.error(f"Filename: {names_filename}")
+
+                raise ValueError("Names filename too long")
+
+            selected_filename = names_filename
+
+        elif filename_mode == "both":
+
+            # Preferred mode
+            if len(both_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = both_filename
+                # logger.debug("Using combined filename mode(performers + title)")
+
+            # Fallback to names only
+            elif len(names_filename) <= MAX_FILENAME_LENGTH:
+
+                selected_filename = names_filename
+
+                logger.warning(
+                    "Combined filename exceeded max length, "
+                    "falling back to performer names"
+                )
+
+            # Hard fail
             else:
-                if create_sub_folder:
-                    # Use performer-based folder name while adding suffix back
-                    if pre_suffix:
-                        new_folder_name = f"{temp_filename_check}.{pre_suffix}.{suffix}" if suffix else temp_filename_check
-                    else:
-                        new_folder_name = f"{temp_filename_check}.{suffix}" if suffix else temp_filename_check
-                    title_folder_full_path = os.path.join(directory, new_folder_name)
 
-                    if not os.path.exists(title_folder_full_path):
-                        os.rename(output_directory, title_folder_full_path)
-                        logger.success(f"Folder successfully renamed to: '{title_folder_full_path}'")
-                        output_directory = title_folder_full_path
-                new_filename = temp_filename_check
+                logger.error(
+                    "Combined filename and names filename "
+                    "both exceeded max allowed length"
+                )
+
+                logger.error(
+                    f"Combined length: {len(both_filename)}"
+                )
+
+                logger.error(
+                    f"Names length: {len(names_filename)}"
+                )
+
+                raise ValueError(
+                    "All filename strategies exceeded max length"
+                )
+
+        else:
+
+            logger.error(f"Invalid filename mode: {filename_mode}")
+
+            raise ValueError("Invalid filename mode")
+
+        # Final assignment
+        new_filename = selected_filename
+
+        # Validate final path length
+        final_full_filename = (
+            f"{new_filename}.{suffix}{file_extension}"
+            if suffix else
+            f"{new_filename}{file_extension}"
+        )
+
+        full_target_path = os.path.join(directory, final_full_filename)
+
+        # Keep some safety margin below Windows MAX_PATH
+        MAX_FULL_PATH_LENGTH = 240
+
+        if len(full_target_path) > MAX_FULL_PATH_LENGTH:
+            logger.error(
+                f"Full target path exceeds safe limit ({MAX_FULL_PATH_LENGTH})"
+            )
+            logger.error(f"Path length: {len(full_target_path)}")
+            logger.error(f"Path: {full_target_path}")
+
+            raise ValueError("Full target path too long")
+
+        # -------------------------------------------------
+        # Handle folder rename/create
+        # -------------------------------------------------
+        try:
+            if create_sub_folder:
+                new_folder_name = f"{new_filename}.{suffix}" if suffix else new_filename
+                new_folder_full_path = os.path.join(directory, new_folder_name)
+
+                if not os.path.exists(output_directory):
+                    logger.error(f"The folder '{output_directory}' does not exist.")
+                else:
+                    if os.path.exists(new_folder_full_path):
+                        logger.warning(
+                            f"Target folder already exists: {new_folder_full_path}"
+                        )
+                    else:
+                        os.rename(output_directory, new_folder_full_path)
+                        logger.success(
+                            f"Folder successfully renamed to: '{new_folder_full_path}'"
+                        )
+
+                    output_directory = new_folder_full_path
 
         except Exception as e:
             logger.error(f"Failed to handle folder creation/renaming: {e}")
@@ -894,7 +1047,7 @@ async def process_files():
 
 
 if __name__ == "__main__":
-    logger.add("Logs/App_Log_{time:YYYY.MMMM}.log", rotation="30 days", backtrace=True, enqueue=False, catch=True)  # Load Logger
+    logger.add("Logs/App_Log_{time:YYYY.MMMM.DD}.log", rotation="5 days", backtrace=True, enqueue=False, catch=True)  # Load Logger
     ffmpeg_ffprobe_results, ff_exit_code = asyncio.run(verify_ffmpeg_and_ffprobe())
     if not ffmpeg_ffprobe_results:
         exit(ff_exit_code)

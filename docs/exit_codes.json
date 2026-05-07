@@ -32,6 +32,7 @@
   "45": "Notifier code file not found.",
   "46": "Failed to import notifier",
   "47": "Invalid matching mode",
+  "48": "Invalid filename_mode",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"
