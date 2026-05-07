@@ -343,7 +343,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             ffprobe_cmd = (
                 f'ffprobe -v 0 -select_streams v:0 '
                 f'-show_entries stream_side_data=rotation '
-                f'-of default=nw=1:nk=1 \""{video_path}"\"'
+                f'-of default=nw=1:nk=1 "{video_path}"'
             )
             ffprobe_output, stderr, exit_code = await run_command(ffprobe_cmd)
             if exit_code == 0:
@@ -362,7 +362,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 f'ffprobe -v error -select_streams v:0 '
                 f'-show_entries stream=width,height,codec_name '
                 f'-probesize 50M -analyzeduration 50M '  # Increase probing for .TS files
-                f'-of csv=s=x:p=0 \""{video_path}"\"'
+                f'-of csv=s=x:p=0 "{video_path}"'
             )
             ffprobe_output, stderr, exit_code = await run_command(ffprobe_cmd)
 
@@ -460,7 +460,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webp_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-vf \"fps={webp_preview_fps},{scale_option}:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}\""
+                f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}"
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
@@ -485,7 +485,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webm_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
                 f"-c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
-                f"-crf 20 -deadline good -cpu-used 4 \"{output_webm}\""
+                f"-crf 20 -deadline good -cpu-used 4 \"{output_webm}"
             )
             stdout, stderr, exit_code = await run_command(webm_command)
             if exit_code == 0 and os.path.exists(output_webm):
@@ -505,7 +505,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         if create_gif_preview and concat_result_gif_path:
             gif_command = (
                 f"ffmpeg -hide_banner -y -i \"{concat_result_gif_path}\" -vf \"fps={gif_preview_fps},{scale_option}:flags=lanczos,"
-                f"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{output_gif}\""
+                f"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{output_gif}"
             )
             stdout, stderr, exit_code = await run_command(gif_command)
             if exit_code == 0 and os.path.exists(output_gif):
@@ -1051,7 +1051,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             inputs_tags = ''.join(f'[{i}:v]' for i in range(num_inputs))
             filter_complex = f"{inputs_tags}hstack=inputs={num_inputs}[v]"
 
-            command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}\""
+            command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}"
             stdout, stderr, exit_code = await run_command(command)
             if exit_code != 0:
                 logger.error(f"Error running ffmpeg command for stacked video {index + 1}: {stdout}\n{stderr}\nCommand: {command}")
@@ -1065,18 +1065,18 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         filter_inputs = []
 
         if add_file_info:
-            input_files_list.append(f"-i \"{final_image_video_path}\"")
+            input_files_list.append(f"-i \"{final_image_video_path}")
             filter_inputs.append(f"[0:v]")
 
         # Add intermediate stacked video inputs
         for idx, file in enumerate(intermediate_files):
-            input_files_list.append(f"-i \"{file}\"")
+            input_files_list.append(f"-i \"{file}")
             filter_inputs.append(f"[{idx + (1 if add_file_info else 0)}:v]")
 
         input_files_str = ' '.join(input_files_list)
         filter_complex_str = ''.join(filter_inputs) + f"vstack=inputs={len(filter_inputs)}[v]"
 
-        command = f"ffmpeg -hide_banner {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}\""
+        command = f"ffmpeg -hide_banner {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}"
         stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
             logger.error(f"Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}")
@@ -1109,7 +1109,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         if create_webp_preview_sheet:
             webp_command = (
                 f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"fps={webp_preview_fps},scale=iw:ih:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}\""
+                f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}"
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code != 0:
@@ -1133,7 +1133,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         if create_webm_preview_sheet:
             webm_command = (
                 f"ffmpeg -hide_banner -y -i \"{final_output}\" -c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
-                f"-crf 20 -deadline good -cpu-used 4 \"{preview_sheet_webm}\""
+                f"-crf 20 -deadline good -cpu-used 4 \"{preview_sheet_webm}"
             )
             stdout, stderr, exit_code = await run_command(webm_command)
             if exit_code != 0:
@@ -1145,7 +1145,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         if create_gif_preview_sheet:
             gif_command = (
                 f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos,fps={gif_preview_fps}\" "
-                f"\"{preview_sheet_gif}\""
+                f"{preview_sheet_gif}"
             )
             stdout, stderr, exit_code = await run_command(gif_command)
             if exit_code != 0:
@@ -1472,7 +1472,7 @@ async def create_video_from_image(image_path, output_path, fps, duration=1):
         # Run the FFmpeg command to create the video
         stdout, stderr, exit_code = await run_command(ffmpeg_command)
         if exit_code == 0:
-            # logger.debug(f"Video created successfully: \"{output_path}\"")
+            # logger.debug(f"Video created successfully: \"{output_path}")
             pass
         else:
             logger.error(f"Error creating video: {stderr}")
