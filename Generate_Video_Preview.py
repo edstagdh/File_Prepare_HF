@@ -54,10 +54,10 @@ async def process_video_preview(input_video_file_name, input_video_file_path, ne
     input_video_file_base_name, _ = os.path.splitext(input_video_file_name)
     input_video_full_path = os.path.join(input_video_file_path, input_video_file_name)
     if input_video_file_name in excluded_files:
-        logger.warning(f"File {input_video_full_path} is in excluded files list and will be ignored - Special Case.")
+        logger.warning(f'File {input_video_full_path} is in excluded files list and will be ignored - Special Case.')
         return True
 
-    font_path = f"Resources/{font_full_name}"
+    font_path = f'Resources/{font_full_name}'
 
     # Verify Segments and Grid values
     is_valid = await validate_preview_sheet_requirements(grid_width, num_of_segments, number_of_segments_gif, create_webp_preview_sheet, create_webm_preview_sheet,
@@ -67,7 +67,7 @@ async def process_video_preview(input_video_file_name, input_video_file_path, ne
         return False
 
     # Start processing
-    # logger.debug(f"processing previews for file: {new_file_full_path}")
+    # logger.debug(f'processing previews for file: {new_file_full_path}")
     results = await process_video(input_video_full_path, input_video_file_path, keep_temp_files, add_black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration,
                                   num_of_segments,
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
@@ -96,26 +96,26 @@ async def validate_preview_sheet_requirements(grid_width: int, num_of_segments: 
 
         # Validate grid width and divisibility
         if not isinstance(num_of_segments, (int, float)):
-            raise TypeError(f"Invalid input: {num_of_segments} is not a number")
+            raise TypeError(f'Invalid input: {num_of_segments} is not a number')
 
         if grid_width == 3:
             if num_of_segments % 3 != 0:
-                raise ValueError(f"{num_of_segments} is not divisible by 3")
+                raise ValueError(f'{num_of_segments} is not divisible by 3')
             if num_of_segments < 9:
-                raise ValueError(f"{num_of_segments} is too low for sheet creation.")
+                raise ValueError(f'{num_of_segments} is too low for sheet creation.')
             if num_of_segments > 30:
-                raise ValueError(f"{num_of_segments} is too high for sheet creation.")
+                raise ValueError(f'{num_of_segments} is too high for sheet creation.')
 
         elif grid_width == 4:
             if num_of_segments % 4 != 0:
-                raise ValueError(f"{num_of_segments} is not divisible by 4")
+                raise ValueError(f'{num_of_segments} is not divisible by 4')
             if num_of_segments < 12:
-                raise ValueError(f"{num_of_segments} is too low for sheet creation.")
+                raise ValueError(f'{num_of_segments} is too low for sheet creation.')
             if num_of_segments > 28:
-                raise ValueError(f"{num_of_segments} is too high for sheet creation.")
+                raise ValueError(f'{num_of_segments} is too high for sheet creation.')
 
         else:
-            logger.error(f"Unsupported grid setting: {grid_width}")
+            logger.error(f'Unsupported grid setting: {grid_width}')
             return False
 
         return True
@@ -139,7 +139,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
     """
 
     if not os.path.exists(concat_list_file):
-        logger.error(f"Concat list file does not exist: {concat_list_file}")
+        logger.error(f'Concat list file does not exist: {concat_list_file}')
         return False, None
 
     # Determine temp file path (same folder as concat_list_file)
@@ -153,7 +153,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
         ]
 
     if not segment_files:
-        logger.error(f"No videos found in concat list: {concat_list_file}")
+        logger.error(f'No videos found in concat list: {concat_list_file}')
         return False, None
 
     # Only one video, just copy
@@ -167,7 +167,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
         cmd = f'ffmpeg -hide_banner -f concat -safe 0 -i "{concat_list_file}" -c copy "{output_file}" -y'
         stdout, stderr, code = await run_command(cmd)
         if code != 0 or not os.path.exists(output_file):
-            logger.error(f"Simple concat failed: {stderr}")
+            logger.error(f'Simple concat failed: {stderr}')
             return False, None
         return True, output_file
 
@@ -184,7 +184,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
     else:
         transitions = [transition_mode] * (len(segment_files) - 1)
 
-    # logger.debug(f"Using transitions: {transitions}")
+    # logger.debug(f'Using transitions: {transitions}")
 
     if transition_mode in ["fade", "fadeblack"]:
         temp_first_fade = os.path.join(temp_folder, "first_fade.mp4")
@@ -197,7 +197,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
         )
         stdout, stderr, code = await run_command(cmd_fade_in)
         if code != 0 or not os.path.exists(temp_first_fade):
-            logger.error(f"Fade-in failed for {segment_files[0]}: {stderr}")
+            logger.error(f'Fade-in failed for {segment_files[0]}: {stderr}')
             return False, None
 
         prev_clip = temp_first_fade
@@ -225,7 +225,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
 
         stdout, stderr, code = await run_command(cmd)
         if code != 0 or not os.path.exists(temp_file_after):
-            logger.error(f"Concat failed between {prev_clip} and {next_clip}: {stderr}")
+            logger.error(f'Concat failed between {prev_clip} and {next_clip}: {stderr}')
             return False, None
 
         # Rename after concat
@@ -254,7 +254,7 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
         )
         stdout, stderr, code = await run_command(cmd_fade_out)
         if code != 0 or not os.path.exists(temp_final_fade):
-            logger.error(f"Fade-out failed for {output_file}: {stderr}")
+            logger.error(f'Fade-out failed for {output_file}: {stderr}')
             return False, None
 
         os.replace(temp_final_fade, output_file)
@@ -268,16 +268,16 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
                         available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold):
     if black_bars:
-        new_filename_base_name = f"{new_filename_base_name}_black_bars"
+        new_filename_base_name = f'{new_filename_base_name}_black_bars'
 
-    temp_folder = os.path.join(directory, f"{new_filename_base_name}-temp")
+    temp_folder = os.path.join(directory, f'{new_filename_base_name}-temp')
     output_directory = custom_output_path if custom_output_path else directory
-    output_webp = os.path.join(output_directory, f"{new_filename_base_name}_preview.webp")
-    output_webm = os.path.join(output_directory, f"{new_filename_base_name}_preview.webm")
-    output_gif = os.path.join(output_directory, f"{new_filename_base_name}_preview.gif")
-    preview_sheet_gif = os.path.join(output_directory, f"{new_filename_base_name}_preview_sheet.gif")
-    preview_sheet_webp = os.path.join(output_directory, f"{new_filename_base_name}_preview_sheet.webp")
-    preview_sheet_webm = os.path.join(output_directory, f"{new_filename_base_name}_preview_sheet.webm")
+    output_webp = os.path.join(output_directory, f'{new_filename_base_name}_preview.webp')
+    output_webm = os.path.join(output_directory, f'{new_filename_base_name}_preview.webm')
+    output_gif = os.path.join(output_directory, f'{new_filename_base_name}_preview.gif')
+    preview_sheet_gif = os.path.join(output_directory, f'{new_filename_base_name}_preview_sheet.gif')
+    preview_sheet_webp = os.path.join(output_directory, f'{new_filename_base_name}_preview_sheet.webp')
+    preview_sheet_webm = os.path.join(output_directory, f'{new_filename_base_name}_preview_sheet.webm')
 
     # Sample file checks
     file_checks = [
@@ -330,7 +330,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
     create_gif_preview_sheet = updated_create_flags['gif_sheet']
     create_webm_preview_sheet = updated_create_flags['webm_sheet']
 
-    # logger.debug(f"Preview flags: {updated_create_flags}")
+    # logger.debug(f'Preview flags: {updated_create_flags}")
     skip_video = False
     codec_name = None
     width = None
@@ -350,11 +350,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                 # Check if rotation is detected
                 if ffprobe_output:
                     if ffprobe_output.strip() != "0":
-                        logger.error(f"Video has rotation metadata: {ffprobe_output.strip()} degrees, this would cause issues generating segments, skipping this file, "
-                                     f"please fix rotation before trying to create previews for this file.")
+                        logger.error(f'Video has rotation metadata: {ffprobe_output.strip()} degrees, this would cause issues generating segments, skipping this file, '
+                                     f'please fix rotation before trying to create previews for this file.')
                         return False  # Skip to the next file
                     else:
-                        # logger.debug(f"No rotation detected for {video_path}. Proceeding with processing.")
+                        # logger.debug(f'No rotation detected for {video_path}. Proceeding with processing.")
                         pass
 
             # Proceed with codec and resolution checks
@@ -373,19 +373,19 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         codec_name = parts[0]
                         width, height = map(int, parts[1:3])
                         if codec_name == "msmpeg4v3":
-                            logger.error(f"Video uses unsupported codec: {codec_name}. Requires full re-encoding.")
+                            logger.error(f'Video uses unsupported codec: {codec_name}. Requires full re-encoding.')
                             skip_video = True
                     else:
-                        logger.error(f"Unexpected ffprobe output format: {ffprobe_output}")
+                        logger.error(f'Unexpected ffprobe output format: {ffprobe_output}')
                         skip_video = True
                 except (ValueError, IndexError) as e:
-                    logger.error(f"Could not determine codec for {video_path}: error: {e}")
+                    logger.error(f'Could not determine codec for {video_path}: error: {e}')
                     skip_video = True
 
                 if skip_video:
                     return False
             else:
-                logger.error(f"Could not determine codec for {video_path}\nFFProbe Output: {ffprobe_output}\nError: {stderr}\nExit Code: {exit_code}")
+                logger.error(f'Could not determine codec for {video_path}\nFFProbe Output: {ffprobe_output}\nError: {stderr}\nExit Code: {exit_code}')
                 return False
 
         except Exception as e:
@@ -399,7 +399,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
 
         # Determine if video is vertical
         is_vertical = width < height
-        # logger.debug(f"Processing file: {video_path}, Resolution: {width}x{height}, Vertical: {is_vertical}")
+        # logger.debug(f'Processing file: {video_path}, Resolution: {width}x{height}, Vertical: {is_vertical}")
 
         # Get video duration
         duration_output, stderr, exit_code = await run_command(
@@ -407,16 +407,16 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             f'-of default=noprint_wrappers=1:nokey=1 -i "{video_path}"'
         )
         if not duration_output:
-            logger.error(f"Failed to retrieve video duration: {video_path}")
+            logger.error(f'Failed to retrieve video duration: {video_path}')
             return False
         try:
             duration = float(duration_output)
         except ValueError:
-            logger.error(f"Invalid duration format returned by ffprobe: {duration_output}")
+            logger.error(f'Invalid duration format returned by ffprobe: {duration_output}')
             return False
         required_duration = 150
         if duration <= required_duration:
-            logger.error(f"Video duration is too short. Minimum required duration is {required_duration} seconds.")
+            logger.error(f'Video duration is too short. Minimum required duration is {required_duration} seconds.')
             return False
         # Determine if any preview sheet is required
         preview_sheet_required = any([
@@ -439,11 +439,11 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             concat_list_preview_gif = concat_list_preview
 
         # Concat the videos into 1 before continuing
-        concat_output_file = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile.mp4")
+        concat_output_file = os.path.join(temp_folder, f'{new_filename_base_name}_concatOutputfile.mp4')
 
         concat_result, concat_result_path = await concat_video_segments(concat_list_preview, concat_output_file, transition_mode, available_transitions, transition_duration)
         if not concat_result or not concat_result_path:
-            logger.error(f"Failed to concatenate video segments concat file")
+            logger.error(f'Failed to concatenate video segments concat file')
             return False
 
         if is_vertical:
@@ -458,72 +458,72 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
         # Create Preview WebP
         if create_webp_preview:
             webp_command = (
-                f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
-                f"-vf \"fps={webp_preview_fps},{scale_option}:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 \"{output_webp}"
+                f'ffmpeg -hide_banner -y -i "{concat_result_path}" '
+                f'-vf "fps={webp_preview_fps},{scale_option}:flags=lanczos" '
+                f'-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 "{output_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
-                logger.success(f"Preview WebP created successfully: {output_webp}")
+                logger.success(f'Preview WebP created successfully: {output_webp}')
                 if upload_previews_imgbb:
                     upload_result = await imgbb_upload_single_image(output_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview WebP")
                     if upload_result:
-                        logger.success(f"Preview WebP uploaded successfully: {output_webp}")
+                        logger.success(f'Preview WebP uploaded successfully: {output_webp}')
                     else:
-                        logger.error(f"Upload failed for file: {output_webp}")
+                        logger.error(f'Upload failed for file: {output_webp}')
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(output_webp, new_filename_base_name, "Preview WebP")
                     if upload_result:
-                        logger.success(f"Preview WebP uploaded successfully: {output_webp}")
+                        logger.success(f'Preview WebP uploaded successfully: {output_webp}')
                     else:
-                        logger.error(f"Upload failed for file: {output_webp}")
+                        logger.error(f'Upload failed for file: {output_webp}')
             else:
-                logger.error(f"Failed to create WebP: {stderr}")
+                logger.error(f'Failed to create WebP: {stderr}')
                 return False
         # Create Preview WebM
         if create_webm_preview:
             webm_command = (
-                f"ffmpeg -hide_banner -y -i \"{concat_result_path}\" "
-                f"-c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
-                f"-crf 20 -deadline good -cpu-used 4 \"{output_webm}"
+                f'ffmpeg -hide_banner -y -i "{concat_result_path}" '
+                f'-c:v libvpx-vp9 -b:v 3M -vf "scale=iw:ih:flags=lanczos" '
+                f'-crf 20 -deadline good -cpu-used 4 "{output_webm}"'
             )
             stdout, stderr, exit_code = await run_command(webm_command)
             if exit_code == 0 and os.path.exists(output_webm):
-                logger.success(f"Preview WebM created successfully: {output_webm}")
+                logger.success(f'Preview WebM created successfully: {output_webm}')
             else:
-                logger.error(f"Failed to create WebM: {stderr}")
+                logger.error(f'Failed to create WebM: {stderr}')
                 return False
         # Create concat video file for gif if create_gif_preview is true
         if create_gif_preview:
-            concat_output_file_gif = os.path.join(temp_folder, f"{new_filename_base_name}_concatOutputfile_gif.mp4")
+            concat_output_file_gif = os.path.join(temp_folder, f'{new_filename_base_name}_concatOutputfile_gif.mp4')
             concat_result_gif, concat_result_gif_path = await concat_video_segments(concat_list_preview_gif, concat_output_file_gif, transition_mode, available_transitions,
                                                                                     transition_duration)
             if not concat_result_gif or not concat_result_gif_path:
-                logger.error(f"Failed to concatenate video segments concat file")
+                logger.error(f'Failed to concatenate video segments concat file')
                 return False
         # Create the preview gif if the concat output file has been created and its set to create gif
         if create_gif_preview and concat_result_gif_path:
             gif_command = (
-                f"ffmpeg -hide_banner -y -i \"{concat_result_gif_path}\" -vf \"fps={gif_preview_fps},{scale_option}:flags=lanczos,"
-                f"split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{output_gif}"
+                f'ffmpeg -hide_banner -y -i "{concat_result_gif_path}" -vf "fps={gif_preview_fps},{scale_option}:flags=lanczos,'
+                f'split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" -loop 0 "{output_gif}"'
             )
             stdout, stderr, exit_code = await run_command(gif_command)
             if exit_code == 0 and os.path.exists(output_gif):
-                logger.success(f"Preview GIF created successfully: {output_gif}")
+                logger.success(f'Preview GIF created successfully: {output_gif}')
                 if upload_previews_imgbb:
                     upload_result = await imgbb_upload_single_image(output_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview GIF")
                     if upload_result:
-                        logger.success(f"Preview GIF uploaded successfully: {output_gif}")
+                        logger.success(f'Preview GIF uploaded successfully: {output_gif}')
                     else:
-                        logger.error(f"Upload failed for file: {output_gif}")
+                        logger.error(f'Upload failed for file: {output_gif}')
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(output_gif, new_filename_base_name, "Preview GIF")
                     if upload_result:
-                        logger.success(f"Preview GIF uploaded successfully: {output_gif}")
+                        logger.success(f'Preview GIF uploaded successfully: {output_gif}')
                     else:
-                        logger.error(f"Upload failed for file: {output_gif}")
+                        logger.error(f'Upload failed for file: {output_gif}')
             else:
-                logger.error(f"Failed to create GIF: {stderr}")
+                logger.error(f'Failed to create GIF: {stderr}')
                 return False
 
         # Sheet Creation Segment
@@ -541,7 +541,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             # logger.debug("Temporary files removed")
             pass
 
-        # logger.debug(f"Finished processing file: {video_path}")
+        # logger.debug(f'Finished processing file: {video_path}")
         await asyncio.sleep(0.5)
         return True
     else:
@@ -561,9 +561,9 @@ async def format_duration(seconds):
         hours = seconds // 3600
         minutes = (seconds % 3600) // 60
         seconds = seconds % 60
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
+        return f'{hours:02}:{minutes:02}:{seconds:02}'
     except Exception as e:
-        logger.error(f"Error formatting duration: {e}")
+        logger.error(f'Error formatting duration: {e}')
         return "00:00:00"
 
 
@@ -573,20 +573,20 @@ async def ask_delete_file(file_path, ignore_existing):
         if ignore_existing:
             choice = "yes"
         else:
-            choice = input(f"Do you want to delete existing file: '{file_path}'? (yes/no): ").strip().lower()
+            choice = input(f'Do you want to delete existing file: "{file_path}"? (yes/no): ').strip().lower()
 
         if choice in ["yes", "y"]:
             os.remove(file_path)
-            # logger.debug(f"Deleted existing file: {file_path}")
+            # logger.debug(f'Deleted existing file: {file_path}")
             return True
         elif choice in ["no", "n"]:
-            # logger.debug(f"Skipped file: {file_path}")
+            # logger.debug(f'Skipped file: {file_path}")
             return False
         else:
             logger.warning("Invalid input. Skipping file by default.")
             return False
     except Exception as e:
-        logger.error(f"Error while processing file: {e}")
+        logger.error(f'Error while processing file: {e}')
         return False
 
 
@@ -612,8 +612,8 @@ async def generate_cut_points(
                 break
             segment_cut_duration = round(segment_cut_duration - 0.1, 2)
             logger.debug(
-                f"cut point generation has failed {calc_failed_counter} times, "
-                f"reducing segment cut duration by 0.1 to {segment_cut_duration}"
+                f'cut point generation has failed {calc_failed_counter} times, '
+                f'reducing segment cut duration by 0.1 to {segment_cut_duration}'
             )
 
         # Start / end percentages
@@ -665,7 +665,7 @@ async def generate_cut_points(
         scene_change_found = False
         for ts in cut_points_seconds:
             if await check_scene_changes_at_timestamp(video_path, ts, segment_cut_duration, scene_threshold):
-                # logger.debug(f"Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
+                # logger.debug(f'Scene change detected at cut point {i}: {ts:.2f} seconds. Regenerating cut points...")
                 scene_change_found = True
                 break
 
@@ -680,7 +680,7 @@ async def generate_cut_points(
                 time_in_seconds = pct * duration
                 formatted_time = await format_duration(time_in_seconds)
                 logger.debug(
-                    f"Segment {i}: {pct:.2%} | Time: {formatted_time} ({time_in_seconds})"
+                    f'Segment {i}: {pct:.2%} | Time: {formatted_time} ({time_in_seconds})'
                 )
 
             if confirm_cut_points_required:
@@ -726,7 +726,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
         h_scale = "1920:1080"
     else:
         if height < 720 and width < 1280:
-            h_scale = f"{width}:{height}"
+            h_scale = f'{width}:{height}'
         else:
             h_scale = "1280:720"
 
@@ -736,7 +736,7 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
         v_scale = "1080:1920"
     else:
         if height < 1280 and width < 720:
-            v_scale = f"{width}:{height}"
+            v_scale = f'{width}:{height}'
         else:
             v_scale = "720:1280"
 
@@ -749,27 +749,27 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
             start_time_formatted = await format_time_filename(start)
             temp_file = os.path.join(
                 temp_folder,
-                f"{filename_without_ext}_start-{start_time_formatted}_cutpoint-{index}_position-{start:.2f}.mp4"
+                f'{filename_without_ext}_start-{start_time_formatted}_cutpoint-{index}_position-{start:.2f}.mp4'
             )
 
             # Choose FFmpeg command based on aspect ratio settings
             if is_vertical and black_bars:
-                vf_filter = f"scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2"
+                vf_filter = f'scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2'
             elif is_vertical:
-                vf_filter = f"scale={v_scale}"
+                vf_filter = f'scale={v_scale}'
             else:
-                vf_filter = f"scale={h_scale}"
+                vf_filter = f'scale={h_scale}'
 
             ffmpeg_segment_command = (
-                f"ffmpeg -hide_banner -ss {start} -i \"{video_path}\" -map 0:v:0 -c:v libx264 -crf 23 -preset fast "
-                f"-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} "
-                f"-vf \"{vf_filter}\" \"{temp_file}\" -y"
+                f'ffmpeg -hide_banner -ss {start} -i "{video_path}" -map 0:v:0 -c:v libx264 -crf 23 -preset fast '
+                f'-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} '
+                f'-vf "{vf_filter}" "{temp_file}" -y'
             )
 
             stdout, stderr, exit_code = await run_command(ffmpeg_segment_command)
 
             if exit_code != 0 or not os.path.exists(temp_file):
-                logger.error(f"Failed to extract segment {index} at {start} seconds")
+                logger.error(f'Failed to extract segment {index} at {start} seconds')
                 if temp_file in temp_files_webp:
                     temp_files_webp.remove(temp_file)  # Remove failed segment from list
                 continue
@@ -801,21 +801,22 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
     # scene_threshold = 0.4
     try:
         # Run FFmpeg command to get the frame information
+        vf = f"select='gt(scene,{scene_threshold})',showinfo"
         probe_command = (
             f'ffmpeg -hide_banner -ss {max(timestamp - 0.1, 0)} -t {segment_cut_duration + 0.1} -i "{video_path}" '
-            f'-vf "select=\'gt(scene,{scene_threshold})\',showinfo" -an -f null -'
+            f'-vf "{vf}"'
         )
 
-        # logger.debug(f"Running command: {probe_command}")
+        # logger.debug(f'Running command: {probe_command}")
         stdout, stderr, exit_code = await run_command(probe_command)
 
         # Check for errors in stderr
         if "Error" in stderr:
-            logger.error(f"Error in ffmpeg execution: {stderr}")
+            logger.error(f'Error in ffmpeg execution: {stderr}')
             return False
 
         # Log stdout and stderr for debugging
-        # logger.debug(f"stderr: {stderr}")
+        # logger.debug(f'stderr: {stderr}")
 
         # Check for scene change in the output
         scene_change_detected = False
@@ -824,13 +825,13 @@ async def check_scene_changes_at_timestamp(video_path, timestamp, segment_cut_du
                 pts_time = float(line.split('pts_time:')[1].split()[0])  # Extract pts_time
                 change_time = timestamp + pts_time
                 scene_change_detected = True
-                # logger.debug(f"Scene change detected at exact time: {change_time:.2f}s, Regenerating...")
+                # logger.debug(f'Scene change detected at exact time: {change_time:.2f}s, Regenerating...")
                 break
 
         return scene_change_detected
 
     except Exception as e:
-        logger.exception(f"Failed to check scene at timestamp {timestamp:.2f}s: {e}")
+        logger.exception(f'Failed to check scene at timestamp {timestamp:.2f}s: {e}')
         return False
 
 
@@ -934,7 +935,7 @@ async def trim_concat_list_file(original_file: str, target_line_count) -> str:
         trimmed_middle = random.sample(middle, num_to_keep)
         final_lines = first_two + trimmed_middle + last_two
     else:
-        logger.info(f"'{new_file}' already has {len(lines)} lines or fewer, no trimming needed.")
+        logger.info(f'"{new_file} already has {len(lines)} lines or fewer, no trimming needed.')
         final_lines = lines
 
     # Sort lines by the number in 'cutpoint-<n>'
@@ -978,7 +979,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
     # Create a new file with the "_timestamped" suffix
     base_name, ext = os.path.splitext(file_path)
     if timestamps_mode in [1, 2]:
-        new_file_path = f"{base_name}_edited{ext}"
+        new_file_path = f'{base_name}_edited{ext}'
     elif timestamps_mode == 3:
         return file_path
     else:
@@ -987,7 +988,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
     # Write the filtered lines to the new file
     with open(new_file_path, 'w', encoding='utf-8') as new_file:
         for line in filtered_lines:
-            new_file.write(f"{line}\n")
+            new_file.write(f'{line}\n')
 
     return new_file_path
 
@@ -1017,7 +1018,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             else:
                 video_groups = [video_files[i:i + 4] for i in range(0, len(video_files), 4)]
         else:
-            logger.error(f"Invalid grid value: {grid}. Only 3 or 4 are allowed.")
+            logger.error(f'Invalid grid value: {grid}. Only 3 or 4 are allowed.')
             return
 
         # List to store the output of intermediate stacked videos
@@ -1044,17 +1045,17 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # Process each group of videos and stack them horizontally
         for index, group in enumerate(video_groups):
             input_files = ' '.join([f'-i "{file}"' for file in group])
-            output_file = os.path.join(temp_folder, f"stacked_{index + 1}.mp4")
+            output_file = os.path.join(temp_folder, f'stacked_{index + 1}.mp4')
             intermediate_files.append(output_file)
 
             num_inputs = len(group)
             inputs_tags = ''.join(f'[{i}:v]' for i in range(num_inputs))
-            filter_complex = f"{inputs_tags}hstack=inputs={num_inputs}[v]"
+            filter_complex = f'{inputs_tags}hstack=inputs={num_inputs}[v]'
 
-            command = f"ffmpeg -hide_banner {input_files} -filter_complex \"{filter_complex}\" -map \"[v]\" -y \"{output_file}"
+            command = f'ffmpeg -hide_banner {input_files} -filter_complex "{filter_complex}" -map "[v]" -y "{output_file}"'
             stdout, stderr, exit_code = await run_command(command)
             if exit_code != 0:
-                logger.error(f"Error running ffmpeg command for stacked video {index + 1}: {stdout}\n{stderr}\nCommand: {command}")
+                logger.error(f'Error running ffmpeg command for stacked video {index + 1}: {stdout}\n{stderr}\nCommand: {command}')
                 continue
 
         # Stack all intermediate videos vertically with info image at top
@@ -1065,40 +1066,40 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         filter_inputs = []
 
         if add_file_info:
-            input_files_list.append(f"-i \"{final_image_video_path}")
-            filter_inputs.append(f"[0:v]")
+            input_files_list.append(f'-i "{final_image_video_path}"')
+            filter_inputs.append(f'[0:v]')
 
         # Add intermediate stacked video inputs
         for idx, file in enumerate(intermediate_files):
-            input_files_list.append(f"-i \"{file}")
-            filter_inputs.append(f"[{idx + (1 if add_file_info else 0)}:v]")
+            input_files_list.append(f'-i "{file}"')
+            filter_inputs.append(f'[{idx + (1 if add_file_info else 0)}:v]')
 
         input_files_str = ' '.join(input_files_list)
-        filter_complex_str = ''.join(filter_inputs) + f"vstack=inputs={len(filter_inputs)}[v]"
+        filter_complex_str = ''.join(filter_inputs) + f'vstack=inputs={len(filter_inputs)}[v]'
 
-        command = f"ffmpeg -hide_banner {input_files_str} -filter_complex \"{filter_complex_str}\" -map \"[v]\" -y \"{final_output}"
+        command = f'ffmpeg -hide_banner {input_files_str} -filter_complex "{filter_complex_str}" -map "[v]" -y "{final_output}"'
         stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
-            logger.error(f"Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}")
+            logger.error(f'Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}')
             return
 
         # Add scale if grid is 4
         if grid == 4:
             # if not is_vertical or (is_vertical and add_black_bars):
-            downscale_filter = f"scale=1890:{(num_of_segments/grid)*270}"
+            downscale_filter = f'scale=1890:{(num_of_segments / grid) * 270}'
             downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
             # logger.debug(downscale_command)
             stdout, stderr, exit_code = await run_command(downscale_command)
             if exit_code != 0:
-                logger.error(f"Error running downscaling stacking command: {stdout}\n{stderr}")
+                logger.error(f'Error running downscaling stacking command: {stdout}\n{stderr}')
                 return
             # Renaming the final output with the "_og" suffix
             base, ext = os.path.splitext(final_output)
-            final_output_og = f"{base}_og{ext}"
+            final_output_og = f'{base}_og{ext}'
             if not os.path.exists(final_output_og):
                 os.rename(final_output, final_output_og)
             else:
-                logger.warning(f"The file {final_output_og} already exists, skipping renaming.")
+                logger.warning(f'The file {final_output_og} already exists, skipping renaming.')
 
             # Replace the final output with the downscaled version
             os.rename(downscaled_output, final_output)
@@ -1108,68 +1109,68 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         # WebP Preview
         if create_webp_preview_sheet:
             webp_command = (
-                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"fps={webp_preview_fps},scale=iw:ih:flags=lanczos\" "
-                f"-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 \"{preview_sheet_webp}"
+                f'ffmpeg -hide_banner -y -i "{final_output}" -vf "fps={webp_preview_fps},scale=iw:ih:flags=lanczos" '
+                f'-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 "{preview_sheet_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code != 0:
-                logger.error(f"Error creating WebP preview: {stdout}\n{stderr}")
+                logger.error(f'Error creating WebP preview: {stdout}\n{stderr}')
             else:
-                results += f"WebP preview saved: {preview_sheet_webp}\n"
+                results += f'WebP preview saved: {preview_sheet_webp}\n'
                 if upload_previews_imgbb:
                     upload_result = await imgbb_upload_single_image(preview_sheet_webp, new_filename_base_name, imgbb_upload_headless_mode, "webp", "Preview Sheet WebP")
                     if upload_result:
-                        logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
+                        logger.success(f'Preview sheet WebP uploaded successfully: {preview_sheet_webp}')
                     else:
-                        logger.error(f"Upload failed for file: {preview_sheet_webp}")
+                        logger.error(f'Upload failed for file: {preview_sheet_webp}')
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(preview_sheet_webp, new_filename_base_name, "Preview Sheet WebP")
                     if upload_result:
-                        logger.success(f"Preview sheet WebP uploaded successfully: {preview_sheet_webp}")
+                        logger.success(f'Preview sheet WebP uploaded successfully: {preview_sheet_webp}')
                     else:
-                        logger.error(f"Upload failed for file: {preview_sheet_webp}")
+                        logger.error(f'Upload failed for file: {preview_sheet_webp}')
 
         # WebM Preview
         if create_webm_preview_sheet:
             webm_command = (
-                f"ffmpeg -hide_banner -y -i \"{final_output}\" -c:v libvpx-vp9 -b:v 3M -vf \"scale=iw:ih:flags=lanczos\" "
-                f"-crf 20 -deadline good -cpu-used 4 \"{preview_sheet_webm}"
+                f'ffmpeg -hide_banner -y -i "{final_output}" -c:v libvpx-vp9 -b:v 3M -vf "scale=iw:ih:flags=lanczos" '
+                f'-crf 20 -deadline good -cpu-used 4 "{preview_sheet_webm}"'
             )
             stdout, stderr, exit_code = await run_command(webm_command)
             if exit_code != 0:
-                logger.error(f"Error creating WebM preview: {stdout}\n{stderr}")
+                logger.error(f'Error creating WebM preview: {stdout}\n{stderr}')
             else:
-                results += f"WebM preview saved: {preview_sheet_webm}\n"
+                results += f'WebM preview saved: {preview_sheet_webm}\n'
 
         # GIF Preview
         if create_gif_preview_sheet:
             gif_command = (
-                f"ffmpeg -hide_banner -y -i \"{final_output}\" -vf \"scale=iw:ih:flags=lanczos,fps={gif_preview_fps}\" "
-                f"{preview_sheet_gif}"
+                f'ffmpeg -hide_banner -y -i "{final_output}" -vf "scale=iw:ih:flags=lanczos,fps={gif_preview_fps}" '
+                f'"{preview_sheet_gif}"'
             )
             stdout, stderr, exit_code = await run_command(gif_command)
             if exit_code != 0:
-                logger.error(f"Error creating GIF preview: {stdout}\n{stderr}")
+                logger.error(f'Error creating GIF preview: {stdout}\n{stderr}')
             else:
-                results += f"GIF preview saved: {preview_sheet_gif}\n"
+                results += f'GIF preview saved: {preview_sheet_gif}\n'
                 if upload_previews_imgbb:
                     upload_result = await imgbb_upload_single_image(preview_sheet_gif, new_filename_base_name, imgbb_upload_headless_mode, "gif", "Preview Sheet GIF")
                     if upload_result:
-                        logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
+                        logger.success(f'Preview sheet GIF uploaded successfully: {preview_sheet_gif}')
                     else:
-                        logger.error(f"Upload failed for file: {preview_sheet_gif}")
+                        logger.error(f'Upload failed for file: {preview_sheet_gif}')
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(preview_sheet_gif, new_filename_base_name, "Preview Sheet GIF")
                     if upload_result:
-                        logger.success(f"Preview sheet GIF uploaded successfully: {preview_sheet_gif}")
+                        logger.success(f'Preview sheet GIF uploaded successfully: {preview_sheet_gif}')
                     else:
-                        logger.error(f"Upload failed for file: {preview_sheet_gif}")
+                        logger.error(f'Upload failed for file: {preview_sheet_gif}')
 
-        logger.info("Thumbnail sheet generation completed successfully.")
+        logger.info(f'Thumbnail sheet generation completed successfully.')
         logger.info(results)
 
     except Exception as e:
-        logger.exception(f"Exception occurred in generate_and_run_ffmpeg_commands: {str(e)}")
+        logger.exception(f'Exception occurred in generate_and_run_ffmpeg_commands: {str(e)}')
 
 
 async def get_video_metadata(file_path, char_break_line, duration):
@@ -1181,7 +1182,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
     try:
         media_info = MediaInfo.parse(file_path)
     except Exception as e:
-        logger.error(f"Error parsing media info for {file_path}: {e}")
+        logger.error(f'Error parsing media info for {file_path}: {e}')
         return [], file_dir, None
 
     # Initialize tracks
@@ -1192,7 +1193,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
     try:
         for track in media_info.tracks:
             ttype = getattr(track, "track_type", "").lower()
-            # logger.debug(f"Found track: id={getattr(track,'track_id',None)}, type={ttype}")
+            # logger.debug(f'Found track: id={getattr(track,'track_id',None)}, type={ttype}")
             if ttype == "video" and video_track is None:
                 video_track = track
             elif ttype == "audio" and audio_track is None:
@@ -1202,7 +1203,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
             elif ttype == "general" and general_track is None:
                 general_track = track
     except Exception as e:
-        logger.error(f"Error iterating tracks for {file_path}: {e}")
+        logger.error(f'Error iterating tracks for {file_path}: {e}')
         return [], file_dir, None
 
     # Video properties
@@ -1212,13 +1213,13 @@ async def get_video_metadata(file_path, char_break_line, duration):
         video_bitrate = round(int(video_track.bit_rate or 0) / 1000) if video_track and video_track.bit_rate else 0
         width = video_track.width if video_track and video_track.width else "N/A"
         height = video_track.height if video_track and video_track.height else "N/A"
-        resolution = f"{width}x{height}"
+        resolution = f'{width}x{height}'
 
         # FPS
         try:
             fps = round(float(video_track.frame_rate), 2) if video_track and video_track.frame_rate else "N/A"
         except Exception as e:
-            logger.error(f"Error parsing FPS: {e}")
+            logger.error(f'Error parsing FPS: {e}')
             fps = "N/A"
 
         # CRF
@@ -1229,11 +1230,11 @@ async def get_video_metadata(file_path, char_break_line, duration):
                 crf_raw = encoding_settings.split("crf=")[1].split(" ")[0].replace("/", "").strip()
                 crf_value = str(int(round(float(crf_raw))))
             except Exception as e:
-                logger.error(f"Error parsing CRF: {e}")
+                logger.error(f'Error parsing CRF: {e}')
 
-        video_details = f"{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}"
+        video_details = f'{video_codec} ({video_profile}) @ {video_bitrate} kbps, {fps} fps, CRF {crf_value}'
     except Exception as e:
-        logger.error(f"Error extracting video properties: {e}")
+        logger.error(f'Error extracting video properties: {e}')
         video_details = "N/A"
         resolution = "N/A"
         fps = None
@@ -1241,7 +1242,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
     # Audio properties
     try:
         if audio_track:
-            # logger.debug(f"Audio track raw data: {audio_track}")
+            # logger.debug(f'Audio track raw data: {audio_track}")
 
             # Format / codec
             audio_codec = getattr(audio_track, "format", None)
@@ -1265,7 +1266,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
                 try:
                     audio_bitrate = round(int(bit_rate) / 1000)
                 except Exception as e:
-                    logger.error(f"Error converting audio bit_rate '{bit_rate}' to int: {e}")
+                    logger.error(f'Error converting audio bit_rate "{bit_rate}" to int: {e}')
                     audio_bitrate = 0
 
             # Profile
@@ -1280,10 +1281,10 @@ async def get_video_metadata(file_path, char_break_line, duration):
             audio_channels = "N/A"
             audio_bitrate = 0
 
-        audio_details = f"{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps"
+        audio_details = f'{audio_codec} ({audio_channels}ch) @ {audio_bitrate} kbps'
 
     except Exception as e:
-        logger.error(f"Error extracting audio properties: {e}")
+        logger.error(f'Error extracting audio properties: {e}')
         audio_details = "N/A"
 
     # General metadata
@@ -1302,18 +1303,18 @@ async def get_video_metadata(file_path, char_break_line, duration):
         size_bytes = int(getattr(general_track, "file_size", 0)) if general_track else 0
         size_mb = size_bytes / (1024 * 1024)
         size_gb = size_bytes / (1024 * 1024 * 1024)
-        file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
+        file_size = f'{size_gb:.2f} GB | {int(size_mb):,} MB'
     except Exception as e:
-        logger.error(f"Error extracting general metadata: {e}")
+        logger.error(f'Error extracting general metadata: {e}')
         file_size = "N/A"
 
     # Duration formatting
     try:
         hours, remainder = divmod(int(duration), 3600)
         minutes, seconds = divmod(remainder, 60)
-        timestamp_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        timestamp_str = f'{hours:02d}:{minutes:02d}:{seconds:02d}'
     except Exception as e:
-        logger.error(f"Error formatting duration: {e}")
+        logger.error(f'Error formatting duration: {e}')
         timestamp_str = "N/A"
 
     # MD5 checksum
@@ -1324,7 +1325,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
                 hash_md5.update(chunk)
         md5_hash = hash_md5.hexdigest()
     except Exception as e:
-        logger.error(f"Error computing MD5 hash: {e}")
+        logger.error(f'Error computing MD5 hash: {e}')
         md5_hash = "N/A"
 
     # Build info table
@@ -1334,14 +1335,14 @@ async def get_video_metadata(file_path, char_break_line, duration):
             ["Title", title],
             ["File Size", file_size],
             ["Duration", timestamp_str],
-            ["A/V", f"Video: {video_details}, {resolution} | Audio: {audio_details}"],
+            ["A/V", f'Video: {video_details}, {resolution} | Audio: {audio_details}'],
             ["MD5", md5_hash.upper()]
         ]
         if add_lines != 0:
             for _ in range(add_lines):
                 info_table.append([" ", " "])
     except Exception as e:
-        logger.error(f"Error building info table: {e}")
+        logger.error(f'Error building info table: {e}')
         return [], fps
 
     return info_table, fps
@@ -1389,7 +1390,7 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
         if font_path and os.path.exists(font_path):
             font = ImageFont.truetype(font_path, font_size)
         else:
-            font = ImageFont.truetype("arial.ttf", font_size)
+            font = ImageFont.truetype('arial.ttf', font_size)
     except IOError:
         logger.warning("Specified font not found, using default font.")
         font = ImageFont.load_default()
@@ -1418,13 +1419,13 @@ async def create_info_image(metadata_table, temp_folder, filename, grid, is_vert
             draw.text((150, y_offset), line, font=font, fill=(255, 255, 255))
             y_offset += line_height
 
-    output_image_name = filename + "_info.png"
+    output_image_name = filename + '_info.png'
     output_image_path = os.path.join(temp_folder, output_image_name)
     try:
         img.save(output_image_path)
-        # logger.debug(f"Image saved as {output_image_path}")
+        # logger.debug(f'Image saved as {output_image_path}")
     except Exception as e:
-        logger.error(f"Error saving image: {e}")
+        logger.error(f'Error saving image: {e}')
 
     return output_image_path
 
@@ -1453,7 +1454,7 @@ async def create_video_from_image(image_path, output_path, fps, duration=1):
         # Get image resolution to ensure the video has the same dimensions
         stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
-            logger.error(f"Error getting image resolution: {stderr}")
+            logger.error(f'Error getting image resolution: {stderr}')
             return
 
         # Use FFmpeg to create the video from the image
@@ -1472,10 +1473,10 @@ async def create_video_from_image(image_path, output_path, fps, duration=1):
         # Run the FFmpeg command to create the video
         stdout, stderr, exit_code = await run_command(ffmpeg_command)
         if exit_code == 0:
-            # logger.debug(f"Video created successfully: \"{output_path}")
+            # logger.debug(f'Video created successfully: "{output_path}")
             pass
         else:
-            logger.error(f"Error creating video: {stderr}")
+            logger.error(f'Error creating video: {stderr}')
 
     except Exception as e:
-        logger.error(f"Exception occurred: {e}")
+        logger.error(f'Exception occurred: {e}')
