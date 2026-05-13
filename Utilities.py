@@ -237,11 +237,21 @@ async def clean_filename(input_string: str, bad_words: list, mode: int) -> str:
         # Remove unwanted characters
         clean_title = input_string.replace(", ", ".")
         clean_title = clean_title.replace("-", " ")
-        clean_title = clean_title.replace("  ", " ")
-        clean_title = clean_title.replace("  ", " ")
+
+        while "  " in clean_title:
+            clean_title = clean_title.replace("  ", " ")
+
         clean_title = clean_title.replace(" ", ".")
-        clean_title = clean_title.translate(str.maketrans("", "", CLEAN_CHARS))
-        clean_title = clean_title.replace("..", ".")
+
+        clean_title = clean_title.translate(
+            str.maketrans("", "", CLEAN_CHARS)
+        )
+
+        while ".." in clean_title:
+            clean_title = clean_title.replace("..", ".")
+
+        clean_title = clean_title.strip(".")
+
         return clean_title
     else:
         return ""
@@ -1052,3 +1062,124 @@ async def remove_ignored_strings(title: str, title_ignore_strings: list[str]) ->
             title_ignore_strings,
         )
         return original_title
+
+
+async def get_selected_filename(
+        bad_words,
+        max_filename_length,
+        send_notification
+):
+    """
+    Prompt the user for a title, clean it, validate it,
+    and return selected_filename.
+    """
+
+    while True:
+        try:
+            # Send notification
+            try:
+                result = await send_notification(
+                    "INFO - User input is required."
+                )
+
+                if not result:
+                    logger.warning(
+                        "Notifier failed to send user input request."
+                    )
+
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                logger.exception(
+                    "Failed to send notification: {}",
+                    e
+                )
+
+            # Get user input
+            try:
+                scene_title = input("Enter title: ").strip()
+
+            except Exception as e:
+                logger.exception(
+                    "Failed to read user input: {}",
+                    e
+                )
+                continue
+
+            # Validate raw input
+            if not scene_title:
+                logger.warning(
+                    "User entered an empty title."
+                )
+
+                logger.error(
+                    "Invalid input. Please try again."
+                )
+
+                continue
+
+            # Clean input
+            try:
+                clean_user_input = await clean_filename(
+                    scene_title,
+                    bad_words,
+                    mode=2
+                )
+
+                logger.info(
+                    "Cleaned filename: {}",
+                    clean_user_input
+                )
+
+            except Exception as e:
+                logger.exception(
+                    "Failed to clean filename: {}",
+                    e
+                )
+                continue
+
+            # Validate cleaned input
+            if not clean_user_input:
+                logger.warning(
+                    "clean_user_input is empty after cleaning."
+                )
+
+                logger.error(
+                    "Invalid input. Please try again."
+                )
+
+                continue
+
+            # Validate filename length
+            if len(clean_user_input) > max_filename_length:
+                logger.warning(
+                    "Filename exceeds max length "
+                    "({} > {}).",
+                    len(clean_user_input),
+                    max_filename_length
+                )
+
+                logger.error(
+                    "Filename is too long ({} / {}). "
+                    "Please try again.",
+                    len(clean_user_input),
+                    max_filename_length
+                )
+
+                continue
+
+            # Final variable
+            selected_filename = clean_user_input
+
+            logger.success(
+                "Selected filename: {}",
+                selected_filename
+            )
+
+            return selected_filename
+
+        except Exception as e:
+            logger.exception(
+                "Unexpected error in get_selected_filename: {}",
+                e
+            )

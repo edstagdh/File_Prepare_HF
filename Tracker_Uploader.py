@@ -41,7 +41,8 @@ async def get_user_input_form_submit_status():
     """
     while True:
         try:
-            response = input("Did you finish submitting the form? (yes[y]/no[n]/cancel[c]): \n").strip().lower()
+            loop = asyncio.get_event_loop()
+            response = (await loop.run_in_executor(None, input, "Did you finish submitting the form? (yes[y]/no[n]/cancel[c]): \n")).strip().lower()
             if response in ["yes", "y"]:
                 return True
             elif response in ["cancel", "c"]:
@@ -65,7 +66,8 @@ async def get_user_input_2fa():
     """
     while True:
         try:
-            response = input("Did you finish login-in process with 2 factor authentication? (yes[y]/no[n]/cancel[c]): \n").strip().lower()
+            loop = asyncio.get_event_loop()
+            response = (await loop.run_in_executor(None, input, "Did you finish login-in process with 2 factor authentication? (yes[y]/no[n]/cancel[c]): \n")).strip().lower()
             if response in ["yes", "y"]:
                 return True
             elif response in ["cancel", "c"]:
@@ -98,6 +100,7 @@ async def get_by(selector_obj):
 
 
 async def init_browser(config):
+    driver = None  # ← always initialize first
     try:
         browser_type = config.get("browser", "").lower()
         if not browser_type:
@@ -112,17 +115,6 @@ async def init_browser(config):
                 raise ValueError(f"Invalid or missing Firefox driver path: {driver_path}")
 
             options = FirefoxOptions()
-            options.set_preference("dom.webdriver.enabled", False)
-            options.set_preference("useAutomationExtension", False)
-            options.add_argument("--private")
-            options.add_argument("--no-remote")
-
-            profile_path = config.get("firefox_profile_path")
-            if profile_path:
-                if not os.path.exists(profile_path):
-                    raise ValueError(f"Invalid Firefox profile path: {profile_path}")
-                options.add_argument("-profile")
-                options.add_argument(profile_path)
 
             service = FirefoxService(executable_path=driver_path)
             driver = webdriver.Firefox(service=service, options=options)
@@ -155,8 +147,10 @@ async def init_browser(config):
         wait = WebDriverWait(driver, 15)
         return driver, wait
 
-    except WebDriverException as e:
+    except Exception as e:  # ← catch everything, not just WebDriverException
         logger.exception("Failed to initialize browser.")
+        if driver:  # ← safe to check now since driver = None above
+            driver.quit()
         raise
 
 
@@ -304,16 +298,16 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
                 return False
 
         # Create Torrent File
-        list_suffixes_ignore = [
-            "_preview.webp", "_preview.webm", "_preview.gif", "_preview_sheet.webp",
-            "_preview_sheet.webm", "_preview_sheet.gif", "_hamster.txt", "_imgbb.txt",
-            "_imgbox.txt", f"_template.txt", f"_tags.txt", "_mediainfo.txt"
-        ]
+        list_suffixes_ignore = config["list_suffixes_ignore"]
+        if len(list_suffixes_ignore) <= 0:
+            raise ValueError("list_suffixes_ignore is empty")
+        if ".mp4" in list_suffixes_ignore:
+            raise ValueError("list_suffixes_ignore must not contain '.mp4' extension")
         torrent_file = await generate_torrent_process(output_dir, save_path, new_filename_base_name, p_ann_url, list_suffixes_ignore)
         # Insert Torrent File
         try:
             if not torrent_file:
-                raise
+                raise ValueError("Torrent file generation failed or returned empty.")
             by_torrent, val_torrent = await get_by(config["torrent_field"])
             driver.find_element(by_torrent, val_torrent).send_keys(torrent_file)
         except Exception as e:

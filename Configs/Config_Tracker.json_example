@@ -3,6 +3,7 @@
     "single": "This must be used with create_sub_folder=True, otherwise the process will be disabled, treats the created folder as the files required for the single release torrent creation."
   },
   "create_torrent_file": true,
+  "list_suffixes_ignore": [ "_preview.webp", "_preview.webm", "_preview.gif", "_preview_sheet.webp", "_preview_sheet.webm", "_preview_sheet.gif", "_hamster.txt", "_imgbb.txt", "_imgbox.txt", "_template.txt", "_tags.txt", "_mediainfo.txt"],
   "trackers_urls": {
     "hf_tracker_login_url": "https://www.SITE.org/login",
     "hf_tracker_upload_url": "https://www.SITE.org/upload.php",

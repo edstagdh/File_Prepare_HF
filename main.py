@@ -8,7 +8,7 @@ from datetime import datetime
 from loguru import logger
 from pathlib import Path
 from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_files, validate_date, format_performers, sanitize_site_filename_part, rename_file, \
-    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input
+    generate_mediainfo_file, generate_template_video, is_supported_major_minor, clean_filename, full_manual_mode_input, get_selected_filename
 from TPDB_API import query_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
@@ -112,7 +112,7 @@ async def process_files():
 
         filename_mode = filename_mode.lower().strip()
 
-        valid_filename_modes = {"title", "names", "both"}
+        valid_filename_modes = {"title", "names", "both", "tpdb_id", "user_input"}
 
         if filename_mode not in valid_filename_modes:
             logger.error(f"Invalid filename_mode: {filename_mode}")
@@ -335,6 +335,7 @@ async def process_files():
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
                 hamster_upload_cover = False
+                tpdb__id = None
 
 
             elif matching_mode == "free_string_parse":
@@ -422,6 +423,7 @@ async def process_files():
             # Prepare critical fields dictionary
             critical_fields = {
                 "scene_title": scene_title,
+                "tpdb__id": tpdb__id,
                 "performers": performers_names,
                 "image_url": image_url,
                 "slug": slug,
@@ -682,6 +684,14 @@ async def process_files():
                 raise ValueError(
                     "All filename strategies exceeded max length"
                 )
+        elif filename_mode == "tpdb_id":
+
+            selected_filename = f"{formatted_site}.{year}.{month}.{day}.{tpdb__id}"
+
+        elif filename_mode == "user_input":
+
+            name_user_input = await get_selected_filename(bad_words, MAX_FILENAME_LENGTH, send_notification)
+            selected_filename = f"{formatted_site}.{year}.{month}.{day}.{name_user_input}"
 
         else:
 
@@ -721,20 +731,27 @@ async def process_files():
                 new_folder_name = f"{new_filename}.{suffix}" if suffix else new_filename
                 new_folder_full_path = os.path.join(directory, new_folder_name)
 
-                if not os.path.exists(output_directory):
-                    logger.error(f"The folder '{output_directory}' does not exist.")
-                else:
-                    if os.path.exists(new_folder_full_path):
-                        logger.warning(
-                            f"Target folder already exists: {new_folder_full_path}"
-                        )
-                    else:
-                        os.rename(output_directory, new_folder_full_path)
-                        logger.success(
-                            f"Folder successfully renamed to: '{new_folder_full_path}'"
-                        )
+                if output_directory == new_folder_full_path:
+                    # Folder is already correctly named from a prior run, nothing to do
+                    logger.debug(f"Folder already correctly named: '{new_folder_full_path}'")
 
-                    output_directory = new_folder_full_path
+                elif not os.path.exists(output_directory):
+                    logger.error(f"Source folder does not exist: '{output_directory}'")
+                    logger.warning(f"End file: {file_full_name}")
+                    failed_files.append(file_full_name)
+                    processed_files += 1
+                    continue
+
+                elif os.path.exists(new_folder_full_path):
+                    # A different folder with the target name already exists
+                    logger.warning(f"Target folder already exists, will use it: '{new_folder_full_path}'")
+
+                else:
+                    os.rename(output_directory, new_folder_full_path)
+                    logger.success(f"Folder renamed to: '{new_folder_full_path}'")
+
+                # Always update output_directory to the final target path
+                output_directory = new_folder_full_path
 
         except Exception as e:
             logger.error(f"Failed to handle folder creation/renaming: {e}")

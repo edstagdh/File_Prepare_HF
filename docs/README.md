@@ -92,6 +92,7 @@ requires `create_template_file` to be set as True and currently only supported u
    - Rename `Config_Tracker.json_example` to `Config_Tracker.json` and adjust the settings as needed.
    - Rename `Config_Video_Preview.json_example` to `Config_Video_Preview.json` and adjust the settings as needed.
    - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials and other credentials if needed.
+   - Rename `Performers_Images.json_Example` to `Performers_Images.json` under `Resources` and input your links for performer images.
 
 2. **Run the Main Script**:
 
