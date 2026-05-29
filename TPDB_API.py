@@ -83,7 +83,10 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
             item = response_data.get("data")
             valid_entries = []
             if item:
-                valid_entries.append(item)
+                if isinstance(item, list):
+                    valid_entries.extend(item)
+                else:
+                    valid_entries.append(item)
             else:
                 return EMPTY_RESULT
 
@@ -396,7 +399,7 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
         "Authorization": f"Bearer {api_auth}"
     }
 
-    # logger.debug(f"Sending request to API: {url}")
+    logger.debug(f"Sending request to API: {url}")
 
     while True:  # allows user-triggered retry cycles
         for attempt in range(1, max_retries + 1):
