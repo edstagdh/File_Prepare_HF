@@ -32,7 +32,7 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
             return EMPTY_RESULT
 
         if existing_tpdb_uuid:
-            # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
+            logger.debug(f"Matching mode - Existing TPDB_UUID: {existing_tpdb_uuid}")
             response_data = await send_request(api_mode_url, api_auth, existing_tpdb_uuid, max_retries, delay, mode='id')
             mode = 0
             need_chapters_data = False
@@ -40,23 +40,24 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
             file_oshash = await calculate_oshash(file)
             response_data = await send_request(api_mode_url, api_auth, file_oshash, max_retries, delay, mode='oshash')
             need_chapters_data = False
-        else:
-            need_chapters_data = True
-            if mode == 1:
-                response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
-            elif mode == 2:
-                response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
-                if response_data is None or not response_data.get('data'):
-                    query_string_fallback = await convert_number_suffix_to_word(query_string)
-                    # logger.debug(query_string_fallback)
-                    if query_string_fallback != query_string and part_match:
-                        response_data = await send_request(api_mode_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
-                    elif response_data is None or not response_data.get('data'):
-                        string_advanced_parse_fallback = await remove_date_from_text(query_string)
-                        # logger.debug(string_advanced_parse_fallback)
-                        response_data = await send_request(api_mode_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
-            else:
-                return EMPTY_RESULT
+
+            # Fallback to parse if oshash found nothing
+            if response_data is None or not response_data.get('data'):
+                logger.warning("OSHASH match failed, falling back to parse mode.")
+                need_chapters_data = True
+                if mode == 1:
+                    response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
+                elif mode == 2:
+                    response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
+                    if response_data is None or not response_data.get('data'):
+                        query_string_fallback = await convert_number_suffix_to_word(query_string)
+                        if query_string_fallback != query_string and part_match:
+                            response_data = await send_request(api_mode_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
+                        elif response_data is None or not response_data.get('data'):
+                            string_advanced_parse_fallback = await remove_date_from_text(query_string)
+                            response_data = await send_request(api_mode_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
+                else:
+                    return EMPTY_RESULT
 
         if response_data is None or not response_data.get('data'):
             return EMPTY_RESULT
