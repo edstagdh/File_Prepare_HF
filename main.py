@@ -37,10 +37,13 @@ async def process_files():
     else:
         # Working Mode, By default scenes is used
         jav_api_mode = config.get("jav_only_api_mode")
+        movies_api_mode = config.get("movies_only_api_mode")
+        movies_scenes_mode = config.get("movies_scenes_mode")
 
         # Matching mode:
         matching_mode = config["scene_matching_mode"]
         re_match_existing_tpdb_uuid = config["force_re_match_using_existing_tpdb_uuid"]
+        tpdb_try_match_oshash_before_parse = config["tpdb_try_match_oshash_before_parse"]
         add_scene_to_collection = config["add_collection"]
 
         # Generate flags, Note - HF Template generation will not work if mediainfo file is set to not generate
@@ -56,6 +59,8 @@ async def process_files():
         manual_mode = config["manual_mode"]
         tpdb_performer_url = config["tpdb_performer_url"]
         tpdb_scenes_url = config["tpdb_scenes_url"]
+        tpdb_jav_url = config.get("tpdb_jav_url")
+        tpdb_movies_url = config.get("tpdb_movies_url")
         target_size_width = config["target_size_width"]
         target_size_height = config["target_size_height"]
         target_size = (target_size_width, target_size_height)
@@ -349,10 +354,11 @@ async def process_files():
                     file_base_name,
                     None,
                     None,
-                    tpdb_scenes_url,
                     None,
                     create_template_file,
                     jav_api_mode,
+                        movies_api_mode,
+                        movies_scenes_mode,
                     filename_ignore_performer_ID,
                     send_notification,
                     existing_tpdb_uuid,
@@ -360,6 +366,7 @@ async def process_files():
                         title_ignore_strings,
                         warn_length_match,
                         add_timestamps_markers,
+                        tpdb_try_match_oshash_before_parse,
                     mode=1
                 )
 
@@ -400,10 +407,11 @@ async def process_files():
                     clean_tpdb_check_filename,
                     scene_api_date,
                     manual_mode,
-                    tpdb_scenes_url,
                     part_match,
                     create_template_file,
                     jav_api_mode,
+                        movies_api_mode,
+                        movies_scenes_mode,
                     filename_ignore_performer_ID,
                     send_notification,
                     existing_tpdb_uuid,
@@ -411,6 +419,7 @@ async def process_files():
                         title_ignore_strings,
                         warn_length_match,
                         add_timestamps_markers,
+                        tpdb_try_match_oshash_before_parse,
                     mode=2
                 )
             else:
@@ -489,7 +498,14 @@ async def process_files():
                 scene_pretty_date = ""
 
             # Construct scene URL and error prefix
-            tpdb_scene_url = f"{tpdb_scenes_url}{slug}" if slug else None
+            if jav_api_mode:
+                tpdb_object_url = tpdb_jav_url
+            elif movies_api_mode:
+                tpdb_object_url = tpdb_movies_url
+            else:
+                tpdb_object_url = tpdb_scenes_url
+
+            tpdb_final_url = f"{tpdb_object_url}{slug}" if slug else None
             error_prefix = f"File: {file_full_name} - Failed to get metadata via API"
 
             # Validate title
@@ -806,7 +822,7 @@ async def process_files():
 
         try:
             contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
-            description = f"TPDB URL: {tpdb_scene_url} | Scene URL: {scene_url}"
+            description = f"TPDB URL: {tpdb_final_url} | Scene URL: {scene_url}"
 
             # Always check metadata
             existing_description = await get_existing_description(new_file_full_path)
@@ -857,7 +873,9 @@ async def process_files():
             if metadata_mismatch:
                 logger.debug(f"File: {new_full_filename} - Metadata mismatch detected.")
 
-                if contains_unwanted_metadata:
+                chapters_will_be_applied = add_timestamps_markers and bool(markers_list)
+
+                if contains_unwanted_metadata and not chapters_will_be_applied:
                     remove_metadata_result = await reset_all_metadata(new_file_full_path)
                     if not remove_metadata_result:
                         logger.error(f"Failed to strip unwanted metadata for: {new_full_filename}")
@@ -960,7 +978,7 @@ async def process_files():
                 (create_template_file, generate_template_video,
                  [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
                   extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,
-                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix, tpdb_scene_url]),
+                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix, tpdb_final_url]),
             ]
             failed = False
             where_failed = None
@@ -1042,7 +1060,7 @@ async def process_files():
             processed_files += 1
             # Add to TPDB Collection
             if add_scene_to_collection:
-                await ensure_scene_collected(tpdb__id, jav_api_mode)
+                await ensure_scene_collected(tpdb__id, jav_api_mode, movies_api_mode)
             logger.info(f"End file: {new_file_full_path}")
             successful_files.append(new_file_full_path)
         except Exception as e:

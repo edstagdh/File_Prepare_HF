@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -867,6 +868,8 @@ async def load_credentials(mode):
                 return secrets["hamster_site_url"], None, None
             elif mode == 8:
                 return secrets["api_auth"], secrets["api_collection_url"], None
+            elif mode == 9:  # MOVIES API endpoint
+                return secrets["api_auth"], secrets["api_movies_url"], secrets["api_sites_url"]
             else:
                 return None, None, None
 
@@ -1183,3 +1186,48 @@ async def get_selected_filename(
                 "Unexpected error in get_selected_filename: {}",
                 e
             )
+
+
+async def calculate_oshash(filepath: str) -> str:
+    """
+    Compute the OpenSubtitles-compatible OSHash for a media file.
+
+    Sums the file size and every 64-bit little-endian word in the first
+    and last 64 KB of the file (mod 2^64), returning a 16-char hex string.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file is smaller than 128 KB.
+        OSError: On any I/O failure.
+    """
+    try:
+        filesize = os.path.getsize(filepath)
+    except FileNotFoundError:
+        logger.error("File not found: '{}'", filepath)
+        raise
+
+    if filesize < 65536 * 2:
+        raise ValueError(f"File too small ({filesize} bytes); minimum is 131072 bytes.")
+
+    hash_value = filesize
+
+    try:
+        with open(filepath, "rb") as f:
+            # Hash first 64 KB
+            for _ in range(65536 // 8):
+                (value,) = struct.unpack("<Q", f.read(8))
+                hash_value = (hash_value + value) & 0xFFFFFFFFFFFFFFFF
+
+            # Hash last 64 KB
+            f.seek(filesize - 65536)
+            for _ in range(65536 // 8):
+                (value,) = struct.unpack("<Q", f.read(8))
+                hash_value = (hash_value + value) & 0xFFFFFFFFFFFFFFFF
+
+    except OSError:
+        logger.exception("I/O error while hashing '{}'", filepath)
+        raise
+
+    result = f"{hash_value:016x}"
+    # logger.debug("OSHash for '{}': {}", filepath, result)
+    return result

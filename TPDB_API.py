@@ -8,51 +8,60 @@ import time
 from loguru import logger
 from datetime import datetime
 from typing import Optional
-from Utilities import load_credentials, remove_ignored_strings
+from Utilities import load_credentials, remove_ignored_strings, calculate_oshash
 
 
-async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part_match, generate_hf_template, jav_api_mode,
+async def query_api(query_string, scene_date, manual_mode, part_match, generate_hf_template, jav_api_mode, movies_api_mode, movies_scenes_mode,
                     filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
-                    mode):
+                    tpdb_try_match_oshash_before_parse, mode):
     max_retries = 3
     delay = 5
     EMPTY_RESULT = (None,) * 14
 
     try:
-        work_mode = 4 if jav_api_mode else 1
-        api_auth, api_scenes_url, api_sites_url = await load_credentials(mode=work_mode)
+        if jav_api_mode:
+            work_mode = 4
+        elif movies_api_mode:
+            work_mode = 9
+        else:
+            work_mode = 1
+        api_auth, api_mode_url, api_sites_url = await load_credentials(mode=work_mode)
 
-        if not api_scenes_url or not api_auth:
+        if not api_mode_url or not api_auth:
             logger.error("API URL or auth token missing. Aborting API request.")
             return EMPTY_RESULT
 
         if existing_tpdb_uuid:
             # logger.debug(f"using tpdb_uuid: {existing_tpdb_uuid}")
-            response_data = await send_request(api_scenes_url, api_auth, existing_tpdb_uuid, max_retries, delay, mode='id')
+            response_data = await send_request(api_mode_url, api_auth, existing_tpdb_uuid, max_retries, delay, mode='id')
             mode = 0
+            need_chapters_data = False
+        elif tpdb_try_match_oshash_before_parse:
+            file_oshash = await calculate_oshash(file)
+            response_data = await send_request(api_mode_url, api_auth, file_oshash, max_retries, delay, mode='oshash')
+            need_chapters_data = False
         else:
+            need_chapters_data = True
             if mode == 1:
-                # logger.debug(query_string)
-                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+                response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
             elif mode == 2:
-                # logger.debug(query_string)
-                response_data = await send_request(api_scenes_url, api_auth, query_string, max_retries, delay, mode='parse')
+                response_data = await send_request(api_mode_url, api_auth, query_string, max_retries, delay, mode='parse')
                 if response_data is None or not response_data.get('data'):
                     query_string_fallback = await convert_number_suffix_to_word(query_string)
                     # logger.debug(query_string_fallback)
                     if query_string_fallback != query_string and part_match:
-                        response_data = await send_request(api_scenes_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
+                        response_data = await send_request(api_mode_url, api_auth, query_string_fallback, max_retries, delay, mode='parse')
                     elif response_data is None or not response_data.get('data'):
                         string_advanced_parse_fallback = await remove_date_from_text(query_string)
                         # logger.debug(string_advanced_parse_fallback)
-                        response_data = await send_request(api_scenes_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
+                        response_data = await send_request(api_mode_url, api_auth, string_advanced_parse_fallback, max_retries, delay, mode='parse')
             else:
                 return EMPTY_RESULT
 
         if response_data is None or not response_data.get('data'):
             return EMPTY_RESULT
         if mode in [1,2]:
-            valid_entries = await filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode)
+            valid_entries = await filter_entries_by_date(response_data, scene_date, api_mode_url, send_notification, mode)
         else:
             item = response_data.get("data")
             valid_entries = []
@@ -91,12 +100,19 @@ async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part
             return EMPTY_RESULT
         else:
             tpdb_uuid = selected_entry.get('id')
-            scene_response_data = await send_request(api_scenes_url, api_auth, tpdb_uuid, max_retries, delay, mode='id')
-            if scene_response_data is None:
-                logger.error("Failed to retrieve scene specific data.")
-                return EMPTY_RESULT
+            if need_chapters_data:
+                scene_response_data = await send_request(api_mode_url, api_auth, tpdb_uuid, max_retries, delay, mode='id')
+                if scene_response_data is None:
+                    logger.error("Failed to retrieve scene specific data.")
+                    return EMPTY_RESULT
+            else:
+                scene_response_data = response_data
         # Safely extract fields from scene_data
         scene_data = scene_response_data.get('data')
+        if isinstance(scene_data, list):
+            scene_data = scene_data[0] if scene_data else None
+        if not scene_data:
+            return EMPTY_RESULT
         markers = scene_data.get("markers") or None
 
         _id = scene_data.get("_id")
@@ -157,6 +173,10 @@ async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part
                     )
 
                     while True:
+                        if send_notification:
+                            result = await send_notification("User input required - Select Entry to Keep")
+                            if not result:
+                                logger.warning("Notifier failed to send user input request.")
                         await asyncio.sleep(0.5)
                         choice = input(
                             f"Marker '{marker.get('title')}' exceeds duration, would you like to (F)ix / (R)emove marker: \n"
@@ -217,8 +237,63 @@ async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part
 
                 markers = fixed_markers or None
 
-        # "Clean" title
+        # "Clean" the title
         title = scene_data.get('title')
+
+        # Check scene number addition to title
+        if movies_api_mode and movies_scenes_mode == "scene":
+            while True:
+                if send_notification:
+                    result = await send_notification("User input required - Add Scene Number")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                logger.info(
+                    f"This is the current title, would you like to add a scene number to it? e.g. ' - Scene 1'\n"
+                    f"The following strings will be removed from the title afterwards: {title_ignore_strings}\n"
+                    f"Current title: {title}\n"
+                    f"Enter a scene number, or press Enter to skip:"
+                )
+                raw = input("> ").strip()
+
+                # User chose to skip
+                if raw == "":
+                    logger.info("Skipping scene number addition.")
+                    break
+
+                # Preview the outcome
+                preview_title = f"{title} {raw}"
+                preview_clean = await remove_ignored_strings(preview_title, title_ignore_strings)
+
+                logger.info(
+                    f"\nPreview of resulting title:\n"
+                    f"  {preview_clean}\n"
+                    f"\n  [a] Approve  [r] Restart  [s] Skip (don't add scene number)"
+                )
+
+                if send_notification:
+                    result = await send_notification("User input required - Confirm Scene Number")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                confirm = input("> ").strip().lower()
+
+                if confirm in ("a", "approve"):
+                    title = preview_title
+                    logger.info(f"Scene number accepted. Title set to: {preview_title}")
+                    break
+                elif confirm in ("s", "skip"):
+                    logger.info("Skipping scene number addition.")
+                    break
+                elif confirm in ("r", "restart"):
+                    logger.info("Restarting scene number input...")
+                    continue
+                else:
+                    logger.warning("Unrecognised input, restarting scene number input...")
+                    continue
+
         clean_title = await remove_ignored_strings(title, title_ignore_strings)
 
         image_url = scene_data.get('image')
@@ -258,8 +333,10 @@ async def query_api(query_string, scene_date, manual_mode, tpdb_scenes_url, part
             site_owner = site
         if any(x in site.lower() for x in ["onlyfans", "manyvids", "fansly"]) and site_owner and site_owner.lower() in site.lower():
             site_owner = None
-        if not manual_mode:
-            female_performers = await extract_female_performers(scene_data, tpdb_scenes_url, filename_ignore_performer_ID, send_notification)
+        if movies_api_mode and movies_scenes_mode == "scene":
+            female_performers = await extract_female_performers(scene_data, api_mode_url, filename_ignore_performer_ID, send_notification, mode=2)
+        elif not manual_mode:
+            female_performers = await extract_female_performers(scene_data, api_mode_url, filename_ignore_performer_ID, send_notification, mode=1)
         else:
             await asyncio.sleep(0.5)
             female_performers = []
@@ -293,12 +370,10 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
     else:
         if mode == "id":
             url = f"{api_url}/{query_string}"
+        elif mode == "oshash":
+            url = f"{api_url}/hash/{query_string}?type=OSHASH"
         else:
-            url = (
-                f"{api_url}?orderBy=recently_released"
-                f"&parse={query_string}&per_page=40&page=1"
-            )
-
+            url = f"{api_url}?orderBy=recently_released&parse={query_string}&per_page=40&page=1"
     headers = {
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
@@ -324,7 +399,14 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
                 if attempt > 1:
                     logger.info("Retry successful!")
 
-                return response_data if "data" in response_data else None
+                if "data" not in response_data:
+                    return None
+
+                # oshash returns a single object, normalize to a list
+                if mode == "oshash" and isinstance(response_data["data"], dict):
+                    response_data["data"] = [response_data["data"]]
+
+                return response_data
 
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response else "N/A"
@@ -484,7 +566,7 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
     return None
 
 
-async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification):
+async def get_user_input_performers(selected_entry, api_mode_url, send_notification):
     """
     Asks the user for a yes/no response.
     If 'yes', prompts for text input and returns it.
@@ -493,7 +575,7 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
     """
     scene_title = selected_entry.get('title', '(No title available)')
     scene_slug = selected_entry.get('slug', '(No scene available)')
-    scene_url = f"{tpdb_scenes_url}{scene_slug}"
+    scene_url = f"{api_mode_url}{scene_slug}"
     temp_performers = []
     while True:
         try:
@@ -534,7 +616,7 @@ async def get_user_input_performers(selected_entry, tpdb_scenes_url, send_notifi
             return None
 
 
-async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, send_notification, mode):
+async def filter_entries_by_date(response_data, scene_date, api_mode_url, send_notification, mode):
     try:
         valid_entries = []
         unmatched_entries = []
@@ -545,7 +627,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
             scene_date = datetime.strptime(scene_date, '%Y-%m-%d')
             for item in response_data['data']:
                 slug = item.get('slug', '').lower()
-                full_scene_url = f"{tpdb_scenes_url}{slug}"
+                full_scene_url = f"{api_mode_url}{slug}"
                 title = item.get('title', '').lower()
                 item_date = datetime.strptime(item.get('date', ''), '%Y-%m-%d')  # Assuming item date is also 'YYYY-MM-DD'
                 # Check if title contains 'interview'
@@ -612,7 +694,7 @@ async def filter_entries_by_date(response_data, scene_date, tpdb_scenes_url, sen
         return None
 
 
-async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ignore_performer_ID, send_notification):
+async def extract_female_performers(selected_entry, api_mode_url, filename_ignore_performer_ID, send_notification, mode=1):
 
     def clean_name(name: str) -> str:
         # Remove any word that starts with ID followed by optional space and digits
@@ -620,6 +702,7 @@ async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ig
         # Remove extra spaces that may remain after deletion
         cleaned_name = re.sub(r"\s{2,}", " ", cleaned_name)
         return cleaned_name
+
     try:
         female_performers = []
         for performer in selected_entry.get("performers", []):  # Access the 'performers' list directly
@@ -660,7 +743,6 @@ async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ig
                 await asyncio.sleep(0.5)
                 user_input = input(f"Treat performer '{performer.get('name', 'Unknown')}' as Female? (yes/no): ").strip().lower()
 
-
                 if user_input in ("yes", "y"):
                     if filename_ignore_performer_ID:
                         performer_name = clean_name(performer.get("name", "Unknown"))
@@ -672,10 +754,36 @@ async def extract_female_performers(selected_entry, tpdb_scenes_url, filename_ig
                         female_performers.append((performer.get("name", "Unknown"), performer["parent"].get("id", "")))
 
         female_performers.sort()
+
+        # Mode 2: ask user which extracted performers are relevant for this scene
+        if mode == 2 and female_performers:
+            if send_notification:
+                result = await send_notification("User input required - Select Relevant Performers")
+                if not result:
+                    logger.warning("Notifier failed to send user input request.")
+            await asyncio.sleep(0.5)
+
+            logger.info("Extracted performers for this scene:")
+            for i, (name, pid) in enumerate(female_performers, start=1):
+                logger.info(f"  {i}. {name}")
+
+            logger.info("Enter the numbers of the performers to KEEP, separated by commas (e.g. 1,3) or 'all' to keep everyone:")
+            raw = input("> ").strip().lower()
+
+            if raw != "all":
+                try:
+                    selected_indices = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+                    female_performers = [
+                        p for i, p in enumerate(female_performers, start=1)
+                        if i in selected_indices
+                    ]
+                except ValueError:
+                    logger.warning("Invalid input for performer selection, keeping all performers.")
+
         if female_performers:
             return female_performers
         else:
-            user_entries = await get_user_input_performers(selected_entry, tpdb_scenes_url, send_notification)
+            user_entries = await get_user_input_performers(selected_entry, api_mode_url, send_notification)
             if user_entries:
                 female_performers.extend([(name, "") for name in user_entries])
             if not female_performers or len(female_performers) < 1:
@@ -816,7 +924,7 @@ async def remove_date_from_text(text: str) -> str:
     return cleaned
 
 
-async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
+async def ensure_scene_collected(scene_id: str, jav_api_mode: bool, movies_api_mode: bool) -> bool:
     """
     Checks whether a scene is already collected.
     If not collected, adds it to the collection.
@@ -865,6 +973,8 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
             return False
         if jav_api_mode:
             url = f"{api_url}?scene_id={scene_id}&type=JAV"
+        elif movies_api_mode:
+            url = f"{api_url}?scene_id={scene_id}&type=Movie"
         else:
             url = f"{api_url}?scene_id={scene_id}&type=Scene"
 
@@ -883,7 +993,12 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool) -> bool:
         add_response = _request("POST", url, api_auth)
 
         if add_response is not None:
-            logger.info(f"Scene added to collection.")
+            if movies_api_mode:
+                logger.info(f"Movie added to collection.")
+            elif jav_api_mode:
+                logger.info(f"JAV Scene added to collection.")
+            else:
+                logger.info(f"Scene added to collection.")
             return True
 
         logger.error(f"Failed to add scene {scene_id} to collection.")
