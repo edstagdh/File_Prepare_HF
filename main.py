@@ -645,60 +645,80 @@ async def process_files():
         # Filename mode selection
         # -------------------------------------------------
 
+        tpdb_id_filename = f"{formatted_site}.{year}.{month}.{day}.{tpdb__id}"
+
         if filename_mode == "title":
 
-            selected_filename = title_filename
+            # Preferred mode
+            if len(title_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = title_filename
+
+            # Fallback to names
+            elif len(names_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = names_filename
+                logger.warning(
+                    "Title filename exceeded max length, "
+                    "falling back to names"
+                )
+
+            # Fallback to tpdb_id
+            else:
+                selected_filename = tpdb_id_filename
+                logger.warning(
+                    f"Title and names filenames both exceeded max length "
+                    f"({MAX_FILENAME_LENGTH}), falling back to tpdb_id"
+                )
 
         elif filename_mode == "names":
 
-            if len(names_filename) > MAX_FILENAME_LENGTH:
-                logger.error(
-                    f"Names filename exceeded max length "
-                    f"({MAX_FILENAME_LENGTH})"
+            # Preferred mode
+            if len(names_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = names_filename
+
+            # Fallback to title
+            elif len(title_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = title_filename
+                logger.warning(
+                    "Names filename exceeded max length, "
+                    "falling back to title"
                 )
 
-                logger.error(f"Length: {len(names_filename)}")
-                logger.error(f"Filename: {names_filename}")
-
-                raise ValueError("Names filename too long")
-
-            selected_filename = names_filename
+            # Fallback to tpdb_id
+            else:
+                selected_filename = tpdb_id_filename
+                logger.warning(
+                    f"Names and title filenames both exceeded max length "
+                    f"({MAX_FILENAME_LENGTH}), falling back to tpdb_id"
+                )
 
         elif filename_mode == "both":
 
             # Preferred mode
             if len(both_filename) <= MAX_FILENAME_LENGTH:
                 selected_filename = both_filename
-                # logger.debug("Using combined filename mode(performers + title)")
 
-            # Fallback to names only
+            # Fallback to names
             elif len(names_filename) <= MAX_FILENAME_LENGTH:
-
                 selected_filename = names_filename
-
                 logger.warning(
                     "Combined filename exceeded max length, "
-                    "falling back to performer names"
+                    "falling back to names"
                 )
 
-            # Hard fail
+            # Fallback to title
+            elif len(title_filename) <= MAX_FILENAME_LENGTH:
+                selected_filename = title_filename
+                logger.warning(
+                    "Combined and names filenames both exceeded max length, "
+                    "falling back to title"
+                )
+
+            # Fallback to tpdb_id
             else:
-
-                logger.error(
-                    "Combined filename and names filename "
-                    "both exceeded max allowed length"
-                )
-
-                logger.error(
-                    f"Combined length: {len(both_filename)}"
-                )
-
-                logger.error(
-                    f"Names length: {len(names_filename)}"
-                )
-
-                raise ValueError(
-                    "All filename strategies exceeded max length"
+                selected_filename = tpdb_id_filename
+                logger.warning(
+                    f"Combined, names, and title filenames all exceeded max length "
+                    f"({MAX_FILENAME_LENGTH}), falling back to tpdb_id"
                 )
         elif filename_mode == "tpdb_id":
 
