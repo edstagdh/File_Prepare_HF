@@ -1100,7 +1100,7 @@ async def get_selected_filename(
 
             # Get user input
             try:
-                scene_title = input("Enter title: ").strip()
+                scene_filename = input("Enter user input for filename: ").strip()
 
             except Exception as e:
                 logger.exception(
@@ -1110,7 +1110,7 @@ async def get_selected_filename(
                 continue
 
             # Validate raw input
-            if not scene_title:
+            if not scene_filename:
                 logger.warning(
                     "User entered an empty title."
                 )
@@ -1124,7 +1124,7 @@ async def get_selected_filename(
             # Clean input
             try:
                 clean_user_input = await clean_filename(
-                    scene_title,
+                    scene_filename,
                     bad_words,
                     mode=2
                 )

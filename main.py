@@ -78,6 +78,8 @@ async def process_files():
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
+        performers_approval = config["performers_approval"]
+        title_approval = config["title_approval"]
         title_date_mode = config["title_date_mode"]
         title_ignore_strings = config["title_ignore_strings"]
         manual_mode_ask_suffix = config["manual_mode_ask_suffix"]
@@ -359,6 +361,8 @@ async def process_files():
                     jav_api_mode,
                         movies_api_mode,
                         movies_scenes_mode,
+                        title_approval,
+                        performers_approval,
                     filename_ignore_performer_ID,
                     send_notification,
                     existing_tpdb_uuid,
@@ -412,6 +416,8 @@ async def process_files():
                     jav_api_mode,
                         movies_api_mode,
                         movies_scenes_mode,
+                        title_approval,
+                        performers_approval,
                     filename_ignore_performer_ID,
                     send_notification,
                     existing_tpdb_uuid,

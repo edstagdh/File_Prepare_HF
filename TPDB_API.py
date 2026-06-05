@@ -11,9 +11,9 @@ from typing import Optional
 from Utilities import load_credentials, remove_ignored_strings, calculate_oshash
 
 
-async def query_api(query_string, scene_date, manual_mode, part_match, generate_hf_template, jav_api_mode, movies_api_mode, movies_scenes_mode,
-                    filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match, add_timestamps_markers,
-                    tpdb_try_match_oshash_before_parse, mode):
+async def query_api(query_string, scene_date, manual_mode, part_match, generate_hf_template, jav_api_mode, movies_api_mode, movies_scenes_mode, title_approval,
+                    performers_approval, filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match,
+                    add_timestamps_markers, tpdb_try_match_oshash_before_parse, mode):
     max_retries = 3
     delay = 5
     EMPTY_RESULT = (None,) * 14
@@ -314,6 +314,59 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
                     logger.warning("Unrecognised input, restarting scene number input...")
                     continue
 
+        # Check title approval
+        if title_approval:
+            while True:
+                if send_notification:
+                    result = await send_notification("User input required - Title Approval")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                logger.info(
+                    f"Title approval required.\n"
+                    f"Current title: {title}\n"
+                    f"Press Enter to approve, or type a new title to replace it:"
+                )
+                raw = input("> ").strip()
+
+                # User approved as-is
+                if raw == "":
+                    logger.info("Title approved as-is.")
+                    break
+
+                # Preview the new title
+                preview_title = raw
+                preview_clean = await remove_ignored_strings(preview_title, title_ignore_strings)
+
+                logger.info(
+                    f"\nPreview of new title:\n"
+                    f"  {preview_clean}\n"
+                    f"\n  [a] Approve  [r] Restart  [s] Skip (keep original title)"
+                )
+
+                if send_notification:
+                    result = await send_notification("User input required - Confirm Title")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                confirm = input("> ").strip().lower()
+
+                if confirm in ("a", "approve"):
+                    title = preview_clean
+                    logger.info(f"New title accepted: {title}")
+                    break
+                elif confirm in ("s", "skip"):
+                    logger.info("Skipping title change, keeping original.")
+                    break
+                elif confirm in ("r", "restart"):
+                    logger.info("Restarting title input...")
+                    continue
+                else:
+                    logger.warning("Unrecognised input, restarting title input...")
+                    continue
+
         clean_title = await remove_ignored_strings(title, title_ignore_strings)
 
         image_url = scene_data.get('image')
@@ -355,6 +408,8 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
             site_owner = None
         if movies_api_mode and movies_scenes_mode == "scene":
             female_performers = await extract_female_performers(scene_data, api_mode_url, filename_ignore_performer_ID, send_notification, mode=2)
+        elif performers_approval:
+            female_performers = await extract_female_performers(scene_data, api_mode_url, filename_ignore_performer_ID, send_notification, mode=3)
         elif not manual_mode:
             female_performers = await extract_female_performers(scene_data, api_mode_url, filename_ignore_performer_ID, send_notification, mode=1)
         else:
@@ -799,6 +854,91 @@ async def extract_female_performers(selected_entry, api_mode_url, filename_ignor
                     ]
                 except ValueError:
                     logger.warning("Invalid input for performer selection, keeping all performers.")
+
+                # Mode 3: full edit — remove/keep extracted performers and/or add new ones manually
+        elif mode == 3:
+            original_performers = female_performers.copy()  # snapshot before any edits
+
+            while True:
+                if send_notification:
+                    result = await send_notification("User input required - Edit Performers List")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                if female_performers:
+                    logger.info("Extracted performers for this scene:")
+                    for i, (name, pid) in enumerate(female_performers, start=1):
+                        logger.info(f"  {i}. {name}")
+                else:
+                    logger.info("No extracted performers for this scene.")
+
+                logger.info(
+                    "Options:\n"
+                    "  Enter numbers to KEEP, separated by commas (e.g. 1,3) — others will be removed\n"
+                    "  [all]  Keep all extracted performers\n"
+                    "  [none] Remove all extracted performers\n"
+                    "  Then you will be prompted to add performers manually."
+                )
+                raw = input("> ").strip().lower()
+
+                if raw == "all":
+                    pass
+                elif raw == "none":
+                    female_performers = []
+                elif raw == "":
+                    pass
+                else:
+                    try:
+                        selected_indices = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+                        female_performers = [
+                            p for i, p in enumerate(female_performers, start=1)
+                            if i in selected_indices
+                        ]
+                    except ValueError:
+                        logger.warning("Invalid input for performer selection, keeping all performers.")
+
+                logger.info(
+                    "Enter additional performer names to add, one per line.\n"
+                    "Press Enter on an empty line when done (or immediately to add none):"
+                )
+                while True:
+                    new_name = input("> ").strip()
+                    if new_name == "":
+                        break
+                    female_performers.append((new_name, ""))
+                    logger.info(f"Added performer: {new_name}")
+
+                if female_performers:
+                    logger.info("Final performers list:")
+                    for i, (name, pid) in enumerate(female_performers, start=1):
+                        logger.info(f"  {i}. {name}")
+                else:
+                    logger.info("Performers list is empty.")
+
+                logger.info("  [a] Approve  [r] Restart")
+
+                if send_notification:
+                    result = await send_notification("User input required - Confirm Performers List")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                confirm = input("> ").strip().lower()
+
+                if confirm in ("a", "approve"):
+                    logger.info("Performers list approved.")
+                    break
+                elif confirm in ("r", "restart"):
+                    logger.info("Restarting performers edit...")
+                    female_performers = original_performers.copy()  # restore snapshot
+                    continue
+                else:
+                    logger.warning("Unrecognised input, restarting performers edit...")
+                    female_performers = original_performers.copy()  # restore snapshot
+                    continue
+
+            female_performers.sort()
 
         if female_performers:
             return female_performers

@@ -54,6 +54,8 @@
   "python_min_version_supported": [3, 9],
   "python_max_version_supported": [3, 10],
   "bad_words": [".Hardcore"],
+  "performers_approval": false,
+  "title_approval": false,
   "title_date_mode": "1",
   "title_date_available_modes": {
     "1": "2025-January-01",

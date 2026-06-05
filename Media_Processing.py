@@ -30,16 +30,23 @@ async def has_unwanted_metadata(file_path) -> bool:
 
         for track in media_info.tracks:
             track_type = track.track_type.lower()
-            # logger.debug(track_type)
 
             # Debug view tracks metadata fields
+            # logger.debug(track_type)
             # for attr, value in track.__dict__.items():
             #     logger.debug(f"{attr} = {value}")
 
 
             # ✅ Check Encoded/Tagged date everywhere
             if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
+                # In case file has any Encoded/Tagged date attribute
                 return True
+
+            # ✅ Check copyright on general track
+            if track_type == "general":
+                if getattr(track, "copyright", None):
+                    # Video has any copyright attribute
+                    return True
 
             # ✅ Custom logic for audio track
             if track_type == "audio":
