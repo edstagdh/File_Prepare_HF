@@ -1,8 +1,7 @@
 import asyncio
 import json
-import os
 import re
-import requests
+import httpx
 from num2words import num2words
 import time
 from loguru import logger
@@ -11,7 +10,7 @@ from typing import Optional
 from Utilities import load_credentials, remove_ignored_strings, calculate_oshash
 
 
-async def query_api(query_string, scene_date, manual_mode, part_match, generate_hf_template, jav_api_mode, movies_api_mode, movies_scenes_mode, title_approval,
+async def query_api(query_string, scene_date, manual_mode, part_match, generate_hf_template, jav_api_mode, movies_api_mode, movies_scenes_mode, date_approval, title_approval,
                     performers_approval, filename_ignore_performer_ID, send_notification, existing_tpdb_uuid, file, title_ignore_strings, warn_length_match,
                     add_timestamps_markers, tpdb_try_match_oshash_before_parse, mode):
     max_retries = 3
@@ -157,7 +156,7 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
                         file,
                     )
 
-            if duration is not None and markers:
+            if duration is not None and markers and add_timestamps_markers:
 
                 fixed_markers = []
 
@@ -314,6 +313,64 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
                     logger.warning("Unrecognised input, restarting scene number input...")
                     continue
 
+        scene_date = scene_data.get('date')
+
+        # Check date approval
+        if date_approval:
+            while True:
+                if send_notification:
+                    result = await send_notification("User input required - Date Approval")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                logger.info(
+                    f"Date approval required.\n"
+                    f"Current date: {scene_date}\n"
+                    f"Press Enter to approve, or type a new date to replace it (format: YYYY-MM-DD):"
+                )
+                raw = input("> ").strip()
+
+                # User approved as-is
+                if raw == "":
+                    logger.info("Date approved as-is.")
+                    break
+
+                # Validate format
+                try:
+                    datetime.strptime(raw, "%Y-%m-%d")
+                except ValueError:
+                    logger.warning(f"Invalid date format '{raw}', expected YYYY-MM-DD. Please try again.")
+                    continue
+
+                logger.info(
+                    f"\nPreview of new date:\n"
+                    f"  {raw}\n"
+                    f"\n  [a] Approve  [r] Restart  [s] Skip (keep original date)"
+                )
+
+                if send_notification:
+                    result = await send_notification("User input required - Confirm Date")
+                    if not result:
+                        logger.warning("Notifier failed to send user input request.")
+                await asyncio.sleep(0.5)
+
+                confirm = input("> ").strip().lower()
+
+                if confirm in ("a", "approve"):
+                    scene_date = raw
+                    logger.info(f"New date accepted: {scene_date}")
+                    break
+                elif confirm in ("s", "skip"):
+                    logger.info("Skipping date change, keeping original.")
+                    break
+                elif confirm in ("r", "restart"):
+                    logger.info("Restarting date input...")
+                    continue
+                else:
+                    logger.warning("Unrecognised input, restarting date input...")
+                    continue
+
         # Check title approval
         if title_approval:
             while True:
@@ -372,7 +429,7 @@ async def query_api(query_string, scene_date, manual_mode, part_match, generate_
         image_url = scene_data.get('image')
         tpdb_image_url = scene_data.get("background", {}).get("full")
         scene_description = scene_data.get('description')
-        scene_date = scene_data.get('date')
+
         slug = scene_data.get('slug')
         url = scene_data.get('url')
         tpdb_uuid = scene_data.get('id')
@@ -459,14 +516,12 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
     while True:  # allows user-triggered retry cycles
         for attempt in range(1, max_retries + 1):
             try:
-                response = requests.get(url, headers=headers)
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, headers=headers)
 
                 # Retry only on 5xx
                 if 500 <= response.status_code < 600:
-                    raise requests.HTTPError(
-                        f"Server error {response.status_code}",
-                        response=response
-                    )
+                    raise httpx.HTTPStatusError(f"Server error {response.status_code}", request=response.request, response=response)
 
                 response.raise_for_status()
                 response_data = response.json()
@@ -483,7 +538,7 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
 
                 return response_data
 
-            except requests.HTTPError as e:
+            except httpx.HTTPStatusError as e:
                 status = e.response.status_code if e.response else "N/A"
 
                 logger.error(
@@ -498,7 +553,7 @@ async def send_request(api_url, api_auth, query_string, max_retries, delay, mode
                 else:
                     logger.error("Maximum retries reached.")
 
-            except requests.RequestException as e:
+            except httpx.RequestError as e:
                 # Non-5xx errors → don't retry automatically
                 logger.error(
                     f"Non-retryable error: "
@@ -590,54 +645,56 @@ async def fetch_api_site_data(api_url, api_auth, site_parent, max_retries, delay
         "accept": "application/json",
         "Authorization": f"Bearer {api_auth}"
     }
+    async with httpx.AsyncClient() as client:
+        for attempt in range(max_retries):
+            try:
+                # Fetch data for the current site
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                response_data = response.json()
 
-    for attempt in range(max_retries):
-        try:
-            # Fetch data for the current site
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            response_data = response.json()
+                if 'data' in response_data:
+                    if attempt > 0:
+                        logger.info("Retry successful!")
 
-            if 'data' in response_data:
-                if attempt > 0:
-                    logger.info("Retry successful!")
+                    # Start traversing the parent hierarchy
+                    while site_parent:
+                        if debug:
+                            logger.info(f"Fetching data for site: {site_parent}")
+                            logger.debug(json.dumps(response_data, indent=4))
 
-                # Start traversing the parent hierarchy
-                while site_parent:
-                    if debug:
-                        logger.info(f"Fetching data for site: {site_parent}")
-                        logger.debug(json.dumps(response_data, indent=4))
+                        # Get current site's name (this could be the top-level parent if no parent is found)
+                        top_parent = response_data['data'].get("name", "Unknown")
 
-                    # Get current site's name (this could be the top-level parent if no parent is found)
-                    top_parent = response_data['data'].get("name", "Unknown")
+                        # If there's no parent, we've reached the top-level parent
+                        next_parent = response_data['data'].get("parent", None)
 
-                    # If there's no parent, we've reached the top-level parent
-                    next_parent = response_data['data'].get("parent", None)
+                        if next_parent is None:  # Top-level parent reached
+                            # logger.info(f"Top-level parent found: {top_parent}")
+                            return top_parent
 
-                    if next_parent is None:  # Top-level parent reached
-                        # logger.info(f"Top-level parent found: {top_parent}")
-                        return top_parent
+                        # Move to the next parent
+                        site_parent = response_data['data']['parent']['uuid']
+                        url = f"{api_url}{site_parent}"
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(url, headers=headers)
+                        response.raise_for_status()
+                        response_data = response.json()
 
-                    # Move to the next parent
-                    site_parent = response_data['data']['parent']['uuid']
-                    url = f"{api_url}{site_parent}"
-                    response = requests.get(url, headers=headers)
-                    response.raise_for_status()
-                    response_data = response.json()
-
-            # If the response data does not contain 'data', it's an error case
-            logger.error("Data key not found in the response.")
-            return None
-
-        except requests.RequestException as e:
-            logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
-            if attempt < max_retries - 1:
-                logger.warning(f"Retrying in {delay} seconds...")
-                await asyncio.sleep(delay)
+                # If the response data does not contain 'data', it's an error case
+                logger.error("Data key not found in the response.")
                 return None
-            else:
-                logger.error("Maximum retries reached. Request failed.")
-                return None
+
+            except httpx.RequestError as e:
+                logger.error(f"Attempt {attempt + 1} failed: {str(e).replace(api_url, '**REDACTED**')}")
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                    return None
+                else:
+                    logger.error("Maximum retries reached. Request failed.")
+                    return None
     return None
 
 
@@ -650,7 +707,7 @@ async def get_user_input_performers(selected_entry, api_mode_url, send_notificat
     """
     scene_title = selected_entry.get('title', '(No title available)')
     scene_slug = selected_entry.get('slug', '(No scene available)')
-    scene_url = f"{api_mode_url}{scene_slug}"
+    scene_url = f"{api_mode_url}/{scene_slug}"
     temp_performers = []
     while True:
         try:
@@ -1088,15 +1145,13 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool, movies_api_m
     """
     Checks whether a scene is already collected.
     If not collected, adds it to the collection.
-
-    This function is intentionally blocking and uses `requests`.
     """
 
     if not scene_id:
         logger.error("Scene ID is required.")
         return False
 
-    def _request(method: str, url: str, token: str) -> dict | None:
+    async def _request(method: str, url: str, token: str) -> dict | None:
         """
         Internal request handler (unique to this function).
         """
@@ -1106,11 +1161,12 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool, movies_api_m
         }
 
         try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                timeout=60
+            async with httpx.AsyncClient() as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    timeout=60
             )
 
             if response.status_code not in (200, 201):
@@ -1139,7 +1195,7 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool, movies_api_m
             url = f"{api_url}?scene_id={scene_id}&type=Scene"
 
         # ---- 1. CHECK (GET) ----
-        check_response = _request("GET", url, api_auth)
+        check_response = await _request("GET", url, api_auth)
 
         if not isinstance(check_response, dict) or "value" not in check_response:
             logger.error(f"Invalid check response for scene {scene_id}: {check_response}")
@@ -1150,7 +1206,7 @@ async def ensure_scene_collected(scene_id: str, jav_api_mode: bool, movies_api_m
             return True
 
         # ---- 2. ADD (POST) ----
-        add_response = _request("POST", url, api_auth)
+        add_response = await _request("POST", url, api_auth)
 
         if add_response is not None:
             if movies_api_mode:

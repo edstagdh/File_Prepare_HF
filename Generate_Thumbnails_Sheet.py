@@ -525,7 +525,8 @@ async def get_video_metadata(file_path, char_break_line, duration):
 
     # General metadata
     try:
-        title = getattr(general_track, "title", "N/A") if general_track else "N/A"
+        title = getattr(general_track, "title", None) if general_track else None
+        title = title if title is not None else "N/A"
         if len(title) > char_break_line:
             title = await break_string_at_char(title, " ", char_break_line)
             add_lines += 1
@@ -536,7 +537,11 @@ async def get_video_metadata(file_path, char_break_line, duration):
                        await break_string_at_char(filename, "-", char_break_line)
             add_lines += 1
 
-        size_bytes = int(getattr(general_track, "file_size", 0)) if general_track else 0
+        size_bytes = os.path.getsize(file_path)
+        if size_bytes == 0 and general_track:
+            raw = getattr(general_track, "file_size", None)
+            if raw is not None:
+                size_bytes = int(str(raw).replace(" ", "").replace(",", ""))
         size_mb = size_bytes / (1024 * 1024)
         size_gb = size_bytes / (1024 * 1024 * 1024)
         file_size = f"{size_gb:.2f} GB | {int(size_mb):,} MB"
@@ -838,3 +843,64 @@ async def process_thumbnails(input_video_file_name,
     except Exception as e:
         logger.exception(f"An error occurred during thumbnail processing: {e}")
         return False
+
+
+if __name__ == "__main__":
+    import sys
+
+
+    async def main():
+        # ── User input ────────────────────────────────────────────────────────
+        folder_path = fr"D:\Angela White\Fansites\AW"
+
+        if not os.path.isdir(folder_path):
+            logger.error(f"'{folder_path}' is not a valid directory.")
+            sys.exit(1)
+
+        mp4_files = [f for f in os.listdir(folder_path) if f.lower().endswith(".mp4")]
+
+        if not mp4_files:
+            logger.warning("No .mp4 files found in the specified folder.")
+            sys.exit(0)
+
+        logger.info(f"Found {len(mp4_files)} .mp4 file(s). Starting thumbnail generation...")
+
+        # ── Settings you can tweak ────────────────────────────────────────────
+        image_output_format = "jpg"  # Output format: "jpg", "png", "webp"
+        use_sub_folder = False  # Set True to save sheets into a subfolder
+        output_path = os.path.join(folder_path, "Thumbnails") if use_sub_folder else folder_path
+
+        # ── Process each file ─────────────────────────────────────────────────
+        success_count = 0
+        fail_count = 0
+
+        for idx, filename in enumerate(mp4_files, 1):
+            logger.info(f"[{idx}/{len(mp4_files)}] Processing: {filename}")
+            try:
+                result = await process_thumbnails(
+                    input_video_file_name=filename,
+                    input_video_file_path=folder_path,
+                    original_video_file_name=filename,
+                    output_path=output_path,
+                    image_output_format=image_output_format,
+                    is_vertical=None,
+                    use_sub_folder=use_sub_folder,
+                    contains_unwanted_metadata=False,
+                )
+                if result:
+                    logger.success(f"Done: {filename}")
+                    success_count += 1
+                else:
+                    logger.error(f"Failed: {filename}")
+                    fail_count += 1
+            except Exception as e:
+                logger.exception(f"Exception for {filename}: {e}")
+                fail_count += 1
+
+        # ── Summary ───────────────────────────────────────────────────────────
+        logger.info(f"Finished. {success_count} succeeded, {fail_count} failed.")
+        if use_sub_folder:
+            logger.info(f"Thumbnail sheets saved to: {output_path}")
+
+
+    asyncio.run(main())

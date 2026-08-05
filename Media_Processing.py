@@ -5,7 +5,7 @@ import json
 import numpy as np
 import os
 import re
-import requests
+import httpx
 import shutil
 import subprocess
 import textwrap
@@ -24,7 +24,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 
-async def has_unwanted_metadata(file_path) -> bool:
+async def has_unwanted_metadata(file_path, set_exclusive, exclusive_string) -> bool:
     try:
         media_info = MediaInfo.parse(file_path)
 
@@ -45,8 +45,13 @@ async def has_unwanted_metadata(file_path) -> bool:
             # ✅ Check copyright on general track
             if track_type == "general":
                 if getattr(track, "copyright", None):
-                    # Video has any copyright attribute
-                    return True
+                    if not set_exclusive:
+                        # Video has copyright attribute and set_exclusive = False
+                        return True
+                    else:
+                        # Video has copyright attribute, and it doesn't match exclusive_string
+                        if getattr(track, "copyright", None) != exclusive_string:
+                            return True
 
             # ✅ Custom logic for audio track
             if track_type == "audio":
@@ -67,6 +72,151 @@ async def has_unwanted_metadata(file_path) -> bool:
         logger.error(f"Error reading metadata: {e}")
         return False
 
+
+async def check_multiple_audio_tracks(input_file):
+    """
+    Check whether a video file contains more than one audio track using pymediainfo.
+
+    Args:
+        input_file (str): Full path to the video file to inspect.
+
+    Returns:
+        bool: True if the file has more than 1 audio track, False otherwise
+              (including when the file can't be parsed or has 0/1 audio tracks).
+    """
+    try:
+        media_info = MediaInfo.parse(input_file)
+
+        audio_track_count = sum(1 for track in media_info.tracks if track.track_type == "Audio")
+
+        return audio_track_count > 1
+
+    except Exception:
+        logger.exception(f"Error checking audio tracks for {input_file}")
+        return False
+
+
+async def select_and_filter_audio_tracks(file_path, keep_old=True):
+    """
+    Prompt the user to choose which audio track(s) to keep in a video file, then use ffmpeg
+    (via run_command) to rebuild the file with only the selected audio track(s) via stream
+    copy (no re-encoding), preserving video, subtitles, other data streams, metadata, and
+    chapters.
+
+    Lists all audio tracks found (index, language, title, codec, bitrate, default flag) and
+    asks the user to select one, several (comma-separated), or all of them to keep.
+
+    Args:
+        file_path (str): Full path to the video file to process.
+        keep_old (bool): If True, keeps the original file untouched and writes the result to
+                          a new file with a "_removed_tracks" suffix. If False, replaces the
+                          original file in place (original is deleted after processing).
+
+    Returns:
+        str | None: Path to the resulting file on success, or None if the operation failed,
+                    was cancelled, or no changes were needed.
+    """
+    # --- Parse media info ---
+    try:
+        media_info = MediaInfo.parse(file_path)
+        audio_tracks = [track for track in media_info.tracks if track.track_type == "Audio"]
+    except Exception:
+        logger.exception(f"Error parsing media info for {file_path}")
+        return None
+
+    if not audio_tracks:
+        logger.warning(f"No audio tracks found in {file_path}")
+        return None
+
+    if len(audio_tracks) == 1:
+        logger.info(f"Only one audio track found in {file_path}, nothing to filter.")
+        return None
+
+    # --- Display tracks ---
+    try:
+        print(f"\nAudio tracks found in: {os.path.basename(file_path)}")
+        print("-" * 90)
+        for idx, track in enumerate(audio_tracks):
+            language = track.language or "und"
+            title = track.title or "N/A"
+            codec = track.codec_id or track.format or "N/A"
+            bitrate = track.bit_rate or "N/A"
+            default = track.default or "No"
+            print(f"[{idx + 1}] Language: {language} | Title: {title} | Codec: {codec} | "
+                  f"Bitrate: {bitrate} | Default: {default}")
+        print("-" * 90)
+    except Exception:
+        logger.exception(f"Error displaying audio tracks for {file_path}")
+        return None
+
+    # --- Get user selection ---
+    try:
+        user_input = input("Enter track number(s) to keep (e.g. '1', '1,3', or 'all'): ").strip().lower()
+
+        if user_input == "all":
+            selected_indexes = list(range(len(audio_tracks)))
+        else:
+            selected_indexes = [int(x.strip()) - 1 for x in user_input.split(",") if x.strip()]
+
+            if not selected_indexes or any(i < 0 or i >= len(audio_tracks) for i in selected_indexes):
+                logger.error(f"Invalid track selection: '{user_input}'")
+                return None
+    except ValueError:
+        logger.error(f"Invalid input received: '{user_input}'")
+        return None
+    except Exception:
+        logger.exception(f"Error reading user selection for {file_path}")
+        return None
+
+    if len(selected_indexes) == len(audio_tracks):
+        logger.info("All audio tracks selected, no changes needed.")
+        return None
+
+    # --- Build and run ffmpeg command ---
+    base_name, ext = os.path.splitext(file_path)
+    temp_output = f"{base_name}_temp_audio_filter{ext}"
+
+    try:
+        # -map 0 keeps everything (video, subtitles, data, chapters), -map -0:a strips all
+        # audio, then each selected track is re-added individually by its audio stream index.
+        command = ["ffmpeg", "-y", "-i", file_path, "-map", "0", "-map", "-0:a"]
+        for idx in selected_indexes:
+            command.extend(["-map", f"0:a:{idx}"])
+        command.extend(["-c", "copy", "-map_metadata", "0", "-map_chapters", "0", temp_output])
+
+        logger.debug(f"Running ffmpeg command: {' '.join(command)}")
+
+        stdout, stderr, exit_code = await run_command(command)
+
+        if exit_code != 0:
+            logger.error(f"ffmpeg failed (exit_code={exit_code}) for {file_path}: {stderr}")
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+            return None
+    except Exception:
+        logger.exception(f"Error running ffmpeg command for {file_path}")
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
+        return None
+
+    # --- Finalize output file ---
+    try:
+        if keep_old:
+            keep_old_path = f"{base_name}_original_tracks{ext}"
+            os.rename(file_path, keep_old_path)
+            os.rename(temp_output, file_path)
+            final_path = file_path
+            logger.success(f"Kept original file while renaming it to: {keep_old_path}")
+        else:
+            os.remove(file_path)
+            os.rename(temp_output, file_path)
+            final_path = file_path
+            logger.success(f"Replaced original file with filtered audio tracks: {final_path}")
+
+        return final_path
+    except Exception:
+        logger.exception(f"Error finalizing output file for {file_path}")
+        return None
 
 async def get_existing_title(input_file):
     try:
@@ -96,6 +246,30 @@ async def get_existing_description(input_file):
                 if description:
                     return description.strip()
                 return None
+
+        return None
+
+    except Exception:
+        logger.exception(f"Error retrieving description from {input_file}")
+        return None
+
+
+async def check_existing_exclusive(input_file, exclusive_string):
+    try:
+        media_info = MediaInfo.parse(input_file)
+
+        for track in media_info.tracks:
+            if track.track_type == "General":
+                copyright_text = track.copyright  # corresponds to ©cprt
+                logger.debug(copyright_text)
+
+                if copyright_text:
+                    if copyright_text == exclusive_string:
+                        return None
+                    else:
+                        return True
+                else:
+                    return True
 
         return None
 
@@ -407,8 +581,9 @@ async def cover_image_download_and_conversion(image_url: str,
             return True
 
         # Download helper
-        def download_image(url):
-            response = requests.get(url, timeout=10)
+        async def download_image(url):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=10)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
             if not content_type.startswith("image/"):
@@ -421,12 +596,12 @@ async def cover_image_download_and_conversion(image_url: str,
 
         # Try downloading
         try:
-            response = download_image(image_url)
+            response = await download_image(image_url)
         except Exception as e:
             # commented out to avoid log clutter, will always fall back to TPDB image url if exists.
             # logger.error(f"Failed to download from primary URL: {image_url}, error: {e}")
             if tpdb_image_url:
-                response = download_image(tpdb_image_url)
+                response = await download_image(tpdb_image_url)
             else:
                 raise
 
@@ -513,14 +688,14 @@ async def convert_image_format(input_file_path: str, output_file_path: str, outp
         return False, None
 
 
-async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN,
+async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, face_detector_model_path,
                                              performer_image_output_format, font_full_name):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
         :param font_full_name:
         :param performer_image_output_format:
-        :param MTCNN:
+        :param face_detector_model_path:
         :param posters_limit:
         :param target_size: Set the desired output size (X, Y)
         :param zoom_factor: Set the zoom factor for cropping
@@ -577,7 +752,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             text_color = (255, 255, 255)  # Text color (black)
             position_percentage = 0.8
             for file in downloaded_files:
-                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, p, font_size, text_color, position_percentage, MTCNN,
+                await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, p, font_size, text_color, position_percentage, face_detector_model_path,
                                         performer_image_output_format, font_full_name)
 
         except Exception:
@@ -586,65 +761,43 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
     return True
 
 
-async def download_poster_images(poster_urls: list[str], faces_dir: str, performer_slug: str, posters_limit: int):
-    """
-    Downloads up to the first N successful performer poster images, saves them as webp format.
-
-    :param poster_urls: List of poster image URLs
-    :param faces_dir: Directory to save the downloaded images
-    :param performer_slug: Slug to include in the saved filename
-    :param posters_limit: Max number of images to download
-    :return: List of successfully saved poster file paths, or ["already downloaded"] if they exist, or False if none were saved
-    """
+async def download_poster_images(poster_urls, faces_dir, performer_slug, posters_limit):
     os.makedirs(faces_dir, exist_ok=True)
     downloaded_files = []
 
-    # Check if images already exist for the performer
-    existing_files = [
-        f for f in os.listdir(faces_dir)
-        if f.startswith(performer_slug) and f.lower().endswith(".webp")
-    ]
-
+    existing_files = [f for f in os.listdir(faces_dir)
+                      if f.startswith(performer_slug) and f.lower().endswith(".webp")]
     if existing_files:
-        downloaded_files.append("already downloaded")
         logger.info(f"Performer posters already exist in {faces_dir}")
-        return downloaded_files
+        return ["already downloaded"]
 
-    for index, url in enumerate(poster_urls, start=1):
-        if len(downloaded_files) >= posters_limit:
-            break
-
+    async def fetch_one(index, url):
         try:
-            # logger.debug(f"Attempting to download poster from: {url}")
-            response = requests.get(url, timeout=10)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=10)
             response.raise_for_status()
-
-            # Open image from response
             image = Image.open(BytesIO(response.content)).convert("RGB")
-
-            # Save as webp format
             filename = f"{performer_slug}_{index}.webp"
             filepath = os.path.join(faces_dir, filename)
             image.save(filepath, format="WEBP")
-            downloaded_files.append(filepath)
             logger.success(f"Saved image to {filepath}")
-
+            return filepath
         except Exception as e:
             logger.warning(f"Failed to download or save poster {index} for {performer_slug}: {e}")
+            return None
 
-    if downloaded_files:
-        return downloaded_files
-    else:
-        logger.error(f"All poster downloads failed for performer: {performer_slug}")
-        return False
+    results = await asyncio.gather(*(fetch_one(i, url) for i, url in enumerate(poster_urls[:posters_limit], start=1)))
+    downloaded_files = [r for r in results if r]
+
+    return downloaded_files if downloaded_files else False
 
 
-async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, MTCNN,
+async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, face_detector_model_path,
                             performer_image_output_format, font_full_name):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
-    bounding_boxes, keypoints, image = await detect_faces(image_path, MTCNN)
+    bounding_boxes, keypoints, image = await detect_faces(image_path, face_detector_model_path)
 
     if len(bounding_boxes) == 0:
         logger.error(f"No faces detected in image: {image_path}")
@@ -768,36 +921,31 @@ async def overlay_text(
     logger.success(f"Saved output image as WebP: {output_file}")
 
 
-async def detect_faces(image_path, MTCNN):  # Adjust the threshold here
-
+async def detect_faces(image_path, face_detector_model_path):
     threshold = 0.93
 
-    detector = MTCNN()
-    # Load the image
     image = cv2.imread(image_path)
+    img_h, img_w = image.shape[:2]
 
-    # Convert image to RGB (MTCNN expects RGB images)
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    detector = cv2.FaceDetectorYN.create(
+        model=face_detector_model_path,
+        config="",
+        input_size=(img_w, img_h),
+        score_threshold=threshold,
+    )
 
-    # Detect faces in the image
-    faces = detector.detect_faces(rgb_image)
+    _, faces = detector.detect(image)
 
-    # List to store bounding boxes and keypoints
     bounding_boxes = []
     keypoints = []
 
-    # Extract the face bounding boxes and keypoints, applying the confidence threshold
-    for face in faces:
-        logger.debug(f"Confidence: {face['confidence']:.2f}")
-        if face['confidence'] >= threshold:  # Only use faces with high confidence
-            bounding_boxes.append(face['box'])  # Get the bounding box (x, y, width, height)
-            keypoints.append(face['keypoints'])  # Get the keypoints (left eye, right eye, etc.)
-        else:
-            # logger.debug(f"Confidence level not high enough to pass threshold({threshold}): {face['confidence']:.2f}")
-            pass
+    for face in (faces if faces is not None else []):
+        logger.debug(f"Confidence: {float(face[-1]):.2f}")
+        x, y, w, h = face[0:4].astype(int)
+        bounding_boxes.append([x, y, w, h])
+        keypoints.append(face[4:14].reshape(5, 2).tolist())  # right eye, left eye, nose, right mouth, left mouth
 
     return bounding_boxes, keypoints, image
-
 
 async def crop_face(image, bounding_box, zoom_factor=1.2):
     # Extract the face region from the image using bounding box (x, y, w, h)
@@ -1306,10 +1454,9 @@ async def add_mp4_chapters(
         title,
         description,
         tpdb_id,
-        matching_mode
+        matching_mode, set_exclusive, exclusive_string
 ) -> bool:
     logger.debug("Chapters detected, Chapters will be applied and only then metadata will be applied.")
-    # logger.debug(f"add_mp4_chapters called for: {input_file}")
     # logger.debug(f"Incoming chapters_list: {chapters_list}")
 
     if not chapters_list:
@@ -1382,12 +1529,17 @@ async def add_mp4_chapters(
         # logger.debug(f"Temporary metadata file created: {tmp_meta_path}")
 
         # ffmpeg command
+        # -map_metadata 1 pulls global metadata from the FFMETADATA file (input 1)
+        # instead of the original video (input 0). Since that file only ever
+        # contains ";FFMETADATA1" + "[CHAPTER]" blocks and nothing else, this is
+        # equivalent to stripping all unwanted global metadata (encoded_date,
+        # tagged_date, copyright, etc.) while embedding chapters, in a single pass.
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",
             "-i", str(input_path),
             "-i", tmp_meta_path,
-            "-map_metadata", "0",
+            "-map_metadata", "1",
             "-map_chapters", "1",
             "-codec", "copy",
             str(output_path)
@@ -1410,10 +1562,10 @@ async def add_mp4_chapters(
             return False
 
         os.replace(output_path, input_path)
-        # logger.debug("Chapter file successfully replaced original")
+        # logger.debug("Chapter file successfully replaced original, global metadata stripped")
 
         video = MP4(input_file)
-        await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
+        await apply_mp4_metadata(video, title, description, tpdb_id, set_exclusive, exclusive_string, matching_mode)
         video.save()
 
         return True
@@ -1438,7 +1590,7 @@ async def add_mp4_chapters(
             pass
 
 
-async def update_metadata(input_file, title, description, tpdb_id, matching_mode, add_timestamps_markers, chapters_list):
+async def update_metadata(input_file, title, description, tpdb_id, matching_mode, add_timestamps_markers, chapters_list, set_exclusive, exclusive_string):
     """
     Updates the metadata of an MP4 video file with the specified title and description,
     and removes unwanted fields completely.
@@ -1455,7 +1607,7 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
                 title,
                 description,
                 tpdb_id,
-                matching_mode
+                matching_mode, set_exclusive, exclusive_string
             )
             if not success:
                 return False
@@ -1464,7 +1616,7 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
             logger.debug("No chapters detected, metadata will be applied.")
 
             video = MP4(input_file)
-            await apply_mp4_metadata(video, title, description, tpdb_id, matching_mode)
+            await apply_mp4_metadata(video, title, description, tpdb_id, set_exclusive, exclusive_string, matching_mode)
             video.save()
 
         return True
@@ -1474,16 +1626,22 @@ async def update_metadata(input_file, title, description, tpdb_id, matching_mode
         return False
 
 
-async def apply_mp4_metadata(video, title, description, tpdb_id, matching_mode):
+async def apply_mp4_metadata(video, title, description, tpdb_id, set_exclusive, exclusive_string, matching_mode):
     video["\xa9nam"] = [title]
 
     if matching_mode != "full_manual":
         video["\xa9cmt"] = [description]
         video["\xa9alb"] = [tpdb_id]
 
-    for key in ["\xa9cpy", "cprt", "ldes", "tven", "\xa9ART"]:
+    for key in ["\xa9cpy", "ldes", "tven", "\xa9ART"]:
         if key in video:
             del video[key]
+
+    if not set_exclusive:
+        if "cprt" in video:
+            del video["cprt"]
+    else:
+        video["cprt"] = [exclusive_string]
 
     video["\xa9too"] = ["File_Prepare_HF"]
 

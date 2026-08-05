@@ -1,7 +1,8 @@
-import requests
+import httpx
 import json
 import os
 import socket
+import asyncio
 from loguru import logger
 
 
@@ -51,25 +52,23 @@ async def send_notification(message: str) -> bool:
         True  — if the message was sent successfully
         False — if all retries fail or any error occurs
     """
-    # logger.debug("Send notification running")
-
     max_retries = 3
+    retry_delay = 2  # seconds
 
     bot_token, chat_id = await load_credentials()
     if not bot_token or not chat_id:
         logger.error("Telegram bot token or chat ID is missing.")
         return False
 
-    # Get hostname (cross-platform)
     hostname = socket.gethostname()
-
-    # Prepend hostname to message
     full_message = f"[{hostname}] {message}"
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id={chat_id}&text={full_message}"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": full_message}
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = requests.post(url, timeout=10)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, data=payload, timeout=10)
 
             if response.status_code == 200:
                 result = response.json()
@@ -80,12 +79,11 @@ async def send_notification(message: str) -> bool:
             else:
                 logger.error(f"HTTP {response.status_code}: {response.text}")
 
-        except requests.RequestException as e:
+        except httpx.RequestError as e:
             logger.error(f"Request error on attempt {attempt}: {e}")
 
-        # If failed and we're not on the last attempt
         if attempt < max_retries:
             logger.info(f"Retrying ({attempt}/{max_retries})...")
+            await asyncio.sleep(retry_delay)
 
-    # If all retries failed
     return False

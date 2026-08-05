@@ -12,7 +12,8 @@ from Utilities import verify_ffmpeg_and_ffprobe, load_json_file, pre_process_fil
 from TPDB_API import query_api, ensure_scene_collected
 from Media_Processing import get_existing_title, get_existing_description, get_existing_tpdb_uuid, cover_image_download_and_conversion, \
     generate_performer_profile_picture, re_encode_video, update_metadata, get_video_fps, get_video_resolution_and_orientation, get_video_codec, has_unwanted_metadata, \
-    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update, is_video_hevc_or_av1
+    reset_all_metadata, check_existing_Encoder_Library, chapters_need_update, is_video_hevc_or_av1, check_existing_exclusive, check_multiple_audio_tracks, \
+    select_and_filter_audio_tracks
 from Generate_Video_Preview import process_video_preview
 from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
@@ -55,6 +56,8 @@ async def process_files():
         create_template_file = config["create_template_file"]
 
         # Additional Configuration:
+        set_exclusive = config["set_exclusive"]
+        exclusive_string = config["exclusive_string"]
         directory = config["working_path"]
         manual_mode = config["manual_mode"]
         tpdb_performer_url = config["tpdb_performer_url"]
@@ -71,6 +74,7 @@ async def process_files():
         warn_length_match = config["warn_length_match"]
         re_encode_downscale = config["re_encode_downscale"]
         keep_original_file = config["keep_original_file"]
+        keep_only_one_audio_track = config["keep_only_one_audio_track"]
         posters_limit = config["posters_limit"]
         template_file_name = config["template_name"]
         limit_cpu_usage = config["limit_cpu_usage"]
@@ -78,6 +82,7 @@ async def process_files():
         python_min_version_supported = tuple(config["python_min_version_supported"])
         python_max_version_supported = tuple(config["python_max_version_supported"])
         bad_words = config["bad_words"]
+        date_approval = config["date_approval"]
         performers_approval = config["performers_approval"]
         title_approval = config["title_approval"]
         title_date_mode = config["title_date_mode"]
@@ -132,9 +137,12 @@ async def process_files():
         exit(36)
 
     if create_face_portrait_pic and matching_mode != "full_manual":
-        from mtcnn import MTCNN
+        face_detector_model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Resources", "face_detection_yunet_2026may.onnx")
+        if not os.path.isfile(face_detector_model_path):
+            logger.error(f"❌ YuNet model file not found at: {face_detector_model_path}")
+            exit(50)
     else:
-        MTCNN = None
+        face_detector_model_path = None
     template_file_full_path = None
 
     if use_notifier:
@@ -170,6 +178,10 @@ async def process_files():
     if image_output_format not in ["webp", "jpeg", "jpg", "bmp", "png"]:
         logger.error(f"image output format not valid")
         exit(39)
+
+    if set_exclusive and (not exclusive_string or exclusive_string == ""):
+        logger.error(f"Exclusive string is empty")
+        exit(49)
 
     if upload_to_tracker:
         if not create_sub_folder:
@@ -271,7 +283,7 @@ async def process_files():
             logger.info(f"Start file: {file}, file {processed_files + 1} out of {total_files}")
 
             # Define flags and initialize them
-            flag_names = ["vr2normal", "upscaled", "bts", "pov", "vertical", "trailer", "v2"]
+            flag_names = ["vr2normal", "upscaled", "bts", "pov", "vertical", "trailer", "v2", "extended"]
             file_flags = {flag: False for flag in flag_names}
 
             # Prepare lowercase filename and split by '.'
@@ -289,7 +301,7 @@ async def process_files():
             )
 
             # Unpack flags
-            vr2normal, upscaled, bts_video, pov, vertical, trailer, v2 = (
+            vr2normal, upscaled, bts_video, pov, vertical, trailer, v2, extended = (
                 file_flags[flag] for flag in flag_names
             )
 
@@ -361,6 +373,7 @@ async def process_files():
                     jav_api_mode,
                         movies_api_mode,
                         movies_scenes_mode,
+                        date_approval,
                         title_approval,
                         performers_approval,
                     filename_ignore_performer_ID,
@@ -416,6 +429,7 @@ async def process_files():
                     jav_api_mode,
                         movies_api_mode,
                         movies_scenes_mode,
+                        date_approval,
                         title_approval,
                         performers_approval,
                     filename_ignore_performer_ID,
@@ -557,6 +571,8 @@ async def process_files():
             suffix = "Trailer"
         elif v2:
             suffix = "V2"
+        elif extended:
+            suffix = "Extended"
         else:
             suffix = ""
 
@@ -837,23 +853,37 @@ async def process_files():
         if str(file) != str(new_file_full_path):
             rename_result, error_msg = await rename_file(str(file), new_full_filename)
             if not rename_result:
-                # logger.error(f"An error has occurred while attempting to rename the file: {error_msg}")
+                logger.error(f"Failed to rename file '{file_full_name}' to '{new_full_filename}': {error_msg}")
                 logger.warning(f"End file: {file_full_name}")
                 failed_files.append(file_full_name)
                 processed_files += 1
                 continue  # Skip to the next file
 
+        if keep_only_one_audio_track:
+            has_multiple_audio_tracks = await check_multiple_audio_tracks(new_file_full_path)
+            if has_multiple_audio_tracks:
+                modify_audio_tracks_result = await select_and_filter_audio_tracks(new_file_full_path, keep_old=True)
+                if not modify_audio_tracks_result:
+                    logger.error(f"Failed to filter audio tracks for file: {file_full_name}")
+                    logger.warning(f"End file: {file_full_name}")
+                    failed_files.append(file_full_name)
+                    processed_files += 1
+                    continue  # Skip to the next file
+
         existing_title = await get_existing_title(new_file_full_path)
         changed_title = True if existing_title != new_title else False
 
         try:
-            contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path)
+
+            contains_unwanted_metadata = await has_unwanted_metadata(new_file_full_path, set_exclusive, exclusive_string)
+            # logger.debug(f"testing unwanted metadata: {contains_unwanted_metadata}")
             description = f"TPDB URL: {tpdb_final_url} | Scene URL: {scene_url}"
 
             # Always check metadata
             existing_description = await get_existing_description(new_file_full_path)
             check_encoder = await check_existing_Encoder_Library(new_file_full_path)
             existing_chapters = await chapters_need_update(new_file_full_path, add_timestamps_markers, markers_list)
+            missing_exclusive = await check_existing_exclusive(new_file_full_path, exclusive_string) if set_exclusive else None
 
             if not existing_chapters:
                 add_timestamps_markers = False
@@ -864,7 +894,7 @@ async def process_files():
                     contains_unwanted_metadata or
                     existing_chapters or
                     check_encoder or
-                    (rename_result is True)
+                    missing_exclusive
             )
 
             if re_match_existing_tpdb_uuid:
@@ -975,7 +1005,8 @@ async def process_files():
                                                    re_encode_hevc_CRF]),
 
                 # runs only if re-encoding is enabled, to re-fetch and update metadata
-                (metadata_update_required, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list]),
+                (metadata_update_required, update_metadata, [new_file_full_path, new_title, description, tpdb_uuid, matching_mode, add_timestamps_markers, markers_list,
+                                                             set_exclusive, exclusive_string]),
 
                 # Create Cover Image
                 (create_cover_image, cover_image_download_and_conversion, [image_url, tpdb_image_url, new_full_filename, file_full_name, directory, image_output_format,
@@ -1000,7 +1031,8 @@ async def process_files():
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
-                 [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, MTCNN, performer_image_output_format, font_full_name]),
+                 [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, face_detector_model_path,
+                  performer_image_output_format, font_full_name]),
                 (create_template_file, generate_template_video,
                  [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
                   extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,

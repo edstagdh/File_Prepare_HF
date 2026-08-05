@@ -6,7 +6,7 @@
     "full": "treat file as full movie",
     "scene": "treat file as a scene from a movie"
   },
-  "tpdb_try_match_oshash_before_parse": true,
+  "tpdb_try_match_oshash_before_parse": false,
   "scene_matching_mode": "free_string_parse",
   "scene_matching_modes_available": {
     "strict": "Filename must be in strict format in order to attempt match",
@@ -38,8 +38,11 @@
   "warn_length_match": true,
   "re_encode_downscale": true,
   "limit_cpu_usage": true,
-  "remove_existing_chapters": true,
+  "remove_existing_chapters": false,
+  "keep_only_one_audio_track": true,
   "keep_original_file": true,
+  "set_exclusive": false,
+  "exclusive_string": "",
   "manual_mode": false,
   "tpdb_scenes_url": "https://theporndb.net/scenes/",
   "tpdb_jav_url": "https://theporndb.net/jav/",
@@ -55,6 +58,7 @@
   "python_max_version_supported": [3, 10],
   "bad_words": [".Hardcore"],
   "performers_approval": false,
+  "date_approval": false,
   "title_approval": false,
   "title_date_mode": "1",
   "title_date_available_modes": {
@@ -94,5 +98,5 @@
   "available_regeneration_modes": ["user input", "force regenerate", "force keep"],
   "use_notifier": false,
   "notifier_name": "Notifier_TG.py",
-  "title_ignore_strings": [" - BTS", " - Behind The Scenes"]
+  "title_ignore_strings": []
 }

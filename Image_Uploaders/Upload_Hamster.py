@@ -1,10 +1,12 @@
-import requests
+import httpx
 import json
 from loguru import logger
 import os
 import base64
 from Utilities import load_credentials
 
+# Timeout for Hamster upload requests (seconds). Increase if large/slow uploads keep timing out.
+HAMSTER_UPLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
 async def upload_to_hamster(hamster_site_url, hamster_api_key, hamster_album_id, filepath, img_title):
     """
@@ -41,7 +43,8 @@ async def upload_to_hamster(hamster_site_url, hamster_api_key, hamster_album_id,
 
         # Send POST request
         # logger.debug(f"Uploading {filepath} as Base64...")
-        response = requests.post(url, headers=headers, data=data)
+        async with httpx.AsyncClient(timeout=HAMSTER_UPLOAD_TIMEOUT) as client:
+            response = await client.post(url, headers=headers, data=data)
 
         # Try parsing JSON
         try:
@@ -75,7 +78,7 @@ async def hamster_upload_single_image(filepath, new_filename_base_name, mode):
 
     if not hamster_api_key or not hamster_album_id or not hamster_site_url:
         logger.error("Missing 'hamster_api_key' or 'hamster_album_id' or 'hamster_site_url' in creds.secret.")
-        exit(-99)
+        exit(51)
 
     result = await upload_to_hamster(hamster_site_url, hamster_api_key, hamster_album_id, filepath, img_title)
     result_json = {

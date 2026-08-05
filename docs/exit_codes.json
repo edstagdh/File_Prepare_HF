@@ -33,6 +33,9 @@
   "46": "Failed to import notifier",
   "47": "Invalid matching mode",
   "48": "Invalid filename_mode",
+  "49": "Invalid Exclusive String detected",
+  "50": "Missing Face Detection mode file",
+  "51": "Missing Hamster credentials",
   "97": "Command Failed",
   "98": "Unknown error",
   "99": "Unknown exception"
