@@ -67,6 +67,7 @@ async def process_files():
         target_size_width = config["target_size_width"]
         target_size_height = config["target_size_height"]
         target_size = (target_size_width, target_size_height)
+        face_score_threshold = config["face_score_threshold"]
         zoom_factor = config["zoom_factor"]
         blur_kernel_size = config["blur_kernel_size"]
         re_encode_hevc_CRF = config["re_encode_hevc_CRF"]
@@ -1032,7 +1033,7 @@ async def process_files():
 
                 (create_face_portrait_pic, generate_performer_profile_picture,
                  [performers_names, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, face_detector_model_path,
-                  performer_image_output_format, font_full_name]),
+                  performer_image_output_format, font_full_name, face_score_threshold]),
                 (create_template_file, generate_template_video,
                  [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
                   extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,

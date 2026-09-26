@@ -774,7 +774,7 @@ async def generate_template_video(
     except Exception as e:
         logger.error(f"Failed to save tags: {e}")
 
-    def trim_description(desc: str, max_len: int = 200) -> str:
+    def trim_description(desc: str, max_len: int = 400) -> str:
         if len(desc) <= max_len:
             return desc
 

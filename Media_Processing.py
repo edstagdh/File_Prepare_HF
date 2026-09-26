@@ -689,7 +689,7 @@ async def convert_image_format(input_file_path: str, output_file_path: str, outp
 
 
 async def generate_performer_profile_picture(performers, directory, tpdb_performer_url, target_size, zoom_factor, blur_kernel_size, posters_limit, face_detector_model_path,
-                                             performer_image_output_format, font_full_name):
+                                             performer_image_output_format, font_full_name, face_score_threshold):
     """
         Creates a folder named 'faces' in the specified directory and processes performer pictures.
 
@@ -753,7 +753,7 @@ async def generate_performer_profile_picture(performers, directory, tpdb_perform
             position_percentage = 0.8
             for file in downloaded_files:
                 await process_detection(file, faces_dir, zoom_factor, target_size, blur_kernel_size, p, font_size, text_color, position_percentage, face_detector_model_path,
-                                        performer_image_output_format, font_full_name)
+                                        performer_image_output_format, font_full_name, face_score_threshold)
 
         except Exception:
             logger.exception(f"Error processing performer {p}, ID: {performer_id}")
@@ -793,11 +793,11 @@ async def download_poster_images(poster_urls, faces_dir, performer_slug, posters
 
 
 async def process_detection(image_path, output_path, zoom_factor, target_size, blur_kernel_size, text, font_size, text_color, position_percentage, face_detector_model_path,
-                            performer_image_output_format, font_full_name):
+                            performer_image_output_format, font_full_name, face_score_threshold):
     filename = os.path.basename(image_path)
     base_filename = os.path.splitext(filename)[0]
     # Detect faces in the image
-    bounding_boxes, keypoints, image = await detect_faces(image_path, face_detector_model_path)
+    bounding_boxes, keypoints, image = await detect_faces(image_path, face_detector_model_path, face_score_threshold)
 
     if len(bounding_boxes) == 0:
         logger.error(f"No faces detected in image: {image_path}")
@@ -921,8 +921,7 @@ async def overlay_text(
     logger.success(f"Saved output image as WebP: {output_file}")
 
 
-async def detect_faces(image_path, face_detector_model_path):
-    threshold = 0.93
+async def detect_faces(image_path, face_detector_model_path, face_score_threshold):
 
     image = cv2.imread(image_path)
     img_h, img_w = image.shape[:2]
@@ -931,7 +930,7 @@ async def detect_faces(image_path, face_detector_model_path):
         model=face_detector_model_path,
         config="",
         input_size=(img_w, img_h),
-        score_threshold=threshold,
+        score_threshold=face_score_threshold,
     )
 
     _, faces = detector.detect(image)

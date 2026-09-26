@@ -14,7 +14,7 @@
     "full_manual": "No matching is done, some functionalities are disabled, manual input required."
   },
   "force_re_match_using_existing_tpdb_uuid": true,
-  "working_path": "G:\temp1",
+  "working_path": "G:\\ffmpeg",
   "filename_mode": "names",
   "filename_available_modes":
   {
@@ -52,6 +52,7 @@
   "target_size_width": 195,
   "target_size_height": 230,
   "zoom_factor": 2.5,
+  "face_score_threshold": 0.75,
   "blur_kernel_size": 3,
   "posters_limit": 5,
   "python_min_version_supported": [3, 14],
