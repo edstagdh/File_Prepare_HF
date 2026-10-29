@@ -418,7 +418,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
         media_info = MediaInfo.parse(file_path)
     except Exception as e:
         logger.error(f"Error parsing media info for {file_path}: {e}")
-        return [], file_dir, None
+        return [], None
 
     # Initialize tracks
     video_track = None
@@ -439,7 +439,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
                 general_track = track
     except Exception as e:
         logger.error(f"Error iterating tracks for {file_path}: {e}")
-        return [], file_dir, None
+        return [], None
 
     # Video properties
     try:

@@ -534,7 +534,7 @@ async def generate_template_video(
         from Media_Processing import get_video_resolution_and_orientation, get_video_fps, get_video_codec
         fps = await get_video_fps(new_file_full_path)
         resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
-        codec = await get_video_codec(new_file_full_path)
+        codec, self_encoded = await get_video_codec(new_file_full_path)
 
     resources_img_host_url, _, _ = await load_credentials(7)
 
@@ -753,7 +753,7 @@ async def generate_template_video(
     else:
         processed_string += f" {resolution_template}"
     if codec == "hevc":
-        processed_string += f" {codec} h265"
+        processed_string += f" {codec} h265 x265.reencoded"
     else:
         processed_string += f" {codec}"
     # remove consecutive dots
@@ -774,7 +774,7 @@ async def generate_template_video(
     except Exception as e:
         logger.error(f"Failed to save tags: {e}")
 
-    def trim_description(desc: str, max_len: int = 400) -> str:
+    def trim_description(desc: str, max_len: int = 600) -> str:
         if len(desc) <= max_len:
             return desc
 

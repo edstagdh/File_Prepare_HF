@@ -13,6 +13,8 @@ from loguru import logger
 
 from .prompt_utils import prompt
 
+REQUEST_TIMEOUT = httpx.Timeout(60.0)  # 60s for connect, read, write, and pool
+
 
 async def send_request(
         api_url: str,
@@ -58,7 +60,7 @@ async def send_request(
     while True:  # allows user-triggered retry cycles once max_retries is exhausted
         for attempt in range(1, max_retries + 1):
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                     response = await client.get(url, headers=headers)
 
                 # Retry only on 5xx; anything else falls through to raise_for_status.
@@ -81,6 +83,16 @@ async def send_request(
                     response_data["data"] = [response_data["data"]]
 
                 return response_data
+            except httpx.TimeoutException as e:
+                logger.error(
+                    f"Attempt {attempt}/{max_retries} timed out: "
+                    f"{str(e).replace(api_url, '**REDACTED**')}"
+                )
+                if attempt < max_retries:
+                    logger.warning(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("Maximum retries reached.")
 
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code if e.response else "N/A"

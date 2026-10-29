@@ -983,7 +983,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
     elif timestamps_mode == 3:
         return file_path
     else:
-        raise "Error, no timestamp mode selected."
+        raise ValueError("Error, no timestamp mode selected.")
 
     # Write the filtered lines to the new file
     with open(new_file_path, 'w', encoding='utf-8') as new_file:
@@ -1030,7 +1030,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         elif grid == 4:
             char_break_line = 105 if is_vertical and not add_black_bars else 130
         else:
-            grid == 0
+            grid = 0
 
         duration, fps = await get_video_duration(file_path)
         duration = int(duration)
@@ -1183,7 +1183,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
         media_info = MediaInfo.parse(file_path)
     except Exception as e:
         logger.error(f'Error parsing media info for {file_path}: {e}')
-        return [], file_dir, None
+        return [], None
 
     # Initialize tracks
     video_track = None
@@ -1204,7 +1204,7 @@ async def get_video_metadata(file_path, char_break_line, duration):
                 general_track = track
     except Exception as e:
         logger.error(f'Error iterating tracks for {file_path}: {e}')
-        return [], file_dir, None
+        return [], None
 
     # Video properties
     try:

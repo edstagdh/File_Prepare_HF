@@ -23,6 +23,14 @@ from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 from tqdm import tqdm
 
+X265_VERSION_RE = re.compile(r'x265\s+(?P<version>[^\s:]+)')
+
+# Cache for the current machine's detected x265/ffmpeg encoder signature
+# (see get_current_x265_encoder_signature). Populated at most once per
+# process run.
+_X265_SELF_PROBE_LOCK = asyncio.Lock()
+_x265_self_probe_cache = None
+
 
 async def has_unwanted_metadata(file_path, set_exclusive, exclusive_string) -> bool:
     try:
@@ -35,7 +43,6 @@ async def has_unwanted_metadata(file_path, set_exclusive, exclusive_string) -> b
             # logger.debug(track_type)
             # for attr, value in track.__dict__.items():
             #     logger.debug(f"{attr} = {value}")
-
 
             # ✅ Check Encoded/Tagged date everywhere
             if getattr(track, "encoded_date", None) or getattr(track, "tagged_date", None):
@@ -217,6 +224,7 @@ async def select_and_filter_audio_tracks(file_path, keep_old=True):
     except Exception:
         logger.exception(f"Error finalizing output file for {file_path}")
         return None
+
 
 async def get_existing_title(input_file):
     try:
@@ -605,7 +613,6 @@ async def cover_image_download_and_conversion(image_url: str,
             else:
                 raise
 
-
         temp_image_path = os.path.join(output_path, f"temp_image.{image_output_format}")
         with open(temp_image_path, "wb") as f:
             f.write(response.content)
@@ -922,7 +929,6 @@ async def overlay_text(
 
 
 async def detect_faces(image_path, face_detector_model_path, face_score_threshold):
-
     image = cv2.imread(image_path)
     img_h, img_w = image.shape[:2]
 
@@ -945,6 +951,7 @@ async def detect_faces(image_path, face_detector_model_path, face_score_threshol
         keypoints.append(face[4:14].reshape(5, 2).tolist())  # right eye, left eye, nose, right mouth, left mouth
 
     return bounding_boxes, keypoints, image
+
 
 async def crop_face(image, bounding_box, zoom_factor=1.2):
     # Extract the face region from the image using bounding box (x, y, w, h)
@@ -1062,7 +1069,7 @@ async def re_encode_video(new_filename, directory, keep_original_file, is_vertic
             logger.info(f"Replaced original file with HEVC version: {final_output}")
             return True
         else:
-            raise "Invalid type returned from encode function"
+            raise TypeError("Invalid type returned from encode function")
     except Exception as e:
         logger.error(f"Failed to replace {file_path}: {e}")
         return False
@@ -1231,7 +1238,6 @@ async def is_video_hevc_or_av1(file_path: str, warn_CRF_match: bool, re_encode_h
             # Convert 24.0 → 24
             crf_value = int(float(match.group(1)))
             logger.info(f"Detected CRF {crf_value} for {file_path}")
-
 
     # Log HEVC / AV1 detection
     if is_hevc:
@@ -1413,19 +1419,311 @@ async def generate_temp_filename(directory, original_name):
     return os.path.join(directory, f"{name}_temp{ext}")
 
 
-async def get_video_codec(file_path):
-    """Return 'avc', 'hevc', or 'av1' if the codec is supported; otherwise return None."""
+def _parse_x265_settings(settings_str):
+    """Parse a x265 'Encoding settings' tag string into a dict of key -> value."""
+    settings = {}
+    if not settings_str:
+        return settings
+    for part in settings_str.split(' / '):
+        part = part.strip()
+        if not part:
+            continue
+        if '=' in part:
+            key, _, value = part.partition('=')
+            settings[key.strip()] = value.strip()
+        else:
+            # bare flags like "wpp" / "no-pmode"
+            if part.startswith('no-'):
+                settings[part[3:]] = 'False'
+            else:
+                settings[part] = 'True'
+    return settings
+
+
+def _extract_x265_version(settings_str):
+    if not settings_str:
+        return None
+    match = X265_VERSION_RE.search(settings_str)
+    return match.group('version') if match else None
+
+
+async def get_frame_rate(file_path):
+    """Return the average frame rate (float) of the video stream, or None."""
+    command = (
+        f'ffprobe -v error -select_streams v:0 '
+        f'-show_entries stream=avg_frame_rate '
+        f'-of default=noprint_wrappers=1:nokey=1 "{file_path}"'
+    )
+    try:
+        stdout, stderr, code = await run_command(command)
+        raw = stdout.strip()
+        if '/' in raw:
+            num, den = raw.split('/')
+            num, den = float(num), float(den)
+            return num / den if den else None
+        return float(raw) if raw else None
+    except Exception as e:
+        logger.error(f"Error getting frame rate for {file_path}: {e}")
+        return None
+
+
+async def get_encoder_settings_tag(file_path):
+    """Return the raw x265 'Encoding settings' string from the video track, or None."""
+    try:
+        media_info = MediaInfo.parse(file_path)
+        for track in media_info.tracks:
+            if track.track_type == "Video":
+                settings = getattr(track, "encoding_settings", None)
+                return settings.strip() if settings else None
+        return None
+    except Exception:
+        logger.exception(f"Error retrieving encoder settings tag from {file_path}")
+        return None
+
+
+async def get_video_writing_library(file_path):
+    """
+    Return the raw 'Writing library' tag from the VIDEO track specifically
+    (not the General track, whose writing_application/writing_library
+    describes the muxer, e.g. 'Lavf60.16.100' -- see
+    check_existing_Encoder_Library for that unrelated check). For x265
+    encodes this is the full encoder build string, e.g.:
+        x265 3.6+103-792de227f:[Windows][GCC 14.2.0][64 bit] 8bit+10bit+12bit
+    Returns None if there's no video track or no writing_library tag.
+    """
+    try:
+        media_info = MediaInfo.parse(file_path)
+
+        for track in media_info.tracks:
+            if track.track_type == "Video":
+                writing_library = getattr(track, "writing_library", None)
+                return writing_library.strip() if writing_library else None
+
+        return None
+
+    except Exception:
+        logger.exception(f"Error retrieving video writing library from {file_path}")
+        return None
+
+
+async def get_current_x265_encoder_signature():
+    """
+    Detect the video-track 'Writing library' string that THIS machine's
+    currently installed libx265/ffmpeg build produces, by running a
+    throwaway one-frame encode to a temp file and reading its tag back via
+    get_video_writing_library() -- the exact same extraction path used to
+    read every other file's tag, so both sides of every comparison in
+    check_self_encoded() go through identical parsing.
+
+    Cached for the lifetime of the process: populated on first use behind
+    an asyncio.Lock (so two files racing to probe at once don't run the
+    encode twice), meaning the throwaway encode runs at most once per run.
+    Simply re-running the app after upgrading ffmpeg/libx265 picks up the
+    new signature automatically -- nothing to configure or keep in sync
+    manually.
+
+    Returns:
+        {"writing_library": str | None, "version": str | None}
+        Both None if the probe itself failed (e.g. libx265 unavailable).
+        This only ever ADDS points in check_self_encoded, never subtracts,
+        so a failed probe just means those two signals stay unavailable
+        for this run -- everything else keeps working.
+    """
+    global _x265_self_probe_cache
+
+    if _x265_self_probe_cache is not None:
+        return _x265_self_probe_cache
+
+    async with _X265_SELF_PROBE_LOCK:
+        # Another caller may have populated it while we waited for the lock.
+        if _x265_self_probe_cache is not None:
+            return _x265_self_probe_cache
+
+        result = {"writing_library": None, "version": None}
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        temp_path = temp_file.name
+        temp_file.close()
+
+        try:
+            probe_cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
+                "-frames:v", "1",
+                "-c:v", "libx265",
+                temp_path,
+            ]
+            stdout, stderr, code = await run_command(probe_cmd)
+
+            if code == 0 and os.path.exists(temp_path):
+                writing_library = await get_video_writing_library(temp_path)
+                result["writing_library"] = writing_library
+                result["version"] = _extract_x265_version(writing_library) if writing_library else None
+            else:
+                logger.warning(f"x265 self-encode signature probe failed (exit_code={code}): {stderr}")
+
+        except Exception:
+            logger.exception("Error probing current x265 encoder signature")
+
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    logger.warning(f"Failed to remove x265 probe temp file: {temp_path}")
+
+        _x265_self_probe_cache = result
+        return result
+
+
+async def check_self_encoded(file_path, fps=None):
+    """
+    Inspect the embedded x265 settings and decide whether they match this
+    pipeline's own encode profile (SELF) vs. a third-party file (PRT).
+
+    Signals, most to least reliable:
+      1. GOP structure: SELF uses keyint ~= round(2*fps) with min-keyint well
+         below fps; x265's own default (used by most other encodes) sets
+         min-keyint=fps and keyint=10*fps.
+      2. Writing library (video track) exact match against what THIS
+         machine's currently installed libx265/ffmpeg build produces (see
+         get_current_x265_encoder_signature) -- the full build string
+         (version + OS + compiler + bit-depth flags), so a match is
+         effectively "same machine/environment", not just "same x265
+         release". Auto-detected every run, never manually configured, so
+         it stays correct across ffmpeg upgrades with nothing to update.
+         Non-definitive: an older self-encoded file made with a previous
+         ffmpeg build simply won't match this and forfeits these points,
+         same as any other missing signal -- it never counts against it.
+      3. 'numa-pools' present — used in 90%+ of SELF encodes to cap CPU usage.
+      4. limit-refs == 2 — a minor secondary tell from your profile.
+      5. x265 version substring match against the current build (weaker
+         than #2 -- this can true-match across different OS/compiler builds
+         that happen to share the same x265 release).
+
+    Returns a dict with the boolean verdict plus the individual signal
+    results, so you can log/tune thresholds later:
+        {
+            "self_encoded": bool,
+            "score": int,
+            "keyint_match": bool | None,
+            "writing_library_match": bool | None,
+            "numa_pools_present": bool | None,
+            "limit_refs_match": bool | None,
+            "version_match": bool | None,
+        }
+    """
+    result = {
+        "self_encoded": False,
+        "score": 0,
+        "keyint_match": None,
+        "writing_library_match": None,
+        "numa_pools_present": None,
+        "limit_refs_match": None,
+        "version_match": None,
+    }
+
+    settings_str = await get_encoder_settings_tag(file_path)
+    if not settings_str or "keyint" not in settings_str:
+        return result  # no x265 settings tag embedded — can't classify
+
+    settings = _parse_x265_settings(settings_str)
+
+    if fps is None:
+        fps = await get_frame_rate(file_path)
+
+    current_signature = await get_current_x265_encoder_signature()
+
+    score = 0
+
+    # 1. GOP / keyint pattern (primary signal)
+    if fps and "keyint" in settings and "min-keyint" in settings:
+        try:
+            keyint = int(settings["keyint"])
+            min_keyint = int(settings["min-keyint"])
+            expected_self = round(2 * fps)
+            expected_default = round(10 * fps)
+
+            dist_to_self = abs(keyint - expected_self)
+            dist_to_default = abs(keyint - expected_default)
+
+            keyint_match = (
+                    dist_to_self <= 2
+                    and dist_to_self < dist_to_default
+                    and min_keyint < fps
+            )
+            result["keyint_match"] = keyint_match
+            if keyint_match:
+                score += 3  # dominant signal
+        except (ValueError, TypeError):
+            pass
+
+    # 2. Writing library exact match against the current machine's build
+    if current_signature["writing_library"]:
+        file_writing_library = await get_video_writing_library(file_path)
+        if file_writing_library:
+            writing_library_match = file_writing_library == current_signature["writing_library"]
+            result["writing_library_match"] = writing_library_match
+            if writing_library_match:
+                score += 2
+
+    # 3. numa-pools present
+    if "numa-pools" in settings:
+        result["numa_pools_present"] = True
+        score += 1
+    else:
+        result["numa_pools_present"] = False
+
+    # 4. limit-refs == 2
+    if "limit-refs" in settings:
+        limit_refs_match = settings["limit-refs"].strip() == "2"
+        result["limit_refs_match"] = limit_refs_match
+        if limit_refs_match:
+            score += 1
+
+    # 5. x265 version substring match (weaker than the full writing-library match)
+    if current_signature["version"]:
+        file_version = _extract_x265_version(settings_str)
+        if file_version:
+            version_match = (
+                    current_signature["version"].strip() in file_version
+                    or file_version in current_signature["version"].strip()
+            )
+            result["version_match"] = version_match
+            if version_match:
+                score += 1
+
+    result["score"] = score
+    # keyint match alone is near-decisive; require it, plus corroboration
+    # from at least one other signal to avoid coincidental keyint hits.
+    result["self_encoded"] = bool(result["keyint_match"]) and score >= 4
+
+    return result
+
+
+async def get_video_codec(file_path, fps=None):
+    """
+    Return (codec, self_encoded):
+      codec        -> 'avc', 'hevc', 'av1', or None if unsupported
+      self_encoded -> True if embedded x265 settings match this pipeline's
+                       own encode profile (only ever True for 'hevc').
+                       Compared automatically against the CURRENT machine's
+                       installed libx265/ffmpeg build (see
+                       get_current_x265_encoder_signature) -- no manual
+                       configuration needed, and it stays correct after an
+                       ffmpeg upgrade since the signature is re-probed once
+                       per run rather than hardcoded.
+    """
     command = (
         f'ffprobe -v error -select_streams v:0 '
         f'-show_entries stream=codec_name '
         f'-of default=noprint_wrappers=1:nokey=1 "{file_path}"'
     )
 
+    codec = None
     try:
         stdout, stderr, code = await run_command(command)
         codec_name = stdout.strip().lower()
 
-        # Map common codec names to the desired labels
         codec_map = {
             "h264": "avc",
             "avc1": "avc",
@@ -1435,15 +1733,19 @@ async def get_video_codec(file_path):
             "av01": "av1",
         }
 
-        if codec_name in codec_map:
-            return codec_map[codec_name]
-        else:
+        codec = codec_map.get(codec_name)
+        if codec is None:
             logger.warning(f"Codec '{codec_name}' is not supported for {file_path}")
-            return None
 
     except Exception as e:
         logger.error(f"Error getting codec for {file_path}: {e}")
-        return None
+
+    self_encoded = False
+    if codec == "hevc":
+        check = await check_self_encoded(file_path, fps=fps)
+        self_encoded = check["self_encoded"]
+
+    return codec, self_encoded
 
 
 async def add_mp4_chapters(
@@ -1669,7 +1971,7 @@ async def reset_all_metadata(file_path: str) -> bool:
             "-c", "copy",
             "-map_metadata", "-1",
             str(tmp_file)
-                      ]
+        ]
 
         stdout, stderr, returncode = await run_command(ffmpeg_cmd)
         if returncode != 0:
@@ -1708,4 +2010,3 @@ async def reset_all_metadata(file_path: str) -> bool:
             tmp_file.unlink()
 
         return False
-

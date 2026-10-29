@@ -955,9 +955,9 @@ async def process_files():
             if (not re_encode_required) and create_template_file:
                 fps = await get_video_fps(new_file_full_path)
                 resolution_template, is_vertical = await get_video_resolution_and_orientation(new_file_full_path)
-                codec = await get_video_codec(new_file_full_path)
+                codec, self_encoded = await get_video_codec(new_file_full_path)
             else:
-                fps, resolution_template, is_vertical, codec = None, None, None, None
+                fps, resolution_template, is_vertical, codec, self_encoded = None, None, None, None, None
 
             # Disable uploading to imgbox
             if imgbox_upload_thumbnails or imgbox_upload_cover:
@@ -1068,7 +1068,7 @@ async def process_files():
                         new_file_full_path = os.path.join(output_directory, new_full_filename)
                     else:
                         logger.error(f"Source file {new_file_full_path} does not exist.")
-                        raise
+                        raise FileNotFoundError(f"Source file {new_file_full_path} does not exist.")
                 except Exception as e:
                     logger.error(f"Error moving file: {e}")
                     logger.warning(f"End file: {new_file_full_path}")
@@ -1103,6 +1103,7 @@ async def process_files():
                             remove_e_files,
                             resolution_template,
                             codec,
+                            self_encoded,
                             is_last_tracker
                         )
 

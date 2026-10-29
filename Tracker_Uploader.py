@@ -155,7 +155,7 @@ async def init_browser(config):
 
 
 async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files,
-                                    resolution_template, codec, is_last_tracker):
+                                    resolution_template, codec, self_encoded, is_last_tracker):
     driver = None
     try:
         # Load Config_Tracker.json
@@ -177,7 +177,7 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
             from Media_Processing import get_video_resolution_and_orientation, get_video_codec
             full_file_path = os.path.join(output_dir, f"{new_filename_base_name}.mp4")
             resolution_template, _ = await get_video_resolution_and_orientation(str(full_file_path))
-            codec = await get_video_codec(full_file_path)
+            codec, self_encoded = await get_video_codec(full_file_path)
 
         # Additional information
         _, template_name = os.path.split(template_file_full_path)
@@ -275,7 +275,15 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         driver.get(form_url)
         logger.info(f"Navigated to form page: {form_url}")
         custom_codecs = ["av1", "hevc"]
-        updated_title = f"{new_title} - {codec.upper()} - {resolution_template}" if codec in custom_codecs else f"{new_title} - {resolution_template}"
+        if codec in custom_codecs:
+            if self_encoded:
+                updated_title = f"{new_title} - {codec.upper()} - Re-encode - {resolution_template}"
+                logger.debug(1)
+            else:
+                updated_title = f"{new_title} - {codec.upper()} - {resolution_template}"
+                logger.debug(2)
+        else:
+            updated_title = f"{new_title} - {resolution_template}"
 
         # --- Fill form fields ---
         for field in config.get("form_fields", []):
@@ -283,7 +291,12 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
                 by_field, val_field = await get_by(field)
                 wait.until(EC.presence_of_element_located((by_field, val_field)))
                 if field["value"] == "category":
-                    driver.find_element(by_field, val_field).send_keys("Pron")
+                    if tracker_mode == "hf":
+                        driver.find_element(by_field, val_field).send_keys("Pron")
+                    elif tracker_mode == "emp":
+                        driver.find_element(by_field, val_field).send_keys("Natural Tits")
+                    else:
+                        raise
                 if field["value"] == "taginput":
                     driver.find_element(by_field, val_field).send_keys(tags_content)
                 if field["value"] == "desc":
