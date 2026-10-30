@@ -26,6 +26,7 @@ This process requires matching scene via TPDB, it is not a standalone script.
 - [x] Add an option to upload to imgbb(webp)
 - [x] Add an option to use free string parsing for scene matching.
 - [x] Add an option to upload to hamster(webp)
+- [x] Add an option to upload to pixhost (anonymous, adult content flag, delete links saved) - see `Upload_Pixhost.py`.
 - [ ] Add an option to change output file naming format(select from list)
 - [x] Switch re-encoding progress bar from logger lines to tqdm.
 - [x] support for cover image and thumbnails content regeneration flag:
@@ -108,6 +109,11 @@ requires `create_template_file` to be set as True and currently only supported u
 - **`Config_Thumbnails.json`**: Contains settings for thumbnails processing
 - **`Config_Ttracker.json`**: Contains settings for tracker upload integration
 - **`Config_Video_Preview.json`**: Contains settings preview processing
+- **Pixhost** (`pixhost_upload_cover`, `pixhost_upload_thumbnails`, `pixhost_upload_previews` in `Config.json`): needs no credentials. Uploads are always flagged as adult content.
+  Because Pixhost is anonymous, every upload's private delete link (`manage_url`) is stored in `<name>_pixhost.txt` and permanently appended to `pixhost_manage_links.jsonl` (
+  project root, keep it private).
+  List uploads that were not deleted: `python Image_Uploaders/Upload_Pixhost.py list`. Delete one: `python Image_Uploaders/Upload_Pixhost.py delete <manage_url>`.
+  Limits: JPEG/PNG/GIF/WebP/AVIF, 10 MB per image.
 - **`creds.secret`**: Stores sensitive information like TPDB API keys. Ensure this file is kept secure and is not shared publicly.
 
 ## File Structure
@@ -127,6 +133,7 @@ File_Prepare_HF/
    ├── Upload_IMGBOX.py                         # IMGBOX code integration
    ├── Upload_IMGBB.py                          # IMGBB code integration
    ├── Upload_Hamster.py                        # Hamster code integration
+   ├── Upload_Pixhost.py                        # Pixhost code integration (anonymous, saves delete links)
 └── Logs/                                       # Log files
 └── Notifiers/                                  # Notifiers Integration
    ├── Notifier_TG.py                           # Telegram Notifier code integration

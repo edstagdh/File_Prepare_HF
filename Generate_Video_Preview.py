@@ -12,9 +12,11 @@ from pymediainfo import MediaInfo
 from Media_Processing import get_video_duration
 from Image_Uploaders.Upload_IMGBB import imgbb_upload_single_image
 from Image_Uploaders.Upload_Hamster import hamster_upload_single_image
+from Image_Uploaders.Upload_Pixhost import pixhost_upload_single_image
 
 
-async def process_video_preview(input_video_file_name, input_video_file_path, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode, hamster_upload_previews):
+async def process_video_preview(input_video_file_name, input_video_file_path, new_filename_base_name, upload_previews_imgbb, imgbb_upload_headless_mode, hamster_upload_previews,
+                                pixhost_upload_previews=False):
     # Load Preview Config
     config, exit_code = await load_json_file("Configs/Config_Video_Preview.json")
     if not config:
@@ -73,7 +75,8 @@ async def process_video_preview(input_video_file_name, input_video_file_path, ne
                                   timestamps_mode, overwrite_existing, grid_width, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points,
                                   custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                   new_filename_base_name, last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews,
-                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold)
+                                  transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold,
+                                  pixhost_upload_previews)
 
     if not results:
         logger.error("Preview creation has failed, please check the log.")
@@ -266,7 +269,8 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews_imgbb, imgbb_upload_headless_mode, add_file_info, hamster_upload_previews, transition_mode,
-                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold,
+                        pixhost_upload_previews=False):
     if black_bars:
         new_filename_base_name = f'{new_filename_base_name}_black_bars'
 
@@ -477,6 +481,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         logger.success(f'Preview WebP uploaded successfully: {output_webp}')
                     else:
                         logger.error(f'Upload failed for file: {output_webp}')
+                if pixhost_upload_previews:
+                    upload_result = await pixhost_upload_single_image(output_webp, new_filename_base_name, "Preview WebP")
+                    if upload_result:
+                        logger.success(f'Preview WebP uploaded successfully: {output_webp}')
+                    else:
+                        logger.error(f'Upload failed for file: {output_webp}')
             else:
                 logger.error(f'Failed to create WebP: {stderr}')
                 return False
@@ -522,6 +532,12 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                         logger.success(f'Preview GIF uploaded successfully: {output_gif}')
                     else:
                         logger.error(f'Upload failed for file: {output_gif}')
+                if pixhost_upload_previews:
+                    upload_result = await pixhost_upload_single_image(output_gif, new_filename_base_name, "Preview GIF")
+                    if upload_result:
+                        logger.success(f'Preview GIF uploaded successfully: {output_gif}')
+                    else:
+                        logger.error(f'Upload failed for file: {output_gif}')
             else:
                 logger.error(f'Failed to create GIF: {stderr}')
                 return False
@@ -532,7 +548,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             await generate_and_run_ffmpeg_commands(concat_list_sheet, temp_folder, create_webp_preview_sheet, preview_sheet_webp, video_path, segment_cut_duration, grid,
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet,
                                                    preview_sheet_webm, upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path,
-                                                   hamster_upload_previews, num_of_segments, fit_thumbs_in_less_rows)
+                                                   hamster_upload_previews, num_of_segments, fit_thumbs_in_less_rows, pixhost_upload_previews)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -996,7 +1012,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
                                            upload_previews_imgbb, imgbb_upload_headless_mode, new_filename_base_name, add_file_info, font_path, hamster_upload_previews,
-                                           num_of_segments, fit_thumbs_in_less_rows):
+                                           num_of_segments, fit_thumbs_in_less_rows, pixhost_upload_previews=False):
     """Generates stacked video sheet, adds preview sheets (WebP, WebM, GIF), and renames files as needed."""
     try:
         # Read the concat_list.txt file
@@ -1129,6 +1145,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                         logger.success(f'Preview sheet WebP uploaded successfully: {preview_sheet_webp}')
                     else:
                         logger.error(f'Upload failed for file: {preview_sheet_webp}')
+                if pixhost_upload_previews:
+                    upload_result = await pixhost_upload_single_image(preview_sheet_webp, new_filename_base_name, "Preview Sheet WebP")
+                    if upload_result:
+                        logger.success(f'Preview sheet WebP uploaded successfully: {preview_sheet_webp}')
+                    else:
+                        logger.error(f'Upload failed for file: {preview_sheet_webp}')
 
         # WebM Preview
         if create_webm_preview_sheet:
@@ -1161,6 +1183,12 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
                         logger.error(f'Upload failed for file: {preview_sheet_gif}')
                 if hamster_upload_previews:
                     upload_result = await hamster_upload_single_image(preview_sheet_gif, new_filename_base_name, "Preview Sheet GIF")
+                    if upload_result:
+                        logger.success(f'Preview sheet GIF uploaded successfully: {preview_sheet_gif}')
+                    else:
+                        logger.error(f'Upload failed for file: {preview_sheet_gif}')
+                if pixhost_upload_previews:
+                    upload_result = await pixhost_upload_single_image(preview_sheet_gif, new_filename_base_name, "Preview Sheet GIF")
                     if upload_result:
                         logger.success(f'Preview sheet GIF uploaded successfully: {preview_sheet_gif}')
                     else:

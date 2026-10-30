@@ -154,8 +154,37 @@ async def init_browser(config):
         raise
 
 
+async def load_preview_image_url(result_file_paths, new_filename_base_name):
+    """
+    Return the "Preview WebP" image URL saved by an image host uploader (Upload_Hamster.py / Upload_Pixhost.py).
+
+    result_file_paths      - list of image host result files (e.g. [hamster_file_path, pixhost_file_path]);
+                             empty strings and missing files are skipped.
+    new_filename_base_name - base name used as the result key ("<base> - Preview WebP").
+    The first file containing the key wins. Returns None if no file has it.
+    To support another image host, just add its result file path to the list passed by the caller;
+    its result file must store the URL under "image_url".
+    """
+    preview_key = f"{new_filename_base_name} - Preview WebP"
+    for path in result_file_paths:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"Failed to parse image host file {path}: {e}")
+        entries = data.get(preview_key)
+        if isinstance(entries, list) and entries:
+            url = entries[0].get("image_url")
+            if url:
+                return url
+            logger.error(f"no preview image url detected in {path}")
+    return None
+
+
 async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output_dir, template_file_full_path, new_title, hamster_file_path, save_path, remove_e_files,
-                                    resolution_template, codec, self_encoded, is_last_tracker):
+                                    resolution_template, codec, self_encoded, is_last_tracker, pixhost_file_path=""):
     driver = None
     try:
         # Load Config_Tracker.json
@@ -190,25 +219,10 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         with open(template_filename, "r", encoding="utf-8") as f:
             template_content = f.read()
 
-        if hamster_file_path != "" and os.path.isfile(hamster_file_path):
-            try:
-                with open(hamster_file_path, "r", encoding="utf-8") as f:
-                    hamster_data = json.load(f)
-
-                preview_key = f"{new_filename_base_name} - Preview WebP"
-
-                if preview_key in hamster_data and isinstance(hamster_data[preview_key], list):
-                    preview_entry = hamster_data[preview_key][0]
-                    if "image_url" in preview_entry:
-                        preview_image_url = preview_entry["image_url"]
-                    else:
-                        logger.error(f"no preview image url detected in {hamster_data}")
-                        raise
-
-            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-                raise ValueError(f"Failed to parse hamster file or missing expected data: {e}")
-        else:
-            preview_image_url = None
+        # Preview image URL: taken from the first enabled image host whose result file holds the "Preview WebP" entry
+        preview_image_url = await load_preview_image_url([hamster_file_path, pixhost_file_path], new_filename_base_name)
+        if not preview_image_url:
+            logger.warning("No preview image URL found in the image host result files (hamster/pixhost).")
 
         # Initialize browser
         driver, wait = await init_browser(config)
@@ -278,10 +292,8 @@ async def process_upload_to_tracker(tracker_mode, new_filename_base_name, output
         if codec in custom_codecs:
             if self_encoded:
                 updated_title = f"{new_title} - {codec.upper()} - Re-encode - {resolution_template}"
-                logger.debug(1)
             else:
                 updated_title = f"{new_title} - {codec.upper()} - {resolution_template}"
-                logger.debug(2)
         else:
             updated_title = f"{new_title} - {resolution_template}"
 

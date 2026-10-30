@@ -55,6 +55,9 @@ Resources.json
 
 # User Secret Files
 *.secret
+# Pixhost delete links (private - anyone with a link can delete the image)
+Resources/pixhost_manage_links.jsonl
+
 Secret.json
 
 # Performers json

@@ -509,6 +509,7 @@ async def generate_template_video(
         imgbox_file_path: str,
         imgbb_file_path: str,
         hamster_file_path: str,
+        pixhost_file_path: str,
         suffix: str,
         tpdb_scene_url: str
 ) -> bool:
@@ -563,7 +564,7 @@ async def generate_template_video(
     preview_sheet_image = f"{new_filename_base_name}_preview_sheet.webp"  # Hardcoded due to HF supported file hosting requirements(Either WEBP or GIF)
     thumbnails_image = f"{new_filename_base_name}_thumbnails.{image_output_format}"
 
-    # Optionally fill URLs from imgbb(first), imgbox
+    # Optionally fill URLs from imgbb(first), imgbox, hamster, pixhost (first enabled host wins)
     if imgbb_file_path != "":
         if fill_img_urls and os.path.isfile(imgbb_file_path):
             try:
@@ -639,6 +640,35 @@ async def generate_template_video(
 
             except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
                 raise ValueError(f"Failed to parse hamster file or missing expected data: {e}")
+    elif pixhost_file_path != "":
+        if fill_img_urls and os.path.isfile(pixhost_file_path):
+            try:
+                with open(pixhost_file_path, "r", encoding="utf-8") as f:
+                    pixhost_data = json.load(f)
+
+                thumbs_key = f"{new_filename_base_name} - thumbnails"
+                cover_key = f"{new_filename_base_name} - cover"
+                preview_sheet_key = f"{new_filename_base_name} - Preview Sheet WebP"
+
+                # "image_url" is the direct image link derived in Upload_Pixhost.derive_direct_image_url();
+                # it is None when the derivation failed, in which case the local file name is kept.
+                if thumbs_key in pixhost_data and isinstance(pixhost_data[thumbs_key], list):
+                    thumbs_entry = pixhost_data[thumbs_key][0]
+                    if thumbs_entry.get("image_url"):
+                        thumbnails_image = thumbs_entry["image_url"]
+
+                if cover_key in pixhost_data and isinstance(pixhost_data[cover_key], list):
+                    cover_entry = pixhost_data[cover_key][0]
+                    if cover_entry.get("image_url"):
+                        cover_image = cover_entry["image_url"]
+
+                if preview_sheet_key in pixhost_data and isinstance(pixhost_data[preview_sheet_key], list):
+                    preview_sheet_entry = pixhost_data[preview_sheet_key][0]
+                    if preview_sheet_entry.get("image_url"):
+                        preview_sheet_image = preview_sheet_entry["image_url"]
+
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                raise ValueError(f"Failed to parse pixhost file or missing expected data: {e}")
 
     # Load JSON config
     performers_images, exit_code = await load_json_file("Resources/Performers_Images.json")

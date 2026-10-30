@@ -19,6 +19,7 @@ from Generate_Thumbnails_Sheet import process_thumbnails
 from Image_Uploaders.Upload_IMGBOX import imgbox_upload_single_image
 from Image_Uploaders.Upload_IMGBB import imgbb_upload_single_image
 from Image_Uploaders.Upload_Hamster import hamster_upload_single_image
+from Image_Uploaders.Upload_Pixhost import pixhost_upload_single_image
 from Tracker_Uploader import process_upload_to_tracker
 
 # ---------------------- Version ----------------------
@@ -115,6 +116,10 @@ async def process_files():
         hamster_upload_cover = config["hamster_upload_cover"]
         hamster_upload_previews = config["hamster_upload_previews"]
         hamster_upload_thumbnails = config["hamster_upload_thumbnails"]
+        # .get() with default False so existing Config.json files without the Pixhost keys keep working
+        pixhost_upload_cover = config.get("pixhost_upload_cover", False)
+        pixhost_upload_previews = config.get("pixhost_upload_previews", False)
+        pixhost_upload_thumbnails = config.get("pixhost_upload_thumbnails", False)
         image_output_format = config["image_output_format"].lower()
 
         # Notifiers Configuration
@@ -185,13 +190,16 @@ async def process_files():
         exit(49)
 
     if upload_to_tracker:
+        hamster_all = hamster_upload_cover and hamster_upload_thumbnails and hamster_upload_previews
+        pixhost_all = pixhost_upload_cover and pixhost_upload_thumbnails and pixhost_upload_previews
+
         if not create_sub_folder:
             exit(40)
         elif upload_mode.lower() != "single":
             exit(41)
         elif not create_template_file:
             exit(42)
-        elif not hamster_upload_cover or not hamster_upload_thumbnails or not hamster_upload_previews:
+        elif hamster_all == pixhost_all:
             exit(43)
 
     if create_template_file:
@@ -355,6 +363,7 @@ async def process_files():
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
                 hamster_upload_cover = False
+                pixhost_upload_cover = False
                 tpdb__id = None
 
 
@@ -970,11 +979,13 @@ async def process_files():
                 imgbox_upload_cover = False
                 imgbb_upload_cover = False
                 hamster_upload_cover = False
+                pixhost_upload_cover = False
 
             if not create_thumbnails:
                 imgbox_upload_thumbnails = False
                 imgbb_upload_thumbnails = False
                 hamster_upload_thumbnails = False
+                pixhost_upload_thumbnails = False
 
             cover_file_name = f"{new_filename}.{suffix}.{image_output_format}" if suffix else f"{new_filename}.{image_output_format}"
             cover_file_path = os.path.join(output_directory, cover_file_name)
@@ -985,8 +996,10 @@ async def process_files():
             imgbox_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbox.txt") if imgbox_upload_cover or imgbox_upload_thumbnails else ""
             imgbb_file_path = os.path.join(output_directory, f"{new_filename_base_name}_imgbb.txt") if imgbb_upload_cover or imgbb_upload_thumbnails else ""
             hamster_file_path = os.path.join(output_directory, f"{new_filename_base_name}_hamster.txt") if hamster_upload_cover or hamster_upload_thumbnails else ""
+            pixhost_file_path = os.path.join(output_directory, f"{new_filename_base_name}_pixhost.txt") if pixhost_upload_cover or pixhost_upload_thumbnails else ""
 
-            if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails or hamster_upload_cover or hamster_upload_thumbnails:
+            if imgbox_upload_cover or imgbox_upload_thumbnails or imgbb_upload_cover or imgbb_upload_thumbnails or hamster_upload_cover or hamster_upload_thumbnails \
+                    or pixhost_upload_cover or pixhost_upload_thumbnails:
                 fill_img_urls = True
 
                 if os.path.exists(imgbox_file_path):
@@ -997,6 +1010,9 @@ async def process_files():
 
                 if os.path.exists(hamster_file_path):
                     os.remove(hamster_file_path)
+
+                if os.path.exists(pixhost_file_path):
+                    os.remove(pixhost_file_path)
             else:
                 fill_img_urls = False
 
@@ -1015,6 +1031,7 @@ async def process_files():
                 (imgbox_upload_cover, imgbox_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
                 (imgbb_upload_cover, imgbb_upload_single_image, [cover_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "cover"]),
                 (hamster_upload_cover, hamster_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
+                (pixhost_upload_cover, pixhost_upload_single_image, [cover_file_path, new_filename_base_name, "cover"]),
 
                 # Create Thumbnails Image
                 (create_thumbnails, process_thumbnails, [new_full_filename, directory, file_full_name, output_directory, image_output_format, is_vertical, create_sub_folder,
@@ -1023,10 +1040,11 @@ async def process_files():
                 (imgbox_upload_thumbnails, imgbox_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
                 (imgbb_upload_thumbnails, imgbb_upload_single_image, [thumbnails_file_path, new_filename_base_name, imgbb_upload_headless_mode, image_output_format, "thumbnails"]),
                 (hamster_upload_thumbnails, hamster_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
+                (pixhost_upload_thumbnails, pixhost_upload_single_image, [thumbnails_file_path, new_filename_base_name, "thumbnails"]),
 
                 # Create Preview Images
                 (create_video_preview, process_video_preview, [new_file_full_path, output_directory, new_filename_base_name, imgbb_upload_previews, imgbb_upload_headless_mode,
-                                                               hamster_upload_previews]),
+                                                               hamster_upload_previews, pixhost_upload_previews]),
 
                 # Create Mediainfo File
                 (create_mediainfo, generate_mediainfo_file, [new_file_full_path, output_directory]),
@@ -1037,7 +1055,7 @@ async def process_files():
                 (create_template_file, generate_template_video,
                  [new_title, scene_title, studio_info, scene_pretty_date, scene_description, performers_names, fps, resolution_template, is_vertical, codec,
                   extension, output_directory, new_file_full_path, new_filename_base_name, template_file_full_path, __version__, scene_tags, studio_tag, image_output_format,
-                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, suffix, tpdb_final_url]),
+                  fill_img_urls, imgbox_file_path, imgbb_file_path, hamster_file_path, pixhost_file_path, suffix, tpdb_final_url]),
             ]
             failed = False
             where_failed = None
@@ -1104,7 +1122,8 @@ async def process_files():
                             resolution_template,
                             codec,
                             self_encoded,
-                            is_last_tracker
+                            is_last_tracker,
+                            pixhost_file_path
                         )
 
                         if not tracker_result:
