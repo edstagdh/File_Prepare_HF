@@ -2,8 +2,8 @@
 {% block body %}
 <div class="layout">
     <aside class="sidebar">
-        <div class="brand">File Prepare HF<small>v{{ version }} <a href="#tools" id="update-badge" class="badge warning hidden" title="A newer version is available"></a></small>
-        </div>
+        <div class="brand">File Prepare HF<small><a href="#" id="version-check" class="version-link" title="Check for updates (once every 5 minutes)">v{{ version }}</a> <a
+                href="#tools" id="update-badge" class="badge warning hidden" title="A newer version is available"></a></small></div>
         <nav class="nav" id="nav">
             <a href="#jobs" data-route="jobs">Jobs <span class="badge hidden" id="nav-prompts"></span></a>
             <a href="#new" data-route="new">New job</a>
@@ -14,9 +14,12 @@
             <a href="#wiki" data-route="wiki">Wiki / Guide</a>
             {% if user.role == 'admin' %}<a href="#users" data-route="users">Users</a>{% endif %}
             <a href="#account" data-route="account">Account</a>
+            <a href="#about" data-route="about">About</a>
         </nav>
         <div class="foot">Signed in as <strong>{{ user.username }}</strong> ({{ user.role }})<br>
-            <a href="{{ base }}/logout">Sign out</a> · <a href="#" id="theme-toggle">Theme</a></div>
+            <a href="{{ base }}/logout">Sign out</a> · <a href="#" id="theme-toggle">Theme</a><br>
+            <a href="{{ repo_url }}" target="_blank" rel="noopener">GitHub</a> · <a href="{{ repo_url }}/issues/new" target="_blank" rel="noopener" id="report-issue">Report an
+                issue</a></div>
     </aside>
     <main class="main" id="view"></main>
 </div>

@@ -34,7 +34,6 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
 ## Features
 
 **Jobs and safety**
-
 - **Job queue**: create, preview, queue, start, stop after the current file, cancel immediately, resume and
   duplicate jobs. Each job keeps its own copy of the settings, shown read-only on the job page.
 - **Mandatory preview (dry run)**: it resolves every TPDB match, new name, folder and output file without touching
@@ -49,7 +48,6 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
   files are removed after failures.
 
 **Media processing**
-
 - **TPDB matching**: OSHash, file-name parser, strict name format or fully manual entry. It also supports scenes,
   JAV and movies, review steps for performers, date and title, and chapter markers.
 - **Naming**: build names from the title, the performers, both, or the TPDB id. Date formats, length limits, an
@@ -64,7 +62,6 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
   paste a URL. Performers entered manually can be linked to TPDB by UUID.
 
 **Uploads**
-
 - **Image hosts**: Hamster, Pixhost, ImgBB and imgbox, with an ordered list per asset. In *fallback* mode the
   first host that works is used; in *all* mode every host gets the file. File formats and size limits are checked
   before uploading.
@@ -75,7 +72,6 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
   toast and a desktop notification.
 
 **Administration**
-
 - **Settings UI**: built from typed models, with an ⓘ tooltip on every setting and a backup on every save. Old
   13.x config files are migrated automatically.
 - **Tools**: version and update check, ffmpeg/ffprobe check with update links for your OS, GPU detection,
@@ -83,6 +79,9 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
 - **Resources page**: preview templates rendered with sample data, fonts, JSON maps and images.
 - **Users**: admin, operator and viewer roles, scrypt password hashes, CSRF protection and a login lockout.
 - **Built-in wiki**: the pages in `docs/wiki/`, rendered in the *Wiki / Guide* tab.
+- **About page and issue reporting**: version and update status, links to the GitHub repository, branches and
+  license, and the environment (OS, Python, ffmpeg). *Report an issue* (on the About page and at the bottom of the
+  sidebar) opens a new GitHub issue pre-filled with a template and that environment.
 
 ---
 
@@ -233,10 +232,14 @@ The full list of keys, and how the 13.x key names map to them, is in the
     - **dev** compares with `VERSION` on the `dev` branch;
     - **off** turns the check off.
 - The check runs when the server starts and every 6 hours. When a newer version exists, a notification appears
-  in the browser, the sidebar shows a *vX available* badge, and *Tools › Version* shows how to update. Press
-  *Check now* to check again.
+  in the browser, the sidebar shows a *vX available* badge, and *Tools › Version* shows how to update.
+- **Manual check:** click the version number at the top of the sidebar (or *Check now* in Tools). A real check
+  runs at most once every 5 minutes; within that time you see the last result and when you can check again.
 - The check only reports; it never downloads or installs anything. To update, run `git pull origin <branch>`,
   then `pip install -r requirements.txt`, and restart.
+- Found a bug? Use **Report an issue** (About page or sidebar). It opens
+  [a new GitHub issue](https://github.com/edstagdh/File_Prepare_HF/issues/new) with your version, OS, Python and
+  ffmpeg filled in; add what happened and the relevant log lines.
 - Versions are `MAJOR.MINOR`. Every change raises the version, and the commit message names it.
 
 ---
@@ -309,7 +312,6 @@ python -m pytest -q tests
 
 The code is organised in modules, one per processing step (see [Architecture](wiki/06-architecture.md)). A new
 setting needs three things:
-
 1. a field in `fileprep/config/models.py`;
 2. a tooltip in `fileprep/config/help.py`;
 3. a regenerated `Configs/*.example.json`.

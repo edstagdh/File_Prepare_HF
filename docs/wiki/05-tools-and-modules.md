@@ -13,9 +13,19 @@ the `VERSION` file of the GitHub branch of your **update channel** (**Settings >
 
 The check runs when the server starts and every 6 hours (*Check on start*). When a newer version exists you get a
 notification once per browser session, the sidebar shows *vX available*, and the Tools panel shows how to update
-(`git pull origin <branch>`, `pip install -r requirements.txt`, restart). **Check now** checks again. *Newer than
+(`git pull origin <branch>`, `pip install -r requirements.txt`, restart). **Click the version number** at the top of
+the sidebar (from any page) or **Check now** to check right away; to spare GitHub, a real check happens at most once
+every 5 minutes - within that time you get the last result and when the next check is possible. *Newer than
 channel* means your installation is ahead of that branch (e.g. a dev build on the stable channel). Nothing is ever
 downloaded or installed automatically. A GitHub token in **Credentials > GitHub** is used when set (private forks).
+
+## About
+
+**About** (sidebar) shows the version and update status, links to the GitHub repository, the stable and
+development branches, the documentation and the license, and the environment (version, update channel, OS,
+Python, ffmpeg, folders). **Report an issue** - here and at the bottom of the sidebar - opens a new issue on GitHub
+pre-filled with a short template and the environment (folder paths are not included); **Open issues** lists the
+existing ones. The repository is the one set in **Settings > Application > Updates**.
 
 ## ffmpeg (Tools)
 

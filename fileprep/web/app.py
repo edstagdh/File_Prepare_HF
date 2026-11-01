@@ -111,7 +111,6 @@ def require(role: str = "viewer"):
         if request.method not in ("GET", "HEAD") and request.headers.get("x-csrf-token") != request.session.get("csrf"):
             raise HTTPException(403, "Invalid CSRF token - reload the page")
         return user
-
     return dependency
 
 
@@ -216,12 +215,34 @@ def _register_routes(app: FastAPI) -> None:  # noqa: C901 - flat route table
             return RedirectResponse(f"{_base(request)}/login", 303)
         request.session.setdefault("csrf", new_token())
         return templates.TemplateResponse(request, "app.html", {"base": _base(request), "csrf": request.session["csrf"],
-                                                                "user": user, "version": __version__})
+                                                                "user": user, "version": __version__,
+                                                                "repo_url": f"https://github.com/{store.app().updates.repository}"})
 
     # ------------------------------------------------------------------ session / forms
     @app.get("/api/me")
     async def me(user=Depends(require())):
         return {**user, "version": __version__, "os": platform.system(), "require_preview": store.app().jobs.require_preview}
+
+    @app.get("/api/about")
+    async def about(user=Depends(require())):
+        import sys
+        from urllib.parse import urlencode
+        from fileprep.system.ffmpeg import check_ffmpeg
+        updates = store.app().updates
+        repo_url = f"https://github.com/{updates.repository}"
+        ffmpeg = (await check_ffmpeg()).ffmpeg
+        python = platform.python_version()
+        environment = {"Version": __version__, "Update channel": updates.channel, "OS": f"{platform.system()} {platform.release()}",
+                       "Python": python, "ffmpeg": ffmpeg.version or ("not found" if not ffmpeg.found else "?")}
+        body = ("**What happened?**\n\n\n**What did you expect?**\n\n\n**Steps to reproduce**\n1. \n\n"
+                "**Log lines** (job log or Logs/)\n```\n\n```\n\n**Environment**\n"
+                + "\n".join(f"- {k}: {v}" for k, v in environment.items()))
+        return {"version": __version__, "repository": updates.repository, "repository_url": repo_url,
+                "issues_url": f"{repo_url}/issues", "new_issue_url": f"{repo_url}/issues/new?" + urlencode({"body": body}),
+                "branches": {"stable": f"{repo_url}/tree/{updates.stable_branch}", "dev": f"{repo_url}/tree/{updates.dev_branch}"},
+                "license_url": f"{repo_url}/blob/{updates.dev_branch if updates.channel == 'dev' else updates.stable_branch}/LICENSE",
+                "environment": {**environment, "Python executable": sys.executable, "Project folder": str(paths.PROJECT_ROOT),
+                                "Settings": str(paths.CONFIG_DIR), "Data": str(paths.DATA_DIR), "Logs": str(paths.LOGS_DIR)}}
 
     @app.get("/api/forms/job")
     async def job_form(user=Depends(require())):
@@ -350,7 +371,6 @@ def _register_routes(app: FastAPI) -> None:  # noqa: C901 - flat route table
 
     class _DeclinePrompter:
         """Web requests cannot answer questions: "Retry again?" after failed API retries is answered "no"."""
-
         async def ask(self, question):
             return "n"
 

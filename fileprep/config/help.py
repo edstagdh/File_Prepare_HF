@@ -92,7 +92,7 @@ HELP = {
     "Selector.value": "The id / name / selector / XPath to look for.",
     # ---------------------------------------------------------------- application
     "UpdateSettings.channel": "stable compares with the VERSION file of the stable branch (master), dev with the dev branch. Only reports; nothing is downloaded or installed.",
-    "UpdateSettings.check_on_start": "Check when the server starts and every 6 hours; a notification appears in the browser when a newer version exists.",
+    "UpdateSettings.check_on_start": "Check when the server starts and every 6 hours; a notification appears in the browser when a newer version exists. Clicking the version number in the sidebar checks right away (at most once every 5 minutes).",
     "UpdateSettings.repository": "GitHub repository (owner/name) whose VERSION file is compared. Change only for a fork.",
     "UpdateSettings.stable_branch": "Branch followed by the stable channel.",
     "UpdateSettings.dev_branch": "Branch followed by the dev channel.",

@@ -28,7 +28,6 @@ def _check(monkeypatch, channel, remote_version, status=200):
     def handler(request):
         seen.append(str(request.url))
         return httpx.Response(status, text=remote_version)
-
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: REAL_CLIENT(transport=httpx.MockTransport(handler), **kw))
     return asyncio.run(updates.check(force=True)), seen
 
@@ -51,3 +50,16 @@ def test_failures_and_off(monkeypatch):
     assert result.error and not result.update_available
     result, seen = _check(monkeypatch, "off", "999.0")
     assert result.channel == "off" and not seen
+
+
+def test_manual_check_cooldown(monkeypatch):
+    first, seen = _check(monkeypatch, "dev", "999.0")
+    assert first.fresh and len(seen) == 1
+    # a second forced check within 5 minutes reuses the result without a request
+    second = asyncio.run(updates.check(force=True))
+    assert second is first and not second.fresh and 0 < second.to_dict()["retry_in"] <= updates.MANUAL_COOLDOWN
+    assert len(seen) == 1
+    # after the cooldown a forced check fetches again
+    first.checked_at -= updates.MANUAL_COOLDOWN + 1
+    third = asyncio.run(updates.check(force=True))
+    assert third.fresh and len(seen) == 2 and third.to_dict()["retry_in"] > 0

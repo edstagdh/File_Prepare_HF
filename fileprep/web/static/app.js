@@ -37,7 +37,7 @@ function linkify(text) {
 }
 function fill(el, ...kids) { el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false)); }
 const fmtTime = (t) => (t ? new Date(t * 1000).toLocaleString() : "—");
-const badge = (text, cls) => h("span", { class: `badge ${cls || text}` }, text);
+const badge = (text, cls) => h("span", { class: `badge ${cls ?? text}` }, text);
 // ms = 0 keeps the toast until it is clicked or closed
 // default durations: errors 20 s, everything else 12 s ("input needed" toasts pass 30 s)
 function toast(message, kind = "", ms = kind === "error" ? 20000 : 12000) {
@@ -288,7 +288,7 @@ async function browseDirectory(start, onPick) {
 
 // ------------------------------------------------------------------ router
 const routes = { jobs: viewJobs, job: viewJob, new: viewNewJob, edit: viewEditJob, settings: viewSettings, modules: viewModules,
-  tools: viewTools, resources: viewResources, wiki: viewWiki, users: viewUsers, account: viewAccount };
+  tools: viewTools, resources: viewResources, wiki: viewWiki, users: viewUsers, account: viewAccount, about: viewAbout };
 function route() {
   clearPollers();
   const [name, ...rest] = (location.hash.slice(1) || "jobs").split("/");
@@ -703,6 +703,9 @@ async function viewTools() {
         [` · channel: ${r.channel} (${r.branch} branch) · latest: `, h("strong", {}, r.latest ? `v${r.latest}` : "?"), " ",
           r.error ? badge("check failed", "error") : r.update_available ? badge("update available", "warning") : r.ahead ? badge("newer than channel", "") : badge("up to date", "ok")]),
       r.error ? h("p", { class: "small muted" }, r.error) : null,
+      r.channel !== "off" ? h("p", { class: "small muted" }, `Checked ${fmtTime(r.checked_at)}`,
+        r.retry_in ? ` · next manual check possible in ${Math.floor(r.retry_in / 60)}:${String(r.retry_in % 60).padStart(2, "0")}` : "",
+        " · click the version number in the sidebar to check from any page.") : null,
       r.update_available ? h("p", {}, "Update with ", h("code", {}, `git pull origin ${r.branch}`), " (or download the branch), then restart. ", h("a", { href: r.url, target: "_blank", rel: "noopener" }, "Open on GitHub")) : null,
       r.channel !== "off" ? h("button", { class: "small", onclick: () => { fill(upd, "Checking version…"); loadUpdates(true).catch((e) => fill(upd, e.message)); } }, "Check now") : null);
   }
@@ -860,7 +863,51 @@ async function viewAccount() {
       } }, "Change password")));
 }
 
+// ------------------------------------------------------------------ about
+async function viewAbout() {
+  const a = await api("GET", "/api/about");
+  const ext = (href, text) => h("a", { href, target: "_blank", rel: "noopener" }, text);
+  const status = h("span", { class: "muted" }, "checking…");
+  fill($view, h("div", { class: "topbar" }, h("h1", {}, "About")),
+    h("div", { class: "panel" },
+      h("h2", {}, "File Prepare HF ", h("span", { class: "muted" }, `v${a.version}`)),
+      h("p", {}, "Prepares video releases for upload: TPDB matching, renaming, HEVC/AV1 encoding, covers, thumbnail sheets, ",
+        "animated previews, performer images, BBCode templates, image host uploads and tracker uploads, from a web interface with a job queue."),
+      h("p", {}, "Updates: ", status, " · ", h("a", { href: "#", onclick: (e) => { e.preventDefault(); manualUpdateCheck(); } }, "Check now")),
+      h("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:10px" },
+        h("a", { class: "btn", href: a.repository_url, target: "_blank", rel: "noopener" }, "GitHub repository"),
+        h("a", { class: "btn primary", href: a.new_issue_url, target: "_blank", rel: "noopener" }, "Report an issue"),
+        h("a", { class: "btn", href: a.issues_url, target: "_blank", rel: "noopener" }, "Open issues"))),
+    h("div", { class: "panel" }, h("h2", {}, "Links"),
+      h("ul", {},
+        h("li", {}, "Repository: ", ext(a.repository_url, a.repository)),
+        h("li", {}, "Stable branch: ", ext(a.branches.stable, a.branches.stable.split("/tree/")[1]), " · development branch: ", ext(a.branches.dev, a.branches.dev.split("/tree/")[1])),
+        h("li", {}, "Documentation: ", h("a", { href: "#wiki" }, "Wiki / Guide"), " (also docs/ in the repository)"),
+        h("li", {}, "License: ", ext(a.license_url, "MIT")))),
+    h("div", { class: "panel" }, h("h2", {}, "Environment"),
+      h("p", { class: "small muted" }, "Included automatically when you use Report an issue (paths are not)."),
+      h("table", {}, h("tbody", {}, Object.entries(a.environment).map(([k, v]) => h("tr", {}, h("td", { class: "muted", style: "width:200px" }, k), h("td", { class: "mono small" }, v)))))));
+  checkUpdates(false, false).then((r) => fill(status, r.channel === "off" ? "check is off" : r.error ? badge("check failed", "error") :
+    r.update_available ? [badge(`v${r.latest} available`, "warning"), ` on the ${r.channel} channel`] :
+    [badge(r.ahead ? "newer than channel" : "up to date", r.ahead ? "" : "ok"), ` (${r.channel} channel, latest v${r.latest})`])).catch((e) => fill(status, e.message));
+}
+
 // ------------------------------------------------------------------ version check
+// Clicking the version in the sidebar checks now (the server allows one real check per 5 minutes).
+async function manualUpdateCheck() {
+  let r;
+  try { r = await checkUpdates(true, false); } catch (e) { return toast(`Version check failed: ${e.message}`, "error"); }
+  if (r.channel === "off") return toast(h("span", {}, "The update check is off. Choose a channel in ", h("a", { href: "#settings/app" }, "Settings › Application › Updates"), "."), "", 10000);
+  const wait = r.retry_in ? ` Next check possible in ${Math.floor(r.retry_in / 60)}:${String(r.retry_in % 60).padStart(2, "0")}.` : "";
+  const ago = Math.round((Date.now() / 1000 - r.checked_at) / 60);
+  const when = r.fresh ? "" : ` (checked ${ago < 1 ? "less than a minute" : ago + " min"} ago.${wait})`;
+  if (r.error) return toast(`Version check failed: ${r.error}${when}`, "error");
+  if (r.update_available) return toast(h("span", {}, `Version ${r.latest} is available on the ${r.channel} channel (you have ${r.current}).${when} `,
+    h("a", { href: r.url, target: "_blank", rel: "noopener" }, "View on GitHub"), " · ", h("a", { href: "#tools" }, "Details")), "warning", 20000);
+  toast(`v${r.current} is ${r.ahead ? "newer than" : "the latest on"} the ${r.channel} channel (${r.branch} branch: v${r.latest}).${when}`, "ok", 10000);
+}
+document.getElementById("version-check")?.addEventListener("click", (e) => { e.preventDefault(); manualUpdateCheck(); });
+
 async function checkUpdates(refresh = false, notify = true) {
   const r = await api("GET", `/api/updates${refresh ? "?refresh=1" : ""}`);
   const b = document.getElementById("update-badge");
@@ -878,4 +925,6 @@ async function checkUpdates(refresh = false, notify = true) {
 
 api("GET", "/api/me").then((me) => { A.requirePreview = me.require_preview; }).catch(() => {});
 checkUpdates().catch(() => {});
+// "Report an issue" opens a new GitHub issue pre-filled with the version and environment
+api("GET", "/api/about").then((a) => { const l = document.getElementById("report-issue"); if (l) l.href = a.new_issue_url; }).catch(() => {});
 route();

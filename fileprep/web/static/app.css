@@ -52,8 +52,9 @@ h1 { font-size: 20px; margin: 0 0 14px; } h2 { font-size: 16px; margin: 18px 0 1
 
 /* buttons & inputs */
 button, .btn { font: inherit; border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 7px 13px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
-button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button:hover, .btn:hover { border-color: var(--accent); }
+a.btn { display: inline-block; text-decoration: none; }
+button.primary, .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.danger { color: var(--err); } button.danger:hover { border-color: var(--err); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 button.small { padding: 3px 9px; font-size: 12px; }
@@ -180,3 +181,5 @@ tr.selected td { background: color-mix(in srgb, var(--accent) 10%, transparent);
 .job-settings[open] > summary { margin-bottom: 10px; }
 .performer.done { opacity: .9; }
 .list-answer { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.version-link { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; cursor: pointer; }
+.version-link:hover { color: var(--accent); }

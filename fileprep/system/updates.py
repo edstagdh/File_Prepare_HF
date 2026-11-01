@@ -17,6 +17,7 @@ from loguru import logger
 from fileprep import __version__
 
 CACHE_SECONDS = 6 * 3600
+MANUAL_COOLDOWN = 5 * 60  # a forced (manual) check reuses the last result when it is newer than this
 
 
 @dataclass
@@ -30,9 +31,12 @@ class UpdateStatus:
     url: str = ""  # page to read about / download the version
     error: Optional[str] = None
     checked_at: float = field(default_factory=time.time)
+    fresh: bool = True  # False when a cached result was returned
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data["retry_in"] = 0 if self.channel == "off" else max(0, int(self.checked_at + MANUAL_COOLDOWN - time.time()))
+        return data
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -59,8 +63,9 @@ async def check(force: bool = False) -> UpdateStatus:
     if settings.channel == "off":
         return UpdateStatus(current=__version__, channel="off")
     branch = settings.stable_branch if settings.channel == "stable" else settings.dev_branch
-    if _cache and not force and _cache.channel == settings.channel and _cache.branch == branch \
-            and time.time() - _cache.checked_at < CACHE_SECONDS:
+    if _cache and _cache.channel == settings.channel and _cache.branch == branch \
+            and time.time() - _cache.checked_at < (MANUAL_COOLDOWN if force else CACHE_SECONDS):
+        _cache.fresh = False
         return _cache
     status = UpdateStatus(current=__version__, channel=settings.channel, branch=branch,
                           url=f"https://github.com/{settings.repository}/tree/{branch}")
