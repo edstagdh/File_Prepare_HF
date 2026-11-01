@@ -1,0 +1,61 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "base_path": "",
+    "log_level": "INFO",
+    "open_browser": true,
+    "browser_command": ""
+  },
+  "auth": {
+    "session_secret": "",
+    "session_hours": 12,
+    "secure_cookies": false,
+    "max_failed_logins": 5,
+    "lockout_minutes": 15,
+    "users": []
+  },
+  "jobs": {
+    "max_concurrent_jobs": 3,
+    "max_cpu_encode_jobs": 1,
+    "max_gpu_encode_jobs": 1,
+    "require_preview": true,
+    "keep_finished_jobs_days": 30,
+    "prompt_context_lines": 40,
+    "notify_on_finish": true
+  },
+  "resource_sync": {
+    "auto_sync_on_start": false,
+    "github_token_from_credentials": true,
+    "entries": []
+  },
+  "environment": {
+    "python_min_version": [
+      3,
+      10
+    ],
+    "python_max_version": [
+      3,
+      14
+    ],
+    "ffmpeg_path": "ffmpeg",
+    "ffprobe_path": "ffprobe",
+    "ffmpeg_min_version": "4.0.0",
+    "ffmpeg_min_build_date": "2024-09-01"
+  },
+  "hardware": {
+    "gpu": "auto",
+    "decode_thumbnails": true,
+    "decode_previews": true,
+    "encode_preview_segments": true,
+    "cpu_fallback": true,
+    "vaapi_device": "/dev/dri/renderD128"
+  },
+  "updates": {
+    "channel": "stable",
+    "check_on_start": true,
+    "repository": "edstagdh/File_Prepare_HF",
+    "stable_branch": "master",
+    "dev_branch": "dev"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "thumbnail_count": 16,
+  "thumbnail_width": 470,
+  "columns": 4,
+  "padding": 2,
+  "output_suffix": "thumbnails",
+  "include_file_info": true,
+  "compact_vertical_layout": true,
+  "alternate_layout": false,
+  "include_first_frame": false,
+  "regeneration_mode": "user input",
+  "font_file": "Gotham_Medium.otf"
+}

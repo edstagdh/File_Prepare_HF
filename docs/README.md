@@ -1,162 +1,321 @@
 # File Prepare HF
 
-**File Prepare HF** is a Python-based tool designed to process and prepare media files for uploading to HF. It offers functionalities for media processing, preview generation, and interaction with ThePornDB (TPDB) API to enrich metadata.
-<br><br>
-This process requires matching scene via TPDB, it is not a standalone script.
+**File Prepare HF** prepares adult video releases for upload to HF and similar trackers. It matches each video with
+[ThePornDB](https://theporndb.net) (TPDB), renames it, optionally re-encodes it to HEVC or AV1 (CPU or GPU), writes
+metadata and chapters, creates a cover, a thumbnails sheet and animated previews (WebP, AVIF, WebM, GIF), keeps
+performer images, builds the BBCode upload template, uploads the images to image hosts, and fills the tracker upload
+form in a browser that stays logged in.
+
+Everything runs from a password-protected **web interface** that you start with `python main.py`. Work is organised
+in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing on disk. The job then waits in a
+**queue** and runs. You can follow its live progress and logs, and you answer its questions in the browser.
+
+> Current version: see `VERSION` (shown in the app's sidebar). Development happens on the `dev` branch; stable
+> releases are on `master`.
+
+---
+
+## Contents
+
+1. [Features](#features)
+2. [Requirements](#requirements)
+3. [Install and start](#install-and-start)
+4. [Workflow](#workflow)
+5. [Settings](#settings)
+6. [Image formats and hosts](#image-formats-and-hosts)
+7. [Versions and updates](#versions-and-updates)
+8. [Command line](#command-line)
+9. [Files and folders](#files-and-folders)
+10. [Documentation](#documentation)
+11. [Development](#development)
+
+---
 
 ## Features
 
-- **Media Processing**: Includes re-encoding of videos and creation of cover image and thumbnails, all set via flags in Config.json
-- **Preview Generation**: Creates previews of videos based on configurable settings.
-- **TPDB API Integration**: Fetches and processes metadata from ThePornDB API.
-- **Configurable Settings**: Utilizes JSON configuration files to customize processing parameters.
-- **Utility Functions**: Includes a set of utility functions to support media processing and general tasks.
-- **Template Generation**: Includes option to generate upload BBCode for each video based on existing template file, including tags/mediainfo.
+**Jobs and safety**
 
+- **Job queue**: create, preview, queue, start, stop after the current file, cancel immediately, resume and
+  duplicate jobs. Each job keeps its own copy of the settings, shown read-only on the job page.
+- **Mandatory preview (dry run)**: it resolves every TPDB match, new name, folder and output file without touching
+  any file. Duplicate or existing target names, paths that are too long, invalid settings, missing credentials or
+  encoders, TPDB connection failures and overlapping jobs **block** the job. Files with no match are skipped by
+  the run. You can turn the preview requirement off.
+- **Fix names after the preview**: add a suffix to all files (for example `VR2Normal`) or rename a single file
+  without running the preview again. You can also set a TPDB UUID by hand or move a file out of the job.
+- **Scheduler**: a limit on concurrent jobs, at most one CPU-encoding job and one GPU-encoding job at a time, and
+  never two jobs on the same folder.
+- **Crash-safe**: job state is saved after every file. Interrupted jobs can be resumed, and temporary or partial
+  files are removed after failures.
 
-## 🛣️ Roadmap
+**Media processing**
 
-- [x] Add tags generation for scene upload process.
-- [ ] ~~Add an option to process files without fetching data from TPDB API(Re-encode, Create Previews).~~
-<br>A "full manual" mode has been introduced, however it does have limitations, this cannot be fully implemented at this stage.
-- [x] Support for Static thumbnails generation without using Scorp VTM software.
-- [ ] ~~Support other types of databases, e.g. StashDB.~~ Note - I don't have access to other databases at this time.
-- [x] Add an option to use jpg format images.
-- [x] Add an option to upload to imgbox(supported static format images only), this requires restructure.
-- [x] Add an option to upload to imgbb(webp)
-- [x] Add an option to use free string parsing for scene matching.
-- [x] Add an option to upload to hamster(webp)
-- [x] Add an option to upload to pixhost (anonymous, adult content flag, delete links saved) - see `Upload_Pixhost.py`.
-- [ ] Add an option to change output file naming format(select from list)
-- [x] Switch re-encoding progress bar from logger lines to tqdm.
-- [x] support for cover image and thumbnails content regeneration flag:
-<br>
-See `Config.json` for `cover_regeneration_mode` and `Config_Thumbnails.json` for `regeneration_mode`
-<br>
-Available modes are [`user input`, `force regenerate`, `force keep`]
-- [x] support for tracker semi-automatic uploading using selenium for python package, see `Config_Tracker.json`.
-<br>
-requires `create_template_file` to be set as True and currently only supported using hamster img host.
-- [x] support for automatic torrent creation using torf package.
-- [x] support for transitions for previews, see `Config_Video_Preview.json`
+- **TPDB matching**: OSHash, file-name parser, strict name format or fully manual entry. It also supports scenes,
+  JAV and movies, review steps for performers, date and title, and chapter markers.
+- **Naming**: build names from the title, the performers, both, or the TPDB id. Date formats, length limits, an
+  optional sub folder per file and suffix detection (`vr2normal`, `bts`, `upscaled`…) are configurable.
+- **Encoding**: HEVC or AV1 on the CPU (x265, SVT-AV1 or libaom) or the GPU (NVENC, Quick Sync, AMF, VAAPI,
+  VideoToolbox). A failed GPU encode can fall back to the CPU. You can downscale above 1080p and cap the CPU usage.
+- **GPU detection**: the app tests each backend on this machine, and also uses the GPU to speed up thumbnails and
+  preview segments.
+- **Outputs**: cover, thumbnails sheet, animated previews and preview sheets (WebP / **AVIF** / WebM / GIF, at
+  480p, 720p or 1080p), MediaInfo file, BBCode template and tags.
+- **Performer images**: before the run you can pick a face cropped from TPDB posters, upload your own image or
+  paste a URL. Performers entered manually can be linked to TPDB by UUID.
 
+**Uploads**
 
+- **Image hosts**: Hamster, Pixhost, ImgBB and imgbox, with an ordered list per asset. In *fallback* mode the
+  first host that works is used; in *all* mode every host gets the file. File formats and size limits are checked
+  before uploading.
+- **Tracker upload**: one persistent Selenium browser per tracker stays logged in across files and jobs (2FA is
+  supported). Form selectors are set per site. Torrent creation and the duplicate check are built in. You check
+  the filled form yourself before submitting.
+- **Notifications**: Telegram messages and in-app toasts with links to the job. Questions show an "Input needed"
+  toast and a desktop notification.
 
+**Administration**
 
-## Installation
+- **Settings UI**: built from typed models, with an ⓘ tooltip on every setting and a backup on every save. Old
+  13.x config files are migrated automatically.
+- **Tools**: version and update check, ffmpeg/ffprobe check with update links for your OS, GPU detection,
+  resource sync from GitHub and Pixhost delete links.
+- **Resources page**: preview templates rendered with sample data, fonts, JSON maps and images.
+- **Users**: admin, operator and viewer roles, scrypt password hashes, CSRF protection and a login lockout.
+- **Built-in wiki**: the pages in `docs/wiki/`, rendered in the *Wiki / Guide* tab.
 
-1. **Clone the repository**:
+---
 
-   ```bash
-   git clone https://github.com/edstagdh/File_Prepare_HF.git
-   cd File_Prepare_HF
-   ```
+## Requirements
 
-2. **Create a virtual environment (optional but recommended)**:
+| Requirement            | Notes                                                                                                                                                          |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Python 3.10 – 3.14     | Range configurable in *Settings › Application › Environment*                                                                                                   |
+| ffmpeg + ffprobe       | Recent build with `libx265`, `libwebp`, `libvpx-vp9` and `libsvtav1` (or `libaom-av1`, which is needed for AV1 encoding and AVIF previews). Checked in *Tools* |
+| TPDB API token         | Not needed in full manual mode                                                                                                                                 |
+| Firefox or Chrome      | Only for tracker uploads and ImgBB                                                                                                                             |
+| GPU drivers (optional) | NVIDIA / Intel / AMD / Apple / VAAPI for GPU encoding and decoding                                                                                             |
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+Python packages are listed in `requirements.txt` (FastAPI, Uvicorn, Pydantic 2, Pillow ≥ 11.3 for AVIF, OpenCV,
+Selenium, httpx, torf…).
 
-3. **Install the required dependencies**:
+---
 
-   ```bash
-   pip install -r Requirements.txt
-   ```
+## Install and start
 
-## Usage
+```bash
+git clone -b dev https://github.com/edstagdh/File_Prepare_HF.git      # or -b master for the stable channel
+cd File_Prepare_HF
+python -m venv venv
+source venv/bin/activate                                                # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
 
-0. **Prerequisites**:
+`main.py` prints the version, the app's URLs (including your LAN addresses when it listens on all interfaces),
+the ffmpeg status and where settings and logs are stored. It then opens `http://127.0.0.1:8765` in your browser.
 
-   - Python version 3.10(any sub versions should work) for maximum compatibility.
-   - TPDB credentials(API Key).
-   - MP4 extension.
-   - Valid HF template file<br>
-   Note - Required only when using `create_hf_template` in the configuration.
-   - FFMPEG installed in configured via PATH(recent ffmpeg version)
-   - Valid filename format, see example below(use only female performer names)<br>
-   Note - This still might not be enough for a match in TPDB.<br>
-   Note 2 - Required only when not using `free_string_parse` in the configuration.
-   ```
-   STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
-   or
-   STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.PART.NUMBER.EXTENSION
-   or
-   STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
-   ```
+- `python main.py --no-browser` skips opening the browser. To make that permanent, turn off *Settings ›
+  Application › Web server › Open the browser*. To use a specific browser or profile, set *Browser command*
+  (for example `firefox -P Work -new-tab {url}`).
+- **First visit:** create the administrator account. The settings files in `Configs/` are created
+  automatically, and 13.x files are migrated.
+- **Remote access:** set the bind address to `0.0.0.0`, put an HTTPS reverse proxy in front of the app, and turn
+  on *Secure cookies*.
+- **Updating:** run `git pull` on your branch, then `pip install -r requirements.txt`, then restart.
 
-1. **Configure Settings**:
+---
 
-   - Rename `Config.json_example` to `Config.json` and adjust the settings as needed.
-   - Rename `Config_Thumbnails.json_example` to `Config_Thumbnails.json` and adjust the settings as needed.
-   - Rename `Config_Tracker.json_example` to `Config_Tracker.json` and adjust the settings as needed.
-   - Rename `Config_Video_Preview.json_example` to `Config_Video_Preview.json` and adjust the settings as needed.
-   - Rename `creds.secret_example` to `creds.secret` and input your TPDB API credentials and other credentials if needed.
-   - Rename `Performers_Images.json_Example` to `Performers_Images.json` under `Resources` and input your links for performer images.
+## Workflow
 
-2. **Run the Main Script**:
+### 1. One-time setup
 
-   ```bash
-   python main.py
-   ```
+1. **Settings › Credentials**: enter the TPDB token, image host accounts, tracker accounts, Telegram and an
+   optional GitHub token.
+2. **Settings › Processing defaults**: set the default job settings (matching, naming, encoding, outputs, hosts,
+   tracker).
+3. **Tools**: check ffmpeg and GPU detection. You can also sync `Resources/` from GitHub.
+4. **Settings › Tracker sites**: set the login and upload URLs, category, 2FA and form selectors for each tracker.
 
-   This will initiate the media processing workflow based on your configurations.
-
-## Configuration
-
-- **`Config.json`**: Contains settings for media processing, such as input/output directories, preview options, and other parameters.
-- **`Config_Thumbnails.json`**: Contains settings for thumbnails processing
-- **`Config_Ttracker.json`**: Contains settings for tracker upload integration
-- **`Config_Video_Preview.json`**: Contains settings preview processing
-- **Pixhost** (`pixhost_upload_cover`, `pixhost_upload_thumbnails`, `pixhost_upload_previews` in `Config.json`): needs no credentials. Uploads are always flagged as adult content.
-  Because Pixhost is anonymous, every upload's private delete link (`manage_url`) is stored in `<name>_pixhost.txt` and permanently appended to `pixhost_manage_links.jsonl` (
-  project root, keep it private).
-  List uploads that were not deleted: `python Image_Uploaders/Upload_Pixhost.py list`. Delete one: `python Image_Uploaders/Upload_Pixhost.py delete <manage_url>`.
-  Limits: JPEG/PNG/GIF/WebP/AVIF, 10 MB per image.
-- **`creds.secret`**: Stores sensitive information like TPDB API keys. Ensure this file is kept secure and is not shared publicly.
-
-## File Structure
+### 2. A job
 
 ```
-File_Prepare_HF/
-├── gitignore                                   # Specifies files to ignore in Git
-└── Configs/                                    # Config files
-   ├── Config.json_example                      # Example configuration file
-   ├── Config_Thumbnails.json_example           # Example Thumbnails configuration file
-   ├── Config_Tracker.json_example              # Example Tracker configuration file
-   ├── Config_Video_Preview.json_example        # Example Preview configuration file
-└── docs/                                       # Documentation files
-   ├── exit_codes.json                          # Common exit codes for the application
-   ├── README.md                                # README file
-└── Image Uploaders/                            # Image Uploaders Integration
-   ├── Upload_IMGBOX.py                         # IMGBOX code integration
-   ├── Upload_IMGBB.py                          # IMGBB code integration
-   ├── Upload_Hamster.py                        # Hamster code integration
-   ├── Upload_Pixhost.py                        # Pixhost code integration (anonymous, saves delete links)
-└── Logs/                                       # Log files
-└── Notifiers/                                  # Notifiers Integration
-   ├── Notifier_TG.py                           # Telegram Notifier code integration
-└── Resources/                                  # Resource files used in code
-   ├── BBCode_Images.json                       # Icons mapping for images URLs
-   ├── Gotham_Medium.otf                        # Font file for previews text overlay
-   ├── HF_Template.txt                          # Example template file with placeholders for HF uploading
-   ├── Performers_Images.json_Example           # Contains mapped performer face images to auto insert in template
-   ├── Sort_Performers_Images.py                # Helper script to sort the performer images json.
-├── creds.secret_example                        # Example credentials file
-├── Generate_Thumbnails_Sheet.py                # Thumbnails generation code
-├── Generate_Torrent_File.py                    # Torrent generation code
-├── Generate_Video_Preview.py                   # Preview generation code
-├── LICENSE                                     # License file
-├── main.py                                     # Main Application code for processing files
-├── Media_Processing.py                         # Handles media file processing
-├── Requirements.txt                            # Python dependencies requirements file
-├── TPDB_API_Processing.py                      # TPDB API code
-├── Tracker_Uploader.py                         # Tracker Selenium Upload code integration
-├── Utilities.py                                # Utility functions for processing
+New job ─► Save & preview ─► (answer questions) ─► ready ─► Queue / start ─► running ─► completed
+                 │                                   │                │
+                 └──► blocked (fix files/settings) ◄─┘        stop / cancel / resume
+```
+
+1. **New job**: choose the working directory. The job processes the `.mp4` files directly inside it. Adjust the
+   job's settings in the tabs; the Thumbnails, Video preview and Tracker tabs appear only when those features
+   are on.
+2. **Preview**: TPDB lookups and your review answers (scene choice, performers, date, title, manual data)
+   produce a plan table. It shows each file's new name, folder, outputs and steps, plus errors, warnings and
+   info.
+    - **Errors** block the job. Fix them and preview again, or for a single file use *Set TPDB UUID* or
+      *Move out*.
+    - Change names without running the preview again: use **Suffix for all files** or **Rename** on a row.
+3. **Performer images** (when portraits or the template are on): choose or upload a face for each performer.
+   The face is uploaded to the portrait hosts and saved in `Resources/Performers_Images.json`.
+4. **Queue / start**: the scheduler starts the job when a slot is free. The run reuses your answers from the
+   preview.
+5. **Answer questions while it runs**: audio track, keep or regenerate an existing cover, sheet or preview, cut
+   points, 2FA, tracker confirmation. A yellow card on the job page shows the recent log lines and quick
+   answers.
+6. **Results**: renamed files, optionally in a sub folder per file, next to the generated images, template and
+   tags. Image host URLs are saved in `<name>_<host>.txt`.
+
+### 3. What happens to each file (run)
+
+| #  | Step                                                               | Enabled by                                           |
+|----|--------------------------------------------------------------------|------------------------------------------------------|
+| 1  | Create the output (sub) folder, rename the video                   | *Naming*                                             |
+| 2  | Choose the audio track                                             | *Encoding › Keep a single audio track*               |
+| 3  | Re-encode to HEVC/AV1 on CPU/GPU (already HEVC/AV1 files are kept) | *Encoding › Re-encode*                               |
+| 4  | Write title, description, TPDB id, exclusive tag and chapters      | always (only when changed)                           |
+| 5  | Cover → upload                                                     | *Outputs › Cover image*, *Image hosts › Cover hosts* |
+| 6  | Thumbnails sheet → upload                                          | *Outputs › Thumbnails sheet*, *Thumbnails* settings  |
+| 7  | Animated previews and sheets (WebP/AVIF/WebM/GIF) → upload         | *Outputs › Video preview*, *Video preview* settings  |
+| 8  | MediaInfo file                                                     | *Outputs › MediaInfo file*                           |
+| 9  | BBCode template + tags (uses the uploaded image URLs)              | *Outputs › Upload template*                          |
+| 10 | Move the files into the sub folder                                 | *Naming › Create a sub folder per file*              |
+| 11 | Torrent, duplicate check, tracker form (you confirm)               | *Tracker upload*                                     |
+| 12 | Add to the TPDB collection                                         | *Matching › Add to TPDB collection*                  |
+
+A TPDB connection failure stops the job; you can resume it later. If a file has no match, that file is skipped
+and you get a notification. A failed cover or image upload is logged and processing continues.
+
+---
+
+## Settings
+
+Settings are edited in the **Settings** tab (admins). Every setting has an ⓘ tooltip, and each save keeps a backup
+in `Configs/backups/`. New jobs copy the defaults; each job's own settings can be edited until the job runs.
+
+| Tab (file)                                  | Sections and main settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|---------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Processing defaults** (`processing.json`) | **Input**: working directory, ignored names, words stripped from names, moved-out folder · **Matching**: mode (free parse / strict / full manual), TPDB database (scenes / JAV / movies), OSHash first, re-match by embedded id, manual performers, TPDB collection, per-file UUIDs · **Review**: approve performers / date / title, duration-mismatch warning, chapter markers · **Naming**: file name mode (title / names / both / TPDB id / user input), title date format, stripped strings, ignore part / resolution / performer id, suffix for all files, sub folder per file, maximum name and path length · **Encoding**: re-encode, codec (HEVC / AV1), device (CPU / GPU), CRF / preset / GPU quality, CPU fallback, downscale > 1080p, CPU limit, chapters, keep original, single audio track · **Metadata**: exclusive tag · **Outputs**: cover (+ regeneration mode), thumbnails, video preview, MediaInfo, performer images, upload template, image format (WebP / AVIF / JPG / PNG / BMP), template file, icon base URL, font · **Portraits**: size, zoom, face score, blur, posters per performer, format · **Image hosts**: fallback / all, host lists for cover, thumbnails, previews, portraits · **Tracker upload**: trackers, release mode, cleanup, wait per upload · **Notifications**: Telegram |
+| **Thumbnails** (`thumbnails.json`)          | Count, width, columns, padding, suffix, file info header, compact vertical layout, alternate layout, first frame, regeneration mode, font                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Video preview** (`video_preview.json`)    | WebP / AVIF / WebM / GIF previews and sheets, resolution (480p / 720p / 1080p), segments and duration, grid columns, GIF segments, fps per format, AVIF quality (CRF), timestamp overlay, transition, scene-change threshold, black bars, file info, cut point options, excluded files, custom output folder, temp files, font                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Tracker sites** (`tracker.json`)          | Browser (Firefox / Chrome, driver and profile paths, timeouts, idle close), torrent (excluded suffixes, piece size), sites (login / upload URL, category, 2FA, form selectors)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Application** (`app.json`)                | **Web server**: bind address, port, base path, log level, open browser, browser command · **Authentication**: session secret and lifetime, secure cookies, lockout · **Jobs**: concurrent jobs, CPU and GPU encode slots, require preview, retention, prompt log lines, finish notifications · **Resource sync** · **Environment**: Python range, ffmpeg / ffprobe paths and minimum versions · **Hardware acceleration**: GPU backend, GPU decode and encode for thumbnails and previews, CPU retry, VAAPI device · **Updates**: channel (stable / dev / off), check on start, repository, branches                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Credentials** (`credentials.secret`)      | TPDB token and API URLs, image host accounts, tracker accounts and announce URLs, Telegram, GitHub token. Secrets are masked in the UI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+The full list of keys, and how the 13.x key names map to them, is in the
+[configuration page](wiki/03-configuration.md).
+
+---
+
+## Image formats and hosts
+
+| Format    | Cover / thumbnails / portraits | Animated previews                                 | Hosts that accept it       |
+|-----------|--------------------------------|---------------------------------------------------|----------------------------|
+| WebP      | ✓ (default)                    | ✓ (default; used by the template and the tracker) | Hamster, Pixhost, ImgBB    |
+| **AVIF**  | ✓                              | ✓ (AV1, much smaller files)                       | **Pixhost only**           |
+| JPG / PNG | ✓                              | –                                                 | all (imgbox: JPG/PNG only) |
+| GIF       | –                              | ✓                                                 | Hamster, Pixhost, ImgBB    |
+| WebM      | –                              | ✓ (kept locally)                                  | –                          |
+
+- AVIF previews are encoded with SVT-AV1, or libaom-av1 when SVT-AV1 is missing. AVIF images are saved with
+  Pillow (11.3 or newer).
+- Hosts that do not accept a file's format are skipped with a warning; in fallback mode the next host is tried.
+  The preview warns about these cases in advance.
+- The BBCode template and the tracker form keep using the **WebP** preview sheet and preview, because HF supports
+  WebP and GIF only. AVIF previews are extra files, uploaded where they are accepted.
+
+---
+
+## Versions and updates
+
+- The installed version comes from the `VERSION` file. It is shown in the sidebar, in the Tools tab and in the
+  console banner.
+- **Settings › Application › Updates › Update channel**:
+    - **stable** compares with `VERSION` on the `master` branch;
+    - **dev** compares with `VERSION` on the `dev` branch;
+    - **off** turns the check off.
+- The check runs when the server starts and every 6 hours. When a newer version exists, a notification appears
+  in the browser, the sidebar shows a *vX available* badge, and *Tools › Version* shows how to update. Press
+  *Check now* to check again.
+- The check only reports; it never downloads or installs anything. To update, run `git pull origin <branch>`,
+  then `pip install -r requirements.txt`, and restart.
+- Versions are `MAJOR.MINOR`. Every change raises the version, and the commit message names it.
+
+---
+
+## Command line
+
+| Command                                                   | Purpose                                                       |
+|-----------------------------------------------------------|---------------------------------------------------------------|
+| `python main.py [--no-browser]`                           | Start the web interface                                       |
+| `python run.py web [--host H --port P]`                   | Server only                                                   |
+| `python run.py preview` / `python run.py process [--yes]` | Terminal dry run / processing with the saved default settings |
+| `python run.py migrate-config [--overwrite]`              | Convert 13.x config files                                     |
+| `python run.py create-user NAME --role admin`             | Create a web user                                             |
+| `python run.py check-ffmpeg`                              | ffmpeg / ffprobe report                                       |
+| `python run.py sync-resources`                            | Sync `Resources/` from GitHub                                 |
+| `python run.py pixhost list\|delete <url>`                | Manage Pixhost uploads                                        |
+
+---
+
+## Files and folders
 
 ```
+main.py               web app launcher (banner, URLs, browser)
+run.py                command line
+VERSION               installed version (compared by the update check)
+Configs/              settings (*.json, credentials.secret; *.example.json are templates) + backups/
+Resources/            templates, fonts, BBCode icon map, performer image map, face detection model
+data/                 jobs (data/jobs/<id>.json + .log), performer image candidates, links (git-ignored)
+Logs/                 application logs
+fileprep/             application package (config, pipeline, jobs, media, tpdb, uploaders, tracker, web…)
+docs/                 this README and the wiki pages
+tests/                pytest suite
+```
+
+Files written next to each video use the new base name: `<name>.mp4`, `<name>.webp` (cover),
+`<name>_thumbnails.webp`, `<name>_preview.webp` / `.avif`, `<name>_preview_sheet.webp` / `.avif`,
+`<name>_mediainfo.txt`, `<name>_template.txt`, `<name>_tags.txt` and `<name>_<host>.txt` (uploaded URLs).
+
+---
+
+## Documentation
+
+- [Getting started](wiki/01-getting-started.md)
+- [Jobs, preview and the queue](wiki/02-jobs.md)
+- [Configuration and renamed keys](wiki/03-configuration.md)
+- [Image hosts and tracker upload](wiki/04-image-hosts-and-tracker.md)
+- [Tools and modules](wiki/05-tools-and-modules.md)
+- [Architecture (developers)](wiki/06-architecture.md)
+- [Troubleshooting](wiki/07-troubleshooting.md)
+
+### File name input (strict matching mode)
+
+```
+STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.EXTENSION
+STUDIO_NAME.YY.MM.DD.PERFORMER_FNAME.PERFORMER_LNAME.PART.NUMBER.EXTENSION
+STUDIO_NAME.YY.MM.DD.PERFORMER1_FNAME.PERFORMER1_LNAME.and.PERFORMER2_FNAME.PERFORMER2_LNAME.EXTENSION
+```
+
+The default mode, `free_string_parse`, sends the file name to the TPDB parser. `full_manual` asks you for all
+metadata.
+
+---
+
+## Development
+
+```bash
+pip install pytest
+python -m pytest -q tests
+```
+
+The code is organised in modules, one per processing step (see [Architecture](wiki/06-architecture.md)). A new
+setting needs three things:
+
+1. a field in `fileprep/config/models.py`;
+2. a tooltip in `fileprep/config/help.py`;
+3. a regenerated `Configs/*.example.json`.
+
+The settings form appears in the UI automatically.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT – see [LICENSE](../LICENSE).

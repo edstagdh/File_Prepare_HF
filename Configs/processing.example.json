@@ -1,0 +1,113 @@
+{
+  "input": {
+    "working_directory": "G:\\ffmpeg",
+    "ignored_filenames": [],
+    "filename_strip_words": [
+      ".Hardcore"
+    ],
+    "excluded_folder": "_excluded"
+  },
+  "matching": {
+    "matching_mode": "free_string_parse",
+    "api_mode": "scenes",
+    "movie_entry_type": "scene",
+    "match_by_oshash_first": false,
+    "rematch_using_embedded_uuid": true,
+    "manual_performer_entry": false,
+    "add_to_collection": true,
+    "uuid_overrides": {},
+    "scenes_url": "https://theporndb.net/scenes/",
+    "jav_url": "https://theporndb.net/jav/",
+    "movies_url": "https://theporndb.net/movies/",
+    "performers_url": "https://theporndb.net/performers/"
+  },
+  "review": {
+    "approve_performers": false,
+    "approve_date": false,
+    "approve_title": false,
+    "warn_on_duration_mismatch": true,
+    "add_chapter_markers": false
+  },
+  "naming": {
+    "filename_mode": "names",
+    "title_date_format": "YYYY-Month-DD",
+    "title_strip_strings": [],
+    "ignore_part_number": false,
+    "ignore_resolution_tag": true,
+    "ignore_performer_id": true,
+    "ask_manual_suffix": false,
+    "extra_suffix": "",
+    "filename_overrides": {},
+    "create_sub_folder": false,
+    "max_filename_length": 200,
+    "max_full_path_length": 240
+  },
+  "encoding": {
+    "re_encode": true,
+    "codec": "hevc",
+    "device": "cpu",
+    "crf": 24,
+    "av1_crf": 30,
+    "av1_preset": 6,
+    "gpu_quality": 26,
+    "gpu_preset": "balanced",
+    "fallback_to_cpu": false,
+    "warn_on_crf_match": true,
+    "downscale_to_1080p": true,
+    "limit_cpu_usage": true,
+    "cpu_usage_percent": 70,
+    "remove_existing_chapters": false,
+    "keep_original_file": true,
+    "keep_single_audio_track": true
+  },
+  "metadata": {
+    "set_exclusive": false,
+    "exclusive_tag": ""
+  },
+  "outputs": {
+    "cover_image": false,
+    "cover_regeneration_mode": "force keep",
+    "thumbnails_sheet": false,
+    "video_preview": false,
+    "mediainfo_file": false,
+    "performer_portraits": false,
+    "upload_template": false,
+    "image_format": "webp",
+    "template_file": "HF_Template.txt",
+    "template_icon_base_url": "https://hamsterimg.net",
+    "font_file": "Gotham_Medium.otf"
+  },
+  "portraits": {
+    "width": 195,
+    "height": 230,
+    "zoom_factor": 2.5,
+    "face_score_threshold": 0.75,
+    "blur_kernel_size": 3,
+    "posters_limit": 5,
+    "image_format": "webp"
+  },
+  "image_hosts": {
+    "mode": "fallback",
+    "cover_hosts": [],
+    "thumbnails_hosts": [],
+    "preview_hosts": [],
+    "portrait_hosts": [
+      "hamster",
+      "pixhost"
+    ],
+    "imgbb_headless": true
+  },
+  "tracker": {
+    "enabled": false,
+    "trackers": [
+      "emp"
+    ],
+    "upload_mode": "single",
+    "remove_extra_files_after_upload": true,
+    "wait_for_upload_before_next_file": false
+  },
+  "notifications": {
+    "enabled": false,
+    "notifier": "telegram"
+  }
+}

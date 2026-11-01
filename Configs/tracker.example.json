@@ -1,0 +1,165 @@
+{
+  "browser": {
+    "browser": "firefox",
+    "firefox_driver_path": "C:\\temp\\geckodriver.exe",
+    "firefox_profile_path": "",
+    "chrome_driver_path": "",
+    "chrome_profile_path": "",
+    "page_timeout_seconds": 15,
+    "session_idle_close_minutes": 30
+  },
+  "torrent": {
+    "excluded_suffixes": [
+      "_preview.webp",
+      "_preview.avif",
+      "_preview.webm",
+      "_preview.gif",
+      "_preview_sheet.webp",
+      "_preview_sheet.avif",
+      "_preview_sheet.webm",
+      "_preview_sheet.gif",
+      "_hamster.txt",
+      "_imgbb.txt",
+      "_imgbox.txt",
+      "_pixhost.txt",
+      "_template.txt",
+      "_tags.txt",
+      "_mediainfo.txt"
+    ],
+    "piece_size_kib": 256
+  },
+  "sites": {
+    "hf": {
+      "login_url": "https://www.SITE.org/login",
+      "upload_url": "https://www.SITE.org/upload.php",
+      "category": "Pron",
+      "two_factor_auth": false,
+      "form": {
+        "login_username": {
+          "by": "name",
+          "value": "username"
+        },
+        "login_password": {
+          "by": "name",
+          "value": "password"
+        },
+        "login_submit": {
+          "by": "id",
+          "value": "login_button"
+        },
+        "login_success": {
+          "by": "css",
+          "value": "ul#userinfo_username a.username"
+        },
+        "category_field": {
+          "by": "id",
+          "value": "category"
+        },
+        "title_field": {
+          "by": "id",
+          "value": "title"
+        },
+        "tags_field": {
+          "by": "id",
+          "value": "taginput"
+        },
+        "image_field": {
+          "by": "id",
+          "value": "image"
+        },
+        "description_field": {
+          "by": "id",
+          "value": "desc"
+        },
+        "torrent_field": {
+          "by": "id",
+          "value": "file"
+        },
+        "dupe_check_button": {
+          "by": "name",
+          "value": "checkonly"
+        },
+        "dupe_message": {
+          "by": "id",
+          "value": "messagebar"
+        },
+        "dupe_message_alt": {
+          "by": "css",
+          "value": "div.box.pad.shadow.center.rowa"
+        },
+        "dupe_found_text": "possible dupes",
+        "dupe_none_text": "no exact size dupes",
+        "submit_button": {
+          "by": "id",
+          "value": "post"
+        }
+      }
+    },
+    "emp": {
+      "login_url": "https://www.SITE.is/login",
+      "upload_url": "https://www.SITE.is/upload.php",
+      "category": "Natural Tits",
+      "two_factor_auth": false,
+      "form": {
+        "login_username": {
+          "by": "name",
+          "value": "username"
+        },
+        "login_password": {
+          "by": "name",
+          "value": "password"
+        },
+        "login_submit": {
+          "by": "id",
+          "value": "login_button"
+        },
+        "login_success": {
+          "by": "css",
+          "value": "ul#userinfo_username a.username"
+        },
+        "category_field": {
+          "by": "id",
+          "value": "category"
+        },
+        "title_field": {
+          "by": "id",
+          "value": "title"
+        },
+        "tags_field": {
+          "by": "id",
+          "value": "taginput"
+        },
+        "image_field": {
+          "by": "id",
+          "value": "image"
+        },
+        "description_field": {
+          "by": "id",
+          "value": "desc"
+        },
+        "torrent_field": {
+          "by": "id",
+          "value": "file"
+        },
+        "dupe_check_button": {
+          "by": "name",
+          "value": "checkonly"
+        },
+        "dupe_message": {
+          "by": "id",
+          "value": "messagebar"
+        },
+        "dupe_message_alt": {
+          "by": "css",
+          "value": "div.box.pad.shadow.center.rowa"
+        },
+        "dupe_found_text": "possible dupes",
+        "dupe_none_text": "no exact size dupes",
+        "submit_button": {
+          "by": "id",
+          "value": "post"
+        }
+      }
+    }
+  }
+}

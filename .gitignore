@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual environments
 venv/
+venv*/
 env/
 ENV/
 .venv/
@@ -43,12 +44,21 @@ dist/
 .env.*
 *.env
 
-# User Configs
+# User Configs (legacy names kept so old files are never committed)
 *.cfg
 Configs/Config.json
 Configs/Config_Thumbnails.json
 Configs/Config_Video_Preview.json
 Configs/Config_Tracker.json
+Configs/*.json
+!Configs/*.example.json
+Configs/*.tmp
+Configs/backups/
+
+# Runtime state (jobs, logs, sync state) and resource backups
+data/
+Logs/
+Resources/.backups/
 
 # Resources Files
 Resources.json

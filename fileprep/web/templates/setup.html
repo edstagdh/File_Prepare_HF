@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Setup · File Prepare HF{% endblock %}
+{% block body %}
+<div class="auth-page">
+    <form class="panel auth-card" method="post" action="{{ base }}/setup">
+        <h1>Create the administrator</h1>
+        <p class="muted small">No users exist yet. This account can manage settings, jobs and other users.</p>
+        {% if error %}
+        <div class="alert error">{{ error }}</div>
+        {% endif %}
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <div class="field"><span class="label">Username</span><input type="text" name="username" autocomplete="username" required autofocus></div>
+        <div class="field"><span class="label">Password</span><input type="password" name="password" autocomplete="new-password" minlength="10" required>
+            <span class="help muted small">At least 10 characters.</span></div>
+        <div class="field"><span class="label">Repeat password</span><input type="password" name="password2" autocomplete="new-password" minlength="10" required></div>
+        <button class="primary" type="submit" style="width:100%">Create administrator</button>
+    </form>
+</div>
+{% endblock %}

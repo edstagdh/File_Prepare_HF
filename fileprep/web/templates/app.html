@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="layout">
+    <aside class="sidebar">
+        <div class="brand">File Prepare HF<small>v{{ version }} <a href="#tools" id="update-badge" class="badge warning hidden" title="A newer version is available"></a></small>
+        </div>
+        <nav class="nav" id="nav">
+            <a href="#jobs" data-route="jobs">Jobs <span class="badge hidden" id="nav-prompts"></span></a>
+            <a href="#new" data-route="new">New job</a>
+            <a href="#settings" data-route="settings">Settings</a>
+            <a href="#modules" data-route="modules">Modules</a>
+            <a href="#tools" data-route="tools">Tools</a>
+            <a href="#resources" data-route="resources">Resources</a>
+            <a href="#wiki" data-route="wiki">Wiki / Guide</a>
+            {% if user.role == 'admin' %}<a href="#users" data-route="users">Users</a>{% endif %}
+            <a href="#account" data-route="account">Account</a>
+        </nav>
+        <div class="foot">Signed in as <strong>{{ user.username }}</strong> ({{ user.role }})<br>
+            <a href="{{ base }}/logout">Sign out</a> · <a href="#" id="theme-toggle">Theme</a></div>
+    </aside>
+    <main class="main" id="view"></main>
+</div>
+<div class="toast-host" id="toasts"></div>
+<script>
+    window.APP = { base: {{ base | tojson }}, csrf: {{ csrf | tojson }}, user: {{ user | tojson }}, version: {{ version | tojson }} };
+</script>
+<script src="{{ base }}/static/app.js?v={{ version }}"></script>
+{% endblock %}
