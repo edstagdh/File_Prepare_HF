@@ -1,5 +1,5 @@
 """
-Undo the processing of one file after its tracker upload was cancelled or failed.
+Undo the processing of files after a cancelled / failed tracker upload or a cancelled job.
 
 Asks the user first. Undo = delete the files this run created for the video (cover, thumbnails, previews,
 MediaInfo, template, tags, image host result files, torrent), delete the images this run uploaded to Pixhost
@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -27,21 +28,63 @@ MANUAL_DELETE_SITES = {"hamster": "the Hamster website (your album)", "imgbb": "
 
 async def offer_undo(job: JobConfig, fp: FilePlan, result: FileResult, *, directory: str, output_directory: str,
                      base_name: str, video_path: str, reason: str) -> bool:
-    """Ask whether to undo ``fp`` and do it. Returns True when the file was undone."""
-    in_sub_folder = os.path.normcase(os.path.abspath(output_directory)) != os.path.normcase(os.path.abspath(directory))
-    where = f" and move the video out of '{os.path.basename(output_directory)}'" if in_sub_folder else ""
-    answer = await runtime.prompt(
-        f"{reason} for {fp.new_file_name}.\n\nUndo this file? 'undo' deletes the files created for it (cover, thumbnails, "
-        f"previews, template, torrent...) and its uploaded images where possible (Pixhost; Hamster / ImgBB / imgbox images "
-        f"are listed for you to delete){where}, and renames the video back to {fp.source_name}. Its new metadata and a "
-        f"re-encode stay. 'keep' leaves everything as it is.",
-        title="Undo this file?", choices=["undo", "keep"])
-    if answer.strip().lower() not in ("undo", "u", "yes", "y"):
-        logger.info(f"Kept the processed files of {fp.new_file_name}.")
+    """Ask whether to undo ``fp`` (after a cancelled / failed tracker upload) and do it. True when undone."""
+    return await offer_undo_files(job, [UndoItem(fp, result, output_directory, base_name, video_path)], reason=reason,
+                                  directory=directory)
+
+
+@dataclass
+class UndoItem:
+    fp: FilePlan
+    result: FileResult
+    output_directory: str
+    base_name: str
+    video_path: str
+
+
+def undo_item(job: JobConfig, fp: FilePlan, result: FileResult) -> UndoItem:
+    """Undo data of a file from its plan and result (used after a cancelled job)."""
+    directory = job.processing.input.working_directory
+    base_name = os.path.splitext(fp.new_file_name)[0]
+    video = result.final_path if result.final_path and os.path.isfile(result.final_path) else os.path.join(directory, fp.source_name)
+    return UndoItem(fp, result, fp.output_directory or directory, base_name, video)
+
+
+def needs_undo(job: JobConfig, fp: FilePlan, result: FileResult) -> bool:
+    """True when the run changed something for this file (renamed, created outputs or its sub folder)."""
+    directory = job.processing.input.working_directory
+    folder = fp.output_directory
+    return bool(result.completed_steps) or bool(result.final_path) or bool(
+        folder and os.path.normcase(os.path.abspath(folder)) != os.path.normcase(os.path.abspath(directory)) and os.path.isdir(folder))
+
+
+async def offer_undo_files(job: JobConfig, items: list[UndoItem], *, reason: str, directory: str | None = None) -> bool:
+    """Ask once whether to undo ``items`` and undo each of them. Returns True when undone."""
+    if not items:
         return False
-    await undo_file(job, fp, result, directory=directory, output_directory=output_directory, base_name=base_name,
-                    video_path=video_path)
-    result.status, result.error, result.completed_steps = "failed", f"{reason} - processing undone", []
+    directory = directory or job.processing.input.working_directory
+    names = [item.fp.new_file_name or item.fp.source_name for item in items]
+    listed = names[0] if len(names) == 1 else f"{len(names)} files ({', '.join(names[:5])}{'...' if len(names) > 5 else ''})"
+    moved = any(os.path.normcase(os.path.abspath(i.output_directory)) != os.path.normcase(os.path.abspath(directory)) for i in items)
+    answer = await runtime.prompt(
+        f"{reason} for {listed}.\n\nUndo {'this file' if len(items) == 1 else 'these files'}? 'undo' deletes the files created "
+        f"for {'it' if len(items) == 1 else 'them'} (cover, thumbnails, previews, template, torrent...) and the uploaded images "
+        f"where possible (Pixhost; Hamster / ImgBB / imgbox images are listed for you to delete)"
+        f"{', moves the video back out of its sub folder (if it was moved there)' if moved else ''} and renames the video back to its original "
+        f"name. New metadata and a re-encode stay. 'keep' leaves everything as it is.",
+        title="Undo?", choices=["undo", "keep"])
+    if answer.strip().lower() not in ("undo", "u", "yes", "y"):
+        logger.info(f"Kept the processed files of {listed}.")
+        return False
+    for item in items:
+        try:
+            await undo_file(job, item.fp, item.result, directory=directory, output_directory=item.output_directory,
+                            base_name=item.base_name, video_path=item.video_path)
+        except Exception as exc:
+            logger.error(f"Undo of {item.fp.new_file_name or item.fp.source_name} failed: {exc}")
+            continue
+        item.result.status, item.result.error = "failed", f"{reason} - processing undone"
+        item.result.completed_steps, item.result.interrupted = [], False
     return True
 
 

@@ -443,6 +443,8 @@ class JobManager:
                     await self._run_job(job_id, config)
             except asyncio.CancelledError:
                 logger.warning("Job cancelled.")
+                if mode == "run":
+                    await self._offer_undo_after_cancel(job_id, config)
                 self._finish(job_id, "cancelled" if mode == "run" else "draft", "Cancelled by user")
                 raise
             except Exception as exc:
@@ -515,6 +517,34 @@ class JobManager:
             self._finish(job_id, "failed" if summary.failed else "completed",
                          f"{summary.failed} file(s) failed" if summary.failed else None)
         logger.info(f"Run finished: {self.get(job_id).state}")
+
+    async def _offer_undo_after_cancel(self, job_id: str, config: JobConfig) -> None:
+        """After a cancel: ask whether to undo the files that were being processed (or waiting for their tracker
+        upload) - the same undo as for a cancelled tracker upload. Finished files are not touched."""
+        from fileprep.pipeline.rollback import needs_undo, offer_undo_files, undo_item
+        job = self.get(job_id)
+        plan_files = {fp.source_name: fp for fp in (job.plan.files if job.plan else [])}
+        items = [undo_item(config, plan_files[r.source_name], r) for r in list(job.results.values())
+                 if r.interrupted and r.source_name in plan_files and needs_undo(config, plan_files[r.source_name], r)]
+        if not items:
+            return
+        from fileprep.tracker.session import registry
+        registry.close_job(job_id)
+        with self._lock:  # questions withdrawn by the cancel are no longer shown
+            worker = self._workers.get(job_id)
+            live = set(worker.prompt_futures) if worker else set()
+            self.get(job_id).prompts = [q for q in self.get(job_id).prompts if q.id in live]
+        self._progress(job_id, "Cancelled", None, "Undo? - waiting for your answer")
+        try:
+            await offer_undo_files(config, items, reason="The job was cancelled")
+        except asyncio.CancelledError:
+            logger.info("Undo question cancelled - the files were kept.")
+        except Exception as exc:
+            logger.error(f"Undo after cancel failed: {exc}")
+        with self._lock:
+            for item in items:
+                self.get(job_id).results[item.result.source_name] = item.result
+            self._save(self.get(job_id), force=True)
 
     def _finish(self, job_id: str, state: str, error: Optional[str]) -> None:
         with self._lock:

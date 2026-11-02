@@ -94,47 +94,54 @@ async def run_plan(job: JobConfig, plan: JobPlan, hooks: RunHooks, results: dict
 
     runnable = [fp for fp in plan.files if fp.match and fp.status != "error"]
     tracker_tasks: list[asyncio.Task] = []
-    for index, fp in enumerate(runnable, start=1):
-        result = results.setdefault(fp.source_name, FileResult(source_name=fp.source_name))
-        summary.results.append(result)
-        if result.status in ("success", "skipped"):
-            continue
-        if runtime.stop_requested():
-            logger.warning("Stop requested - remaining files are left for the next start.")
-            break
-        logger.info("-" * 100)
-        logger.info(f"Start file: {fp.source_name}, file {index} out of {len(runnable)}")
-        runtime.report_progress("File", (index - 1) * 100 / len(runnable), fp.source_name)
-        result.status, result.started_at, result.error = "running", time.time(), None
-        hooks.on_file_update(result)
-        try:
-            upload_task = await process_file(job, fp, result, hooks)
-            if upload_task:
-                if p.tracker.wait_for_upload_before_next_file:
-                    await upload_task
-                else:
-                    tracker_tasks.append(upload_task)
-            if result.status == "running":
-                result.status = "success"
-        except asyncio.CancelledError:
-            result.status, result.error = "failed", "cancelled"
+    try:
+        for index, fp in enumerate(runnable, start=1):
+            result = results.setdefault(fp.source_name, FileResult(source_name=fp.source_name))
+            summary.results.append(result)
+            if result.status in ("success", "skipped"):
+                continue
+            if runtime.stop_requested():
+                logger.warning("Stop requested - remaining files are left for the next start.")
+                break
+            logger.info("-" * 100)
+            logger.info(f"Start file: {fp.source_name}, file {index} out of {len(runnable)}")
+            runtime.report_progress("File", (index - 1) * 100 / len(runnable), fp.source_name)
+            result.status, result.started_at, result.error = "running", time.time(), None
             hooks.on_file_update(result)
-            raise
-        except TpdbConnectionError as exc:  # API down: stop the whole job, the remaining files stay resumable
-            logger.error(f"TPDB connection failure - job stopped: {exc}")
-            result.status, result.error, result.finished_at = "failed", str(exc), time.time()
+            try:
+                upload_task = await process_file(job, fp, result, hooks)
+                if upload_task:
+                    if p.tracker.wait_for_upload_before_next_file:
+                        await upload_task
+                    else:
+                        tracker_tasks.append(upload_task)
+                if result.status == "running":
+                    result.status = "success"
+            except asyncio.CancelledError:
+                result.status, result.error, result.interrupted = "failed", "cancelled", True
+                hooks.on_file_update(result)
+                raise
+            except TpdbConnectionError as exc:  # API down: stop the whole job, the remaining files stay resumable
+                logger.error(f"TPDB connection failure - job stopped: {exc}")
+                result.status, result.error, result.finished_at = "failed", str(exc), time.time()
+                hooks.on_file_update(result)
+                raise
+            except Exception as exc:
+                logger.exception(f"Processing failed for file: {fp.source_name}")
+                result.status, result.error = "failed", str(exc)
+            result.finished_at = time.time()
             hooks.on_file_update(result)
-            raise
-        except Exception as exc:
-            logger.exception(f"Processing failed for file: {fp.source_name}")
-            result.status, result.error = "failed", str(exc)
-        result.finished_at = time.time()
-        hooks.on_file_update(result)
-        logger.info(f"End file: {result.final_path or fp.source_name} ({result.status})")
+            logger.info(f"End file: {result.final_path or fp.source_name} ({result.status})")
 
-    if tracker_tasks:
-        logger.info(f"Waiting for {len(tracker_tasks)} tracker upload(s) to be completed in the browser...")
+        if tracker_tasks:
+            logger.info(f"Waiting for {len(tracker_tasks)} tracker upload(s) to be completed in the browser...")
+            await asyncio.gather(*tracker_tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        # cancel the tracker uploads still waiting in the browser; their files are marked interrupted
+        for task in tracker_tasks:
+            task.cancel()
         await asyncio.gather(*tracker_tasks, return_exceptions=True)
+        raise
     runtime.report_progress("File", 100, "done")
     return summary
 
@@ -322,7 +329,15 @@ async def process_file(job: JobConfig, fp: FilePlan, result: FileResult, hooks: 
             step("TPDB collection")
         return True
 
+    async def finish_or_mark_cancelled() -> bool:
+        try:
+            return await finish()
+        except asyncio.CancelledError:  # job cancelled before this file's tracker upload was confirmed
+            result.status, result.error, result.interrupted = "failed", "cancelled before the tracker upload", True
+            hooks.on_file_update(result)
+            raise
+
     if p.tracker.enabled:
-        return asyncio.create_task(finish())
+        return asyncio.create_task(finish_or_mark_cancelled())
     await finish()
     return None

@@ -181,7 +181,8 @@ New job ─► Save & preview ─► (answer questions) ─► ready ─► Queu
 | 11 | Torrent, duplicate check, tracker form (you confirm)               | *Tracker upload*                                     |
 | 12 | Add to the TPDB collection                                         | *Matching › Add to TPDB collection*                  |
 
-If you cancel the tracker upload (or it fails), the app offers to **undo the file**: it deletes the files and
+If you cancel the tracker upload (or it fails), or cancel the job while a file is being processed, the app offers
+to **undo the file**: it deletes the files and
 uploaded images this run created (Pixhost automatically, Hamster/ImgBB/imgbox listed for manual deletion) and
 moves the video back to the working folder under its original name.
 

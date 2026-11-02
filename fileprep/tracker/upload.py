@@ -59,6 +59,8 @@ async def upload_to_tracker(job: JobConfig, *, tracker_name: str, base_name: str
         while True:  # the job may end (cancel) while we wait
             try:
                 return pending.result(timeout=1)
+            except concurrent.futures.CancelledError:  # the question was withdrawn (job cancelled)
+                raise UserCancelled("The job was cancelled")
             except concurrent.futures.TimeoutError:
                 if session.closing.is_set() or loop.is_closed():
                     pending.cancel()

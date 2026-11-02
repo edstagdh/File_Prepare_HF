@@ -109,6 +109,7 @@ class FileResult(BaseModel):
     completed_steps: list[str] = Field(default_factory=list)
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
+    interrupted: bool = False  # the job was cancelled while this file was processed / awaited its upload
 
 
 def config_hash(config_dump: dict) -> str:
