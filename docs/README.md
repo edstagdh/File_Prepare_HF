@@ -153,7 +153,8 @@ New job ─► Save & preview ─► (answer questions) ─► ready ─► Queu
    info.
     - **Errors** block the job. Fix them and preview again, or for a single file use *Set TPDB UUID* or
       *Move out*.
-    - Change names without running the preview again: use **Suffix for all files** or **Rename** on a row.
+   - Change names without running the preview again: use **Suffix for all files**, choose another **file name mode for one file** (e.g. the title instead of a long list of
+     performers), or **Rename** a row.
 3. **Performer images** (when portraits or the template are on): choose or upload a face for each performer.
    The face is uploaded to the portrait hosts and saved in `Resources/Performers_Images.json`.
 4. **Queue / start**: the scheduler starts the job when a slot is free. The run reuses your answers from the

@@ -130,6 +130,9 @@ class NamingSettings(Section):
     filename_overrides: dict[str, str] = setting(dict, "Custom file names",
                                                  "Original file name -> new name (without extension), set from the preview "
                                                  "with 'Rename'. Used as-is: the suffix is not added again.", hidden=True)
+    filename_mode_overrides: dict[str, Literal["names", "title", "both", "tpdb_id"]] = setting(
+        dict, "File name mode per file", "Original file name -> file name mode for that file, set from the preview "
+                                         "('Name' list). Overrides the job's file name mode.", hidden=True)
     create_sub_folder: bool = setting(False, "Create a sub folder per file",
                                       "Move every file and its outputs into its own folder (required for tracker uploads).")
     max_filename_length: int = setting(200, "Maximum file name length", min=40, max=250)

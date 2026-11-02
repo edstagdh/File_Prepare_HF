@@ -210,20 +210,37 @@ async def _plan_file(job: JobConfig, directory: str, original_name: str, fp: Fil
 
     candidates = await naming.build_name_candidates(match.site, date, match.performers, match.scene_title, match.tpdb_id,
                                                     pre_suffix, match.manual_suffix, p.input.filename_strip_words)
+    # every mode's name is kept so the mode can be changed per file after the preview (no TPDB lookup)
+    fp.name_candidates = {"title": candidates.title, "names": candidates.names, "both": candidates.both,
+                          "tpdb_id": candidates.tpdb_id}
     if p.naming.filename_mode == "user_input":
         from fileprep.utils.text import sanitize_site_filename_part
         user_part = await get_selected_filename(p.input.filename_strip_words, p.naming.max_filename_length, notify)
         site_part = await sanitize_site_filename_part(match.site)
-        fp.auto_base_name = f"{site_part}.{date.year}.{date.month}.{date.day}.{user_part}"
-    else:
-        fp.auto_base_name, warnings = naming.select_filename(candidates, p.naming.filename_mode, p.naming.max_filename_length)
-        fp.issues.extend(PlanIssue(level="warning", code="NAME_FALLBACK", file=original_name, message=w) for w in warnings)
+        fp.name_candidates["user_input"] = f"{site_part}.{date.year}.{date.month}.{date.day}.{user_part}"
     await apply_names(job, directory, original_name, fp)
 
 
 # issue codes that depend on the final name - recomputed whenever the names change
 NAME_ISSUE_CODES = {"PATH_TOO_LONG", "TARGET_EXISTS", "FOLDER_EXISTS", "FOLDER_RENAME", "OUTPUT_EXISTS_ASK", "ALREADY_HEVC",
-                    "DUPLICATE_TARGET", "TARGET_IS_INPUT", "CUSTOM_NAME", "BAD_NAME"}
+                    "DUPLICATE_TARGET", "TARGET_IS_INPUT", "CUSTOM_NAME", "BAD_NAME", "NAME_FALLBACK"}
+
+
+def _select_base_name(p, original_name: str, fp: FilePlan) -> None:
+    """Name from TPDB for the file's mode: the per-file mode set in the preview, else the job's file name mode
+    (with the usual fallbacks when a name is too long)."""
+    overrides = p.naming.filename_mode_overrides
+    mode = overrides.get(original_name) or overrides.get(fp.source_name) or p.naming.filename_mode
+    if not fp.name_candidates:  # preview made by 14.14 or older: keep its name
+        fp.name_mode = fp.name_mode or p.naming.filename_mode
+        return
+    fp.name_mode = mode
+    if mode == "user_input":
+        fp.auto_base_name = fp.name_candidates.get("user_input") or fp.auto_base_name
+        return
+    candidates = naming.NameCandidates(**{k: fp.name_candidates[k] for k in ("title", "names", "both", "tpdb_id")})
+    fp.auto_base_name, warnings = naming.select_filename(candidates, mode, p.naming.max_filename_length)
+    fp.issues.extend(PlanIssue(level="warning", code="NAME_FALLBACK", file=original_name, message=w) for w in warnings)
 
 
 async def apply_names(job: JobConfig, directory: str, original_name: str, fp: FilePlan) -> None:
@@ -240,6 +257,7 @@ async def apply_names(job: JobConfig, directory: str, original_name: str, fp: Fi
     except ValueError:
         extra = ""  # reported by validate_job_config
     fp.suffix = naming.combine_suffixes(fp.flag_suffix, extra)
+    _select_base_name(p, original_name, fp)
     custom = (p.naming.filename_overrides.get(original_name) or p.naming.filename_overrides.get(fp.source_name) or "").strip()
     fp.custom_name = bool(custom)
     if custom:

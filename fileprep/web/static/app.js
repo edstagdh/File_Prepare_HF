@@ -594,11 +594,29 @@ function renderPlan(job, id, refresh) {
     const done = new Set(r?.completed_steps || []);
     return h("ul", { class: "steps" }, f.steps.map((s) => h("li", { class: [...done].some((d) => d === s || d.includes(s.split(" ")[0]) || s.includes(d)) ? "done" : "" }, s)));
   };
+  const editable = isRole("operator") && !["running", "previewing", "queued", "stopping"].includes(job.state);
+  const MODE_LABELS = { names: "names", title: "title", both: "names + title", tpdb_id: "TPDB id", user_input: "typed name" };
+  // per-file file name mode: each option shows the name it gives (no new preview needed)
+  const modeSelect = (f) => {
+    const c = f.name_candidates || {};
+    if (!f.match || !Object.keys(c).length) return null;
+    const jobMode = job.config.processing.naming.filename_mode;
+    const sel = h("select", { class: "small", style: "max-width:100%;margin-top:4px", disabled: !editable || f.custom_name,
+      title: f.custom_name ? "A custom name is set - clear it with Rename to choose a name mode" : "File name mode for this file",
+      onchange: async () => {
+        try { await api("POST", `/api/jobs/${id}/names`, { file: f.source_name, mode: sel.value }); toast("Name mode updated", "ok", 4000); refresh(); }
+        catch (e) { toast(e.message, "error"); refresh(); }
+      } },
+      h("option", { value: "" }, `Job default (${MODE_LABELS[jobMode] || jobMode})${c[jobMode] ? ": " + c[jobMode] : ""}`),
+      ["names", "title", "both", "tpdb_id"].filter((m) => c[m] && m !== jobMode && (m !== "tpdb_id" || f.match.tpdb_id)).map((m) => h("option", { value: m }, `${MODE_LABELS[m]}: ${c[m]}`)));
+    sel.value = f.name_mode && f.name_mode !== jobMode ? f.name_mode : "";
+    return h("div", { class: "small" }, sel);
+  };
   const files = plan.files.map((f) => {
     const r = job.results[f.source_name];
     return h("tr", {},
       h("td", {}, h("div", { class: "mono small" }, f.source_name), f.new_file_name && f.new_file_name !== f.source_name ? h("div", { class: "mono small" }, "→ " + f.new_file_name, f.custom_name ? h("span", { style: "margin-left:6px" }, badge("custom", "info")) : null) : null,
-        f.title ? h("div", { class: "small muted" }, f.title) : null),
+        f.title ? h("div", { class: "small muted" }, f.title) : null, modeSelect(f)),
       h("td", {}, badge(f.status), r ? h("div", {}, badge(r.status)) : null),
       h("td", { class: "small" }, f.steps.length ? stepList(f, r) : "—", r?.error ? h("div", { style: "color:var(--err)" }, r.error) : null),
       h("td", {}, f.issues.map(issueRow)),

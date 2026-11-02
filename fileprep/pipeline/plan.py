@@ -62,6 +62,8 @@ class FilePlan(BaseModel):
     flags: dict[str, bool] = Field(default_factory=dict)
     suffix: str = ""  # suffix after the name (flag suffix + job suffix, e.g. VR2Normal)
     flag_suffix: str = ""  # suffix detected from the original name's flags
+    name_candidates: dict[str, str] = Field(default_factory=dict)  # file name mode -> base name (from the preview)
+    name_mode: str = ""  # file name mode used for this file
     auto_base_name: str = ""  # base name built from the TPDB data (before a per-file name)
     custom_name: bool = False  # new name set by the user for this file
     new_base_name: str = ""  # without suffix / extension

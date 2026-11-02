@@ -179,8 +179,9 @@ class JobManager:
             return job
 
     def set_names(self, job_id: str, suffix: Optional[str] = None, file_name: Optional[str] = None,
-                  new_name: Optional[str] = None) -> Job:
-        """Change the suffix for all files and/or one file's name after the preview (no new preview needed)."""
+                  new_name: Optional[str] = None, mode: Optional[str] = None) -> Job:
+        """Change the suffix for all files, one file's name or one file's file name mode after the preview
+        (no new preview needed). ``mode`` "" returns the file to the job's file name mode."""
         from fileprep.pipeline.naming import clean_suffix
         with self._lock:
             job = self.get(job_id)
@@ -195,12 +196,26 @@ class JobManager:
                 originals = {new: old for old, new in (job.plan.renames if job.plan else [])}
                 key = originals.get(file_name, file_name)
                 new_name = (new_name or "").strip()
-                if new_name.lower().endswith(".mp4"):
-                    new_name = new_name[:-4]
-                if new_name:
-                    config.processing.naming.filename_overrides[key] = new_name
+                if mode is not None:
+                    modes = config.processing.naming.filename_mode_overrides
+                    if mode and mode not in ("names", "title", "both", "tpdb_id"):
+                        raise JobError(f"Unknown file name mode: {mode}")
+                    fp = next(f for f in job.plan.files if f.source_name == file_name)
+                    if mode and not fp.name_candidates:
+                        raise JobError("This preview is from an older version - run the preview again to change the name mode.")
+                    if mode == "tpdb_id" and not (fp.match and fp.match.tpdb_id):
+                        raise JobError("This file has no TPDB id.")
+                    if mode and mode != config.processing.naming.filename_mode:
+                        modes[key] = mode
+                    else:
+                        modes.pop(key, None)
                 else:
-                    config.processing.naming.filename_overrides.pop(key, None)
+                    if new_name.lower().endswith(".mp4"):
+                        new_name = new_name[:-4]
+                    if new_name:
+                        config.processing.naming.filename_overrides[key] = new_name
+                    else:
+                        config.processing.naming.filename_overrides.pop(key, None)
         return self.update_config(job_id, config)
 
     def _reapply_names(self, job: Job) -> None:
@@ -632,6 +647,7 @@ def _only_names_changed(old: JobConfig, new: JobConfig) -> bool:
         data = config.model_dump(mode="json")
         data["processing"]["naming"].pop("extra_suffix", None)
         data["processing"]["naming"].pop("filename_overrides", None)
+        data["processing"]["naming"].pop("filename_mode_overrides", None)
         return data
     return strip(old) == strip(new)
 

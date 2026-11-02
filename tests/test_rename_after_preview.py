@@ -69,3 +69,35 @@ def test_other_setting_change_still_needs_preview(job, tmp_path):
     manager.update_config("j1", config)
     assert manager.get("j1").state == "draft"
     assert config_hash(config.model_dump(mode="json")) != manager.get("j1").plan.config_hash
+
+
+def test_file_name_mode_per_file_without_new_preview(job, tmp_path):
+    manager = JobManager(jobs_dir=str(tmp_path / "jobs"))
+    (tmp_path / "jobs").mkdir()
+    manager._jobs["j1"] = job
+    with pytest.raises(JobError):  # preview without the names of every mode (older version)
+        manager.set_names("j1", file_name="a.mp4", mode="title")
+    for f in job.plan.files:  # what a new preview stores
+        who = f.auto_base_name.split(".", 4)[-1]
+        f.name_candidates = {"names": f"Studio.25.01.01.{who}", "title": "Studio.25.01.01.Scene",
+                             "both": f"Studio.25.01.01.{who}.Scene", "tpdb_id": "Studio.25.01.01.123"}
+    manager.set_names("j1", suffix="VR2Normal")
+    manager.set_names("j1", file_name="a.mp4", mode="title")
+    files = {f.source_name: f for f in manager.get("j1").plan.files}
+    assert files["a.mp4"].new_file_name == "Studio.25.01.01.Scene.VR2Normal.mp4" and files["a.mp4"].name_mode == "title"
+    assert files["b.mp4"].new_file_name == "Studio.25.01.01.Anna.Lee.VR2Normal.mp4"  # other files keep the job's mode
+    assert manager.get("j1").config.processing.naming.filename_mode_overrides == {"a.mp4": "title"}
+    assert manager.get("j1").state == "ready" and manager.get("j1").plan_is_current
+    manager.set_names("j1", file_name="b.mp4", mode="title")  # same name twice -> blocked
+    assert manager.get("j1").state == "blocked"
+    manager.set_names("j1", file_name="b.mp4", mode="")  # back to the job's mode
+    assert manager.get("j1").state == "ready" and "b.mp4" not in manager.get("j1").config.processing.naming.filename_mode_overrides
+    # a too long name falls back like the job's mode does (both -> names)
+    job.plan.files[0].name_candidates["both"] = "Studio.25.01.01.Jane.Doe." + "Very.Long.Title." * 4
+    job.config.processing.naming.max_filename_length = 40
+    job.config.processing.naming.filename_mode_overrides["a.mp4"] = "both"
+    files = {f.source_name: f for f in asyncio.run(planner.reapply_names(job.config, job.plan)).files}
+    assert files["a.mp4"].new_base_name == "Studio.25.01.01.Jane.Doe"
+    assert any(i.code == "NAME_FALLBACK" for i in files["a.mp4"].issues)
+    with pytest.raises(JobError):
+        manager.set_names("j1", file_name="a.mp4", mode="bogus")

@@ -36,10 +36,16 @@ The new names come from the TPDB data. Without running the preview again you can
 - **Suffix for all files** (box above the table, also in the job's **Naming** tab as *Suffix for all files*): added
   after every name and to the video title, e.g. `VR2Normal` -> `Studio.25.01.01.Jane.Doe.VR2Normal.mp4`. It is
   combined with a suffix detected from the original name (`.vr2normal.` etc.). Empty removes it.
+- **File name mode per file** (list under the file name): pick *title*, *names*, *names + title* or *TPDB id* for
+  that file only - each option shows the name it gives - e.g. *title* when a scene has so many performers that the
+  name gets too long. *Job default* goes back to the job's **File name mode**. The usual fallbacks apply when the
+  chosen name is longer than the maximum (a `NAME_FALLBACK` warning). Saved per job in
+  `naming.filename_mode_overrides`. Not available while a custom name is set, nor for previews made before 14.15
+  (run the preview again).
 - **Rename** on a file row: type the new name (without `.mp4`); it is used exactly as typed, the suffix is not added
   again, and the row shows a *custom* badge. An empty name goes back to the name from TPDB.
 
-Both update the table at once and re-check conflicts (duplicate or existing names, path length) - the job stays
+All of these update the table at once and re-check conflicts (duplicate or existing names, path length) - the job stays
 *ready*, or becomes *blocked* if the new names conflict. Cover, thumbnails, previews and the sub folder follow the
 new name. Changing any other setting still needs a new preview.
 

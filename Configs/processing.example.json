@@ -38,6 +38,7 @@
     "ask_manual_suffix": false,
     "extra_suffix": "",
     "filename_overrides": {},
+    "filename_mode_overrides": {},
     "create_sub_folder": false,
     "max_filename_length": 200,
     "max_full_path_length": 240
