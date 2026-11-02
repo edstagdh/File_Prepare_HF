@@ -56,7 +56,7 @@ Configs/*.tmp
 Configs/backups/
 
 # Runtime state (jobs, logs, sync state) and resource backups
-data/
+data
 Logs/
 Resources/.backups/
 
