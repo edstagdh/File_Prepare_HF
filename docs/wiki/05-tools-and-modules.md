@@ -70,7 +70,9 @@ The **Resources** page lists the files in `Resources/` (templates, fonts, image 
 Click a file to preview it:
 
 - **templates** - filled with sample data and rendered like the tracker shows BBCode (icons from
-  `BBCode_Images.json`, cover / preview / thumbnail placeholders), plus the filled BBCode text;
+  `BBCode_Images.json`, cover / preview / thumbnail placeholders), plus the filled BBCode text.
+  A template named `<Site>_Template_<Theme>.txt` uses the `<Theme>_<key>` entries of `BBCode_Images.json`
+  (`HF_Template_Reel.txt` -> `Reel_1080p`, `Reel_bg`...); keys it does not define keep the base image;
 - **fonts** - sample text in that font (editable) at several sizes;
 - **JSON / text** - the content; **images** - the image.
 

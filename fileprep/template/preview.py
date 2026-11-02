@@ -3,7 +3,7 @@ Template preview: fill an upload template with sample data and render its BBCode
 
 The HTML is an approximation of how Gazelle-style trackers display BBCode (BG, font, color, size, img,
 url, table/tr/td, spoiler, mediainfo, center/align, b/i/u, BR). Icons come from Resources/BBCode_Images.json
-and the configured icon base URL; cover / preview / thumbnail images are labelled placeholders.
+(the set named by the template file) and the configured icon base URL; cover / preview / thumbnail images are labelled placeholders.
 """
 
 import html
@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from fileprep import paths
 from fileprep.config.store import store
+from fileprep.template.icons import icons_for_template
 
 SIZES = {"1": 10, "2": 13, "3": 16, "4": 18, "5": 24, "6": 32, "7": 48}
 
@@ -24,13 +25,14 @@ def _placeholder(label: str, width: int, height: int) -> str:
     return "data:image/svg+xml," + quote(svg)
 
 
-def sample_values() -> dict[str, str]:
+def sample_values(template_name: str = "") -> dict[str, str]:
     """Values for every template placeholder (same keys as fileprep.template.bbcode)."""
     base = store.processing().outputs.template_icon_base_url.rstrip("/")
     try:
         icons = json.loads(paths.BBCODE_IMAGES_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         icons = {}
+    icons = icons_for_template(icons, template_name)
 
     def icon(key: str, label: str) -> str:
         return f"{base}{icons[key]}" if key in icons else _placeholder(label, 200, 60)
@@ -54,8 +56,8 @@ def sample_values() -> dict[str, str]:
     }
 
 
-def fill_template(text: str) -> str:
-    for placeholder, value in sample_values().items():
+def fill_template(text: str, template_name: str = "") -> str:
+    for placeholder, value in sample_values(template_name).items():
         text = text.replace(placeholder, value)
     return text
 
@@ -125,7 +127,7 @@ def render_preview(template_name: str) -> dict:
     path = paths.resource(template_name)
     if path.resolve().parent != paths.RESOURCES_DIR.resolve() or not path.is_file():
         raise FileNotFoundError(template_name)
-    filled = fill_template(path.read_text(encoding="utf-8"))
+    filled = fill_template(path.read_text(encoding="utf-8"), template_name)
     body = bbcode_to_html(filled)
     page = ("<!doctype html><html><head><meta charset='utf-8'><style>body{margin:0;background:#1e1e1e;color:#ddd;"
             "font:14px/1.4 sans-serif}img{max-width:100%}pre.mi{text-align:left;white-space:pre-wrap;background:#111;padding:8px}"

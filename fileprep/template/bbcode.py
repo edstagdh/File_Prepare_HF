@@ -3,6 +3,7 @@ import os
 import re
 from loguru import logger
 from fileprep import paths, runtime
+from fileprep.template.icons import icons_for_template
 from fileprep.uploaders.service import find_uploaded_url, hosts_for
 from fileprep.utils.files import load_json_file
 from fileprep.utils.text import CLEAN_CHARS
@@ -63,6 +64,7 @@ async def generate_template_video(
     json_map, exit_code = await load_json_file(str(paths.BBCODE_IMAGES_FILE))
     if exit_code != 0 or json_map is None:
         raise RuntimeError(f"Failed to load JSON config (exit code: {exit_code})")
+    json_map = icons_for_template(json_map, template_file_full_path)
 
     # Additional information
     _, template_name = os.path.split(template_file_full_path)

@@ -118,7 +118,13 @@ completed, failed...) also show a short toast with a link to the job.
 
 - **Queue / start** - start a ready job; **Resume** continues a stopped/interrupted/failed job.
 - **Stop after current file** - graceful; remaining files are kept for a later resume.
-- **Cancel** - immediate; the running step (e.g. ffmpeg encoding) is killed and its temporary file removed.
+- **Cancel** - immediate; the running step (e.g. ffmpeg encoding) is killed and its temporary file removed. When
+  the cancel interrupts a file that already changed something (renamed, outputs created, images uploaded) - or
+  files still waiting for their tracker upload - the job asks once **Undo?** before it ends: *undo* deletes the
+  files and Pixhost uploads created for those files, lists Hamster / ImgBB / imgbox images to delete by hand and
+  renames / moves the videos back (the same undo as for a cancelled tracker upload, see
+  [Image hosts and tracker](04-image-hosts-and-tracker.md)); *keep* leaves them. Files that finished before the
+  cancel are never touched. The job's tracker browser is closed.
 - **Duplicate** - new draft with the same settings.
 
 ## Scheduling rules
