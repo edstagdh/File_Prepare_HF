@@ -78,7 +78,6 @@ def create_app() -> FastAPI:
                   openapi_url=None, root_path=app_config.server.base_path)
     app.add_middleware(SessionMiddleware, secret_key=ensure_session_secret(), session_cookie="fileprep_session",
                        max_age=app_config.auth.session_hours * 3600, same_site="lax", https_only=app_config.auth.secure_cookies)
-
     @app.middleware("http")
     async def one_line_errors(request: Request, call_next):
         # an unexpected error in a request is logged as one line (traceback only in Logs/) instead of the
@@ -518,10 +517,10 @@ def _register_routes(app: FastAPI) -> None:  # noqa: C901 - flat route table
         from fileprep.tracker.session import registry
         return {"sessions": registry.status()}
 
-    @app.post("/api/tools/tracker-sessions/{name}/close")
-    async def close_tracker(name: str, user=Depends(require("operator"))):
+    @app.post("/api/tools/tracker-sessions/{sid}/close")
+    async def close_tracker(sid: str, user=Depends(require("operator"))):
         from fileprep.tracker.session import registry
-        return {"ok": registry.close(name)}
+        return {"ok": registry.close(sid)}
 
     @app.get("/api/tools/pixhost")
     async def pixhost_links(user=Depends(require("operator"))):

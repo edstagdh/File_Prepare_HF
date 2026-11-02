@@ -51,9 +51,10 @@ class UploadRequest:
 
 
 class TrackerSession:
-    def __init__(self, tracker_name: str, config: TrackerConfig, account: TrackerAccount):
+    def __init__(self, tracker_name: str, config: TrackerConfig, account: TrackerAccount, job_id: Optional[str] = None):
         # composition (not a Thread subclass) so private names cannot clash with threading internals
         self.thread = threading.Thread(target=self._run, name=f"tracker-{tracker_name}", daemon=True)
+        self.job_id = job_id
         self.tracker_name = tracker_name
         self.config = config
         self.account = account
@@ -63,6 +64,7 @@ class TrackerSession:
         self.logged_in = False
         self.last_used = time.time()
         self.closed = threading.Event()
+        self.closing = threading.Event()  # set by close(): a question being waited for is abandoned
         self.state = "starting"
 
     # ------------------------------------------------------------------ public
@@ -73,10 +75,13 @@ class TrackerSession:
         return request.future
 
     def close(self) -> None:
+        """Close the browser and end the thread (after the current step; a pending question is abandoned)."""
+        self.closing.set()
         self.requests.put(None)
 
     def status(self) -> dict:
-        return {"tracker": self.tracker_name, "state": self.state, "logged_in": self.logged_in,
+        return {"id": session_id(self.job_id, self.tracker_name), "job_id": self.job_id,
+                "tracker": self.tracker_name, "state": self.state, "logged_in": self.logged_in,
                 "pending": self.requests.qsize(), "idle_seconds": int(time.time() - self.last_used)}
 
     def start(self) -> None:
@@ -105,9 +110,11 @@ class TrackerSession:
                     try:
                         self.state = "uploading"
                         request.future.set_result(self._process_request(request))
-                    except UserCancelled as exc:  # the browser stays open and logged in
+                    except UserCancelled as exc:
                         logger.warning(f"Tracker '{self.tracker_name}': {exc}.")
                         request.future.set_exception(exc)
+                        if not self.closing.is_set():
+                            self._reset_upload_page()  # ready for the job's next file, still logged in
                     except Exception as exc:
                         logger.exception(f"Tracker '{self.tracker_name}' upload failed")
                         self._reset_browser()
@@ -161,6 +168,18 @@ class TrackerSession:
                 pass
         self.driver = None
         self.logged_in = False
+
+    def _reset_upload_page(self) -> None:
+        """Discard the filled form: reload an empty upload page (the login is kept)."""
+        if not self._alive():
+            return
+        try:
+            self.driver.get(self.site.upload_url)
+            logger.info(f"Tracker '{self.tracker_name}': upload form reset, ready for the next file.")
+        except WebDriverException as exc:
+            logger.warning(f"Tracker '{self.tracker_name}': could not reset the upload page ({exc.msg}) - "
+                           f"the browser restarts with the next upload.")
+            self._reset_browser()
 
     def _reset_browser(self) -> None:
         """After an error the browser state is unknown: start fresh on the next request."""
@@ -300,36 +319,53 @@ class TrackerSession:
             logger.error(f"Failed during dupe check: {exc}")
 
 
+def session_id(job_id: Optional[str], tracker_name: str) -> str:
+    return f"{job_id or 'cli'}-{tracker_name}"
+
+
 class TrackerSessionRegistry:
-    """Shared sessions keyed by tracker name (re-created when the browser settings change)."""
+    """One session (browser window) per job and tracker, closed when the job ends (re-created when the browser
+    settings change)."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._sessions: dict[str, tuple[str, TrackerSession]] = {}
 
-    def get(self, tracker_name: str, config: TrackerConfig, account: TrackerAccount) -> TrackerSession:
+    def get(self, tracker_name: str, config: TrackerConfig, account: TrackerAccount,
+            job_id: Optional[str] = None) -> TrackerSession:
         key = config.browser.model_dump_json() + config.sites[tracker_name].model_dump_json() + account.username
+        sid = session_id(job_id, tracker_name)
         with self._lock:
-            existing = self._sessions.get(tracker_name)
-            if existing and existing[0] == key and existing[1].is_alive() and not existing[1].closed.is_set():
+            existing = self._sessions.get(sid)
+            if existing and existing[0] == key and existing[1].is_alive() and not existing[1].closing.is_set():
                 return existing[1]
             if existing and existing[1].is_alive():
                 existing[1].close()
-            session = TrackerSession(tracker_name, config, account)
+            session = TrackerSession(tracker_name, config, account, job_id)
             session.start()
-            self._sessions[tracker_name] = (key, session)
+            self._sessions[sid] = (key, session)
             return session
 
     def status(self) -> list[dict]:
         with self._lock:
             return [s.status() for _, s in self._sessions.values() if s.is_alive()]
 
-    def close(self, tracker_name: str) -> bool:
+    def close(self, sid: str) -> bool:
         with self._lock:
-            entry = self._sessions.pop(tracker_name, None)
+            entry = self._sessions.pop(sid, None)
         if entry:
             entry[1].close()
         return bool(entry)
+
+    def close_job(self, job_id: Optional[str]) -> int:
+        """Close every browser of a job (called when the job ends: completed, stopped, failed or cancelled)."""
+        with self._lock:
+            sids = [sid for sid, (_, s) in self._sessions.items() if s.job_id == job_id]
+            entries = [self._sessions.pop(sid) for sid in sids]
+        for _, session in entries:
+            logger.info(f"Closing the '{session.tracker_name}' tracker browser of this job.")
+            session.close()
+        return len(entries)
 
     def shutdown(self) -> None:
         with self._lock:

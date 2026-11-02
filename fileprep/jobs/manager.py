@@ -449,6 +449,9 @@ class JobManager:
                 logger.exception(f"Job {mode} failed")
                 self._finish(job_id, "failed" if mode == "run" else "draft", str(exc))
             finally:
+                if mode == "run":  # each job has its own tracker browser(s)
+                    from fileprep.tracker.session import registry
+                    registry.close_job(job_id)
                 if mode == "run" and notify and store.app().jobs.notify_on_finish:
                     state = self.get(job_id).state
                     try:

@@ -4,6 +4,7 @@ torrent) and hands the browser part to the tracker's persistent session thread.
 """
 
 import asyncio
+import concurrent.futures
 import os
 
 from loguru import logger
@@ -49,12 +50,21 @@ async def upload_to_tracker(job: JobConfig, *, tracker_name: str, base_name: str
     loop = asyncio.get_running_loop()
     prompter = runtime.current().prompter
 
+    job_id = runtime.current().job_id
+    session = registry.get(tracker_name, job.tracker, account, job_id)
+
     def ask(text: str, choices: list[str]) -> str:  # called from the tracker thread
         question = Question(text=text, title=f"Tracker: {tracker_name}", choices=choices)
-        return asyncio.run_coroutine_threadsafe(prompter.ask(question), loop).result()
+        pending = asyncio.run_coroutine_threadsafe(prompter.ask(question), loop)
+        while True:  # the job may end (cancel) while we wait
+            try:
+                return pending.result(timeout=1)
+            except concurrent.futures.TimeoutError:
+                if session.closing.is_set() or loop.is_closed():
+                    pending.cancel()
+                    raise UserCancelled("The job ended while waiting for your answer")
 
-    session = registry.get(tracker_name, job.tracker, account)
-    request = UploadRequest(job_id=runtime.current().job_id, title=tracker_title(title, codec, self_encoded, resolution),
+    request = UploadRequest(job_id=job_id, title=tracker_title(title, codec, self_encoded, resolution),
                             tags=tags, description=description, image_url=image_url, torrent_file=torrent_file, ask=ask)
     try:
         ok = await asyncio.wrap_future(session.submit(request))

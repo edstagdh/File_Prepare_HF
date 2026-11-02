@@ -32,6 +32,7 @@ class FakeDriver:
 
     def __init__(self, *args, **kwargs):
         self.logged_in, self.logins, self.page, self.typed, self.current_url = False, 0, "", {}, ""
+        self.quit_called, self.visits = False, []
         FakeDriver.instances.append(self)
 
     def set_window_size(self, *a):
@@ -39,9 +40,10 @@ class FakeDriver:
 
     def get(self, url):
         self.page = self.current_url = url
+        self.visits.append(url)
 
     def quit(self):
-        pass
+        self.quit_called = True
 
     def find_element(self, by, value):
         login_fields = {"username", "password", "login_button"}
@@ -75,6 +77,45 @@ def test_session_logs_in_once_and_reuses_browser(tmp_path, monkeypatch):
     assert driver.logins == 2  # initial login + one re-login after expiry
     assert len(asked) == 3  # one "form submitted?" confirmation per upload
     assert ("title", "T1") in driver.typed["http://t/upload.php"] and ("category", "Cat") in driver.typed["http://t/upload.php"]
+    registry.shutdown()
+
+
+def test_cancel_resets_the_form_and_the_job_end_closes_the_browser(tmp_path, monkeypatch):
+    import time
+    from fileprep.errors import UserCancelled
+    FakeDriver.instances = []
+    monkeypatch.setattr(session_module.webdriver, "Chrome", FakeDriver)
+    config = TrackerConfig()
+    config.browser.browser = "chrome"
+    config.browser.page_timeout_seconds = 3
+    config.sites["emp"] = TrackerSite(login_url="http://t/login", upload_url="http://t/upload.php")
+    registry = TrackerSessionRegistry()
+    account = TrackerAccount(username="u", password="p", announce_url="a")
+    session = registry.get("emp", config, account, "job1")
+    answers = iter(["cancel", "yes"])
+    for i in range(2):
+        torrent = tmp_path / f"t{i}.torrent"
+        torrent.write_bytes(b"x")
+        future = session.submit(UploadRequest(job_id="job1", title=f"T{i}", tags="", description="d", image_url=None,
+                                              torrent_file=str(torrent), ask=lambda text, choices: next(answers)))
+        if i == 0:
+            try:
+                future.result(timeout=30)
+                raise AssertionError("cancel must fail the upload")
+            except UserCancelled:
+                pass
+        else:
+            assert future.result(timeout=30) is True  # next file: same window, still logged in
+    driver = FakeDriver.instances[0]
+    assert len(FakeDriver.instances) == 1 and driver.logins == 1 and not driver.quit_called
+    assert driver.visits.count("http://t/upload.php") == 3  # upload, reset after the cancel, next upload
+    # another job gets its own browser; ending a job closes only its own
+    other = registry.get("emp", config, account, "job2")
+    assert other is not session and {s["job_id"] for s in registry.status()} == {"job1", "job2"}
+    assert registry.close_job("job1") == 1
+    session.thread.join(timeout=10)
+    assert driver.quit_called and not session.is_alive()
+    assert [s["job_id"] for s in registry.status()] == ["job2"]
     registry.shutdown()
 
 

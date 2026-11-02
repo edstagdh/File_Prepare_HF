@@ -754,9 +754,9 @@ async function viewTools() {
   async function loadSessions() {
     const r = await api("GET", "/api/tools/tracker-sessions");
     fill(sessions, h("h2", {}, "Tracker browser sessions"),
-      r.sessions.length ? h("table", {}, h("tbody", {}, r.sessions.map((s) => h("tr", {}, h("td", {}, s.tracker), h("td", {}, badge(s.state, s.logged_in ? "ok" : "")),
-        h("td", { class: "small" }, `${s.pending} pending · idle ${s.idle_seconds}s`), h("td", {}, isRole("operator") ? h("button", { class: "small", onclick: async () => { await api("POST", `/api/tools/tracker-sessions/${s.tracker}/close`); loadSessions(); } }, "Close") : null)))))
-        : h("p", { class: "muted" }, "No open sessions. A logged-in browser starts with the first tracker upload and stays open between files."));
+      r.sessions.length ? h("table", {}, h("tbody", {}, r.sessions.map((s) => h("tr", {}, h("td", {}, s.tracker), h("td", {}, s.job_id ? h("a", { href: `#job/${s.job_id}` }, `job ${s.job_id}`) : "terminal"), h("td", {}, badge(s.state, s.logged_in ? "ok" : "")),
+        h("td", { class: "small" }, `${s.pending} pending · idle ${s.idle_seconds}s`), h("td", {}, isRole("operator") ? h("button", { class: "small", onclick: async () => { await api("POST", `/api/tools/tracker-sessions/${encodeURIComponent(s.id)}/close`); loadSessions(); } }, "Close") : null)))))
+        : h("p", { class: "muted" }, "No open sessions. Each job opens its own tracker browser with its first upload, keeps it logged in between its files and closes it when the job ends."));
   }
   async function loadPixhost() {
     if (!isRole("operator")) { pix.remove(); return; }

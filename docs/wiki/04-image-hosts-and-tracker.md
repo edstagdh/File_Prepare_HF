@@ -44,9 +44,10 @@ Older tracker.json files (one shared set of selectors) are converted on load: ev
 
 How it works:
 
-1. The first upload starts a dedicated browser thread for that tracker and logs in once (with 2FA you are
-   asked to complete it in the browser window). The session stays logged in between files and jobs and closes
-   after **Close idle browser after** minutes. See **Tools > Tracker browser sessions**.
+1. Each job has its own browser per tracker: the job's first upload opens it and logs in once (with 2FA you are
+   asked to complete it in the browser window). It stays logged in between the job's files and is **closed when
+   the job ends** (completed, stopped, failed or cancelled), or earlier after **Close idle browser after** minutes.
+   Open sessions and their jobs are listed in **Tools > Tracker browser sessions**.
 2. For every file the job prepares the torrent, tags, description and preview URL, then the browser opens the
    upload page, fills the form, attaches the torrent and runs the dupe check.
 3. You review and submit the form in the browser window, then answer **yes** on the job page.
@@ -64,7 +65,9 @@ Answering **cancel** (or a failed upload to the first tracker of the file) asks 
   (after a new preview) processes it again from the start.
 - **keep** - leaves everything as it is.
 
-The tracker browser stays open and logged in after a cancel.
+After a cancel the browser reloads an empty upload page and stays logged in, ready for the job's next file; when
+the job has no more files it is closed with the job. Cancelling the whole job also closes its browser, even while
+it waits for your confirmation.
 
 With **Wait for each upload before the next file** off (default) the next file is processed while you handle
 the form; the job finishes once all uploads are confirmed.

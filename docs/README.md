@@ -65,8 +65,9 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
 - **Image hosts**: Hamster, Pixhost, ImgBB and imgbox, with an ordered list per asset. In *fallback* mode the
   first host that works is used; in *all* mode every host gets the file. File formats and size limits are checked
   before uploading.
-- **Tracker upload**: one persistent Selenium browser per tracker stays logged in across files and jobs (2FA is
-  supported). Form selectors are set per site. Torrent creation and the duplicate check are built in. You check
+- **Tracker upload**: each job gets its own Selenium browser per tracker that stays logged in across the job's
+  files and closes when the job ends; a cancelled upload resets the form for the next file (2FA is supported). Form selectors are set per site. Torrent creation and the duplicate
+  check are built in. You check
   the filled form yourself before submitting.
 - **Notifications**: Telegram messages and in-app toasts with links to the job. Questions show an "Input needed"
   toast and a desktop notification.

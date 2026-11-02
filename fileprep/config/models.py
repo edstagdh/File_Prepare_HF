@@ -346,7 +346,7 @@ class BrowserSettings(Section):
     chrome_profile_path: str = setting("", "Chrome profile path", visible_if="browser.browser == chrome")
     page_timeout_seconds: int = setting(15, "Element wait timeout (s)", min=3, max=300)
     session_idle_close_minutes: int = setting(30, "Close idle browser after (min)",
-                                              "The logged-in browser is kept open between files and jobs.", min=1, max=1440)
+                                              "Each job's browser stays logged in between its files and closes when the job ends, or after this idle time.", min=1, max=1440)
 
 
 class TrackerFormSettings(BaseModel):
