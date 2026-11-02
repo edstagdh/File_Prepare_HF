@@ -123,12 +123,13 @@ async def build_plan(job: JobConfig, active_directories: dict[str, str] | None =
                                            app.environment.python_min_version, app.environment.python_max_version))
     plan.issues.extend(await gpu_issues(job))
 
-    norm = os.path.normcase(os.path.abspath(directory)) if directory else ""
-    for other_dir, other_id in (active_directories or {}).items():
-        other = os.path.normcase(os.path.abspath(other_dir))
-        if norm and (norm == other or norm.startswith(other + os.sep) or other.startswith(norm + os.sep)):
-            plan.issues.append(PlanIssue(level="error", code="DIRECTORY_IN_USE",
-                                         message=f"Job {other_id} is already queued/running on this directory."))
+    # Jobs only read the files directly inside their folder, so a parent and a child folder can run side by side;
+    # only the same folder (or writing into a folder another job uses, checked below per file) conflicts.
+    claimed = {_norm(d): other_id for d, other_id in (active_directories or {}).items()}
+    if directory and _norm(directory) in claimed:
+        plan.issues.append(PlanIssue(level="error", code="DIRECTORY_IN_USE",
+                                     message=f"Job {claimed[_norm(directory)]} is already queued/running on this directory "
+                                             f"(or writes its output there)."))
     if any(i.code == "E27_DIRECTORY" for i in plan.issues):
         return plan
 
@@ -178,6 +179,7 @@ async def build_plan(job: JobConfig, active_directories: dict[str, str] | None =
         else "warning" if any(i.level == "warning" for i in file_plan.issues) else "ok")
 
     _detect_cross_file_conflicts(plan, directory)
+    _detect_job_conflicts(plan, claimed)
     if p.outputs.performer_portraits or p.outputs.upload_template:
         from fileprep.media.portrait_picker import image_url, load_images, performer_key
         images = load_images()
@@ -322,6 +324,21 @@ async def reapply_names(job: JobConfig, plan: JobPlan) -> JobPlan:
                          else "warning" if any(i.level == "warning" for i in fp.issues) else "ok")
     plan.config_hash = config_hash(job.model_dump(mode="json"))
     return plan
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _detect_job_conflicts(plan: JobPlan, claimed: dict[str, str]) -> None:
+    """A file whose output (sub) folder is the working folder of another queued/running job (or one of its
+    output folders) would mix the two jobs' files."""
+    for fp in plan.files:
+        if fp.output_directory and _norm(fp.output_directory) in claimed and _norm(fp.output_directory) != _norm(plan.working_directory):
+            fp.issues.append(PlanIssue(level="error", code="OUTPUT_DIRECTORY_IN_USE", file=fp.source_name,
+                                       message=f"Output folder {fp.output_directory} is used by job {claimed[_norm(fp.output_directory)]} "
+                                               f"- rename the file or wait for that job."))
+            fp.status = "error"
 
 
 def _detect_cross_file_conflicts(plan: JobPlan, directory: str) -> None:

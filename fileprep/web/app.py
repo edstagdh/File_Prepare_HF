@@ -48,6 +48,8 @@ async def lifespan(app: FastAPI):
     sync = store.app().resource_sync
     if sync.auto_sync_on_start and sync.entries:
         asyncio.create_task(_sync_resources(None))
+    from fileprep.log import asyncio_exception_handler
+    asyncio.get_running_loop().set_exception_handler(asyncio_exception_handler)
     update_task = asyncio.create_task(_update_loop())
     logger.info(f"File Prepare HF {__version__} web interface ready")
     yield
@@ -76,6 +78,18 @@ def create_app() -> FastAPI:
                   openapi_url=None, root_path=app_config.server.base_path)
     app.add_middleware(SessionMiddleware, secret_key=ensure_session_secret(), session_cookie="fileprep_session",
                        max_age=app_config.auth.session_hours * 3600, same_site="lax", https_only=app_config.auth.secure_cookies)
+
+    @app.middleware("http")
+    async def one_line_errors(request: Request, call_next):
+        # an unexpected error in a request is logged as one line (traceback only in Logs/) instead of the
+        # server's multi-line "Exception in ASGI application"
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            from fileprep.errors import describe
+            logger.opt(exception=exc).error(f"{request.method} {request.url.path} failed")
+            return JSONResponse({"detail": describe(exc)}, status_code=500)
+
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
     _register_routes(app)
     return app

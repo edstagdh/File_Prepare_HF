@@ -51,6 +51,21 @@ How it works:
    upload page, fills the form, attaches the torrent and runs the dupe check.
 3. You review and submit the form in the browser window, then answer **yes** on the job page.
 
+### Cancelled or failed upload: undo the file
+
+Answering **cancel** (or a failed upload to the first tracker of the file) asks **Undo this file?**:
+
+- **undo** - deletes what the run created for that file: cover, thumbnails, previews, MediaInfo, template, tags,
+  image host result files and the torrent; deletes the images this run uploaded to **Pixhost** (with their delete
+  links); lists the **Hamster / ImgBB / imgbox** image URLs for you to delete on those websites (also sent as a
+  notification); moves the video out of its sub folder back into the working folder under its **original name**
+  and removes the sub folder when it is empty. Files that existed before the run and files the app does not know
+  are never deleted. The video's new metadata and a re-encode stay. The file is marked failed, so **Resume**
+  (after a new preview) processes it again from the start.
+- **keep** - leaves everything as it is.
+
+The tracker browser stays open and logged in after a cancel.
+
 With **Wait for each upload before the next file** off (default) the next file is processed while you handle
 the form; the job finishes once all uploads are confirmed.
 

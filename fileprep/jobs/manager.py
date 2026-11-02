@@ -8,7 +8,9 @@ Scheduling rules (``Configs/app.json`` > jobs):
 * at most ``max_concurrent_jobs`` runs at the same time;
 * at most ``max_cpu_encode_jobs`` running jobs that re-encode on the CPU (x265 alone uses ~70% of the CPU)
   and ``max_gpu_encode_jobs`` that re-encode on the GPU (default 1 each);
-* two jobs never run on the same (or a nested) working directory.
+* two jobs never run on the same working directory, and a job may not write into a folder another queued /
+  running job uses. A parent and a child folder can run at the same time (jobs only read the files directly
+  inside their folder).
 Queued jobs that cannot start yet are skipped, so a non-HEVC job can start while an HEVC job waits.
 """
 
@@ -30,6 +32,7 @@ from loguru import logger
 from fileprep import paths
 from fileprep.config.models import JobConfig
 from fileprep.config.store import store
+from fileprep.log import asyncio_exception_handler, job_log_format
 from fileprep.jobs.models import ACTIVE_STATES, EDITABLE_STATES, RESUMABLE_STATES, Job, PendingPrompt
 from fileprep.pipeline.plan import JobPlan
 from fileprep.runtime import Question, Runtime, use_runtime
@@ -79,7 +82,7 @@ class JobManager:
     def start(self) -> None:
         os.makedirs(self.jobs_dir, exist_ok=True)
         self._sink_id = logger.add(self._log_sink, level="DEBUG", filter=lambda r: "job_id" in r["extra"] and r["extra"]["job_id"],
-                                   format="{time:HH:mm:ss} | {level: <8} | {message}", enqueue=False, catch=True)
+                                   format=job_log_format, enqueue=False, catch=True)
         for name in os.listdir(self.jobs_dir):
             if not name.endswith(".json"):
                 continue
@@ -137,9 +140,17 @@ class JobManager:
         return lines[start:], total
 
     def active_directories(self, exclude: str) -> dict[str, str]:
+        """Folders used by other queued/running jobs: their working folder and the output folders of their preview."""
         with self._lock:
-            return {j.working_directory: j.id for j in self._jobs.values()
-                    if j.id != exclude and j.state in ("queued", "running", "stopping") and j.working_directory}
+            used = {}
+            for j in self._jobs.values():
+                if j.id == exclude or j.state not in ("queued", "running", "stopping") or not j.working_directory:
+                    continue
+                used[j.working_directory] = j.id
+                for fp in (j.plan.files if j.plan else []):
+                    if fp.output_directory:
+                        used.setdefault(fp.output_directory, j.id)
+            return used
 
     # ================================================================== mutations
     def create(self, config: JobConfig, name: str, user: str) -> Job:
@@ -395,6 +406,7 @@ class JobManager:
     def _thread_main(self, job_id: str, mode: str) -> None:
         worker = self._workers[job_id]
         loop = asyncio.new_event_loop()
+        loop.set_exception_handler(asyncio_exception_handler)
         asyncio.set_event_loop(loop)
         worker.loop = loop
         try:
@@ -583,13 +595,11 @@ class JobManager:
 
 def _only_names_changed(old: JobConfig, new: JobConfig) -> bool:
     """True when the two configs differ only in the suffix for all files / custom file names."""
-
     def strip(config: JobConfig) -> dict:
         data = config.model_dump(mode="json")
         data["processing"]["naming"].pop("extra_suffix", None)
         data["processing"]["naming"].pop("filename_overrides", None)
         return data
-
     return strip(old) == strip(new)
 
 

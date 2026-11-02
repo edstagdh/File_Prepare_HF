@@ -26,6 +26,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from fileprep.config.models import Selector, TrackerAccount, TrackerConfig
+from fileprep.errors import UserCancelled
 
 BY_MAP = {"id": By.ID, "name": By.NAME, "css": By.CSS_SELECTOR, "xpath": By.XPATH, "class": By.CLASS_NAME,
           "tag": By.TAG_NAME, "link": By.LINK_TEXT}
@@ -104,6 +105,9 @@ class TrackerSession:
                     try:
                         self.state = "uploading"
                         request.future.set_result(self._process_request(request))
+                    except UserCancelled as exc:  # the browser stays open and logged in
+                        logger.warning(f"Tracker '{self.tracker_name}': {exc}.")
+                        request.future.set_exception(exc)
                     except Exception as exc:
                         logger.exception(f"Tracker '{self.tracker_name}' upload failed")
                         self._reset_browser()
@@ -206,7 +210,7 @@ class TrackerSession:
             if answer in ("yes", "y"):
                 return
             if answer in ("cancel", "c"):
-                raise RuntimeError(cancel_message)
+                raise UserCancelled(cancel_message)
             logger.info("Continue in the browser window, then answer 'yes' (or 'cancel' to abort).")
 
     # ------------------------------------------------------------------ upload

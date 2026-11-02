@@ -22,6 +22,12 @@ data/                      runtime state: data/jobs/<id>.json + .log (git ignore
 
 ## Key ideas
 
+- **Failures are one log line.** `fileprep/errors.py` defines `UserCancelled`, `ExpectedFailure` and which
+  exceptions are expected (cancellations, OSError, network / httpx / Selenium errors, TPDB connection, plain
+  RuntimeError). A loguru patcher (`log.py`) appends the short reason to the message and drops the traceback of
+  expected failures; console and job logs never print tracebacks; unexpected ones keep it in `Logs/` only. Threads,
+  event loops and web requests use the same rule. Raise `UserCancelled` when the user cancels.
+- **Undo** (`pipeline/rollback.py`): offered when a file's tracker upload is cancelled or fails.
 - **Thread per job.** Each preview/run gets its own thread and asyncio loop, so CPU-heavy steps never block the
   web server or other jobs. Cancel = `task.cancel()`; subprocess helpers kill ffmpeg on cancellation.
 - **Prompts.** Code anywhere in the pipeline calls `await fileprep.runtime.prompt(text)`. Inside a job the

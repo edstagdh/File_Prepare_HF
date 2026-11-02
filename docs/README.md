@@ -43,7 +43,7 @@ in **jobs**. Each job runs a **preview (dry run)** first, which changes nothing 
 - **Fix names after the preview**: add a suffix to all files (for example `VR2Normal`) or rename a single file
   without running the preview again. You can also set a TPDB UUID by hand or move a file out of the job.
 - **Scheduler**: a limit on concurrent jobs, at most one CPU-encoding job and one GPU-encoding job at a time, and
-  never two jobs on the same folder.
+  never two jobs on the same folder (a parent and a child folder can run side by side).
 - **Crash-safe**: job state is saved after every file. Interrupted jobs can be resumed, and temporary or partial
   files are removed after failures.
 
@@ -179,6 +179,10 @@ New job ─► Save & preview ─► (answer questions) ─► ready ─► Queu
 | 10 | Move the files into the sub folder                                 | *Naming › Create a sub folder per file*              |
 | 11 | Torrent, duplicate check, tracker form (you confirm)               | *Tracker upload*                                     |
 | 12 | Add to the TPDB collection                                         | *Matching › Add to TPDB collection*                  |
+
+If you cancel the tracker upload (or it fails), the app offers to **undo the file**: it deletes the files and
+uploaded images this run created (Pixhost automatically, Hamster/ImgBB/imgbox listed for manual deletion) and
+moves the video back to the working folder under its original name.
 
 A TPDB connection failure stops the job; you can resume it later. If a file has no match, that file is skipped
 and you get a notification. A failed cover or image upload is logged and processing continues.

@@ -11,6 +11,7 @@ from loguru import logger
 from fileprep import runtime
 from fileprep.config.models import JobConfig
 from fileprep.config.store import get_credentials
+from fileprep.errors import UserCancelled
 from fileprep.runtime import Question
 from fileprep.tracker.session import UploadRequest, delete_prefixed_files, registry, tracker_title
 from fileprep.tracker.torrent import generate_torrent_process
@@ -57,6 +58,8 @@ async def upload_to_tracker(job: JobConfig, *, tracker_name: str, base_name: str
                             tags=tags, description=description, image_url=image_url, torrent_file=torrent_file, ask=ask)
     try:
         ok = await asyncio.wrap_future(session.submit(request))
+    except UserCancelled:
+        raise  # handled by the runner (offers to undo the file)
     except Exception as exc:
         logger.error(f"Tracker '{tracker_name}' upload failed: {exc}")
         return False

@@ -17,3 +17,7 @@
 | Server restarted during a job                                                 | The job becomes **interrupted** - press Resume; finished files are skipped.                                                                                                |
 
 Logs: each job's log is on its page and in `data/jobs/<id>.log`; the application log is in `Logs/`.
+
+Failures are logged as **one line** (`<what failed>: <reason>`) - no tracebacks for cancellations, network, image
+host, browser or file errors. Only an unexpected error (a bug) ends with "(details in the log file in Logs/)"; its
+full traceback is written to the application log in `Logs/` only - attach it when you use **Report an issue**.

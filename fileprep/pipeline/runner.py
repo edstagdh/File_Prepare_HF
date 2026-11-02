@@ -29,7 +29,9 @@ from fileprep.media.probe import get_video_fps, get_video_resolution_and_orienta
 from fileprep.media.thumbnail_sheet import process_thumbnails
 from fileprep.media.video_preview import process_video_preview
 from fileprep.pipeline.matching import DESCRIPTION_NOT_FOUND
+from fileprep.errors import UserCancelled
 from fileprep.pipeline.plan import FilePlan, FileResult, JobPlan, inputs_hash
+from fileprep.pipeline.rollback import offer_undo
 from fileprep.pipeline.planner import list_input_files
 from fileprep.template.bbcode import generate_template_video
 from fileprep.tpdb import TpdbConnectionError, ensure_scene_collected
@@ -295,13 +297,24 @@ async def process_file(job: JobConfig, fp: FilePlan, result: FileResult, hooks: 
                 is_last = i == len(p.tracker.trackers) - 1
                 if hooks.submit_tracker_upload is None:
                     raise RuntimeError("Tracker uploads are not available in this mode")
-                ok = await hooks.submit_tracker_upload(
-                    tracker_name=tracker_name, base_name=new_filename_base_name, output_dir=output_directory,
-                    title=fp.title, save_path=directory, resolution=resolution_template, codec=codec,
-                    self_encoded=self_encoded, is_last_tracker=is_last)
+                try:
+                    ok = await hooks.submit_tracker_upload(
+                        tracker_name=tracker_name, base_name=new_filename_base_name, output_dir=output_directory,
+                        title=fp.title, save_path=directory, resolution=resolution_template, codec=codec,
+                        self_encoded=self_encoded, is_last_tracker=is_last)
+                    reason = None if ok else f"The upload to {tracker_name} failed"
+                except UserCancelled:
+                    ok, reason = False, f"The upload to {tracker_name} was cancelled"
                 if not ok:
-                    result.status, result.error = "failed", f"tracker upload to {tracker_name} failed"
+                    result.status, result.error = "failed", reason[0].lower() + reason[1:]
                     hooks.on_file_update(result)
+                    if i == 0:  # nothing was posted yet: offer to undo the file
+                        try:
+                            await offer_undo(job, fp, result, directory=directory, output_directory=output_directory,
+                                             base_name=new_filename_base_name, video_path=new_file_full_path, reason=reason)
+                        except Exception as exc:
+                            logger.error(f"Undo of {fp.new_file_name} failed: {exc}")
+                        hooks.on_file_update(result)
                     return False
                 step(f"tracker: {tracker_name}")
         if p.matching.add_to_collection and match.tpdb_id and not full_manual:

@@ -89,10 +89,12 @@ def test_cancel_answer_fails_the_upload(tmp_path, monkeypatch):
     request = UploadRequest(job_id="j", title="T", tags="", description="d", image_url=None,
                             torrent_file=str(tmp_path / "x.torrent"), ask=lambda text, choices: "cancel")
     future = session.submit(request)
+    from fileprep.errors import UserCancelled
     try:
         future.result(timeout=30)
         raised = False
-    except RuntimeError:
+    except UserCancelled:
         raised = True
     assert raised
+    assert session.driver is not None  # a cancel keeps the browser (and the login) open
     registry.shutdown()

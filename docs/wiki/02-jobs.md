@@ -127,4 +127,7 @@ completed, failed...) also show a short toast with a link to the job.
 - At most **one** running job that re-encodes on the **CPU** (x265 / SVT-AV1 use ~70% of the CPU) and at most
   **one** that re-encodes on the **GPU** (consumer GPUs limit parallel encode sessions). Both limits are in
   **Settings > Application > Jobs**. Other jobs keep starting while an encoding job waits.
-- Two jobs never run on the same (or nested) working directory.
+- Two jobs never run on the same working directory. A parent folder and a folder inside it can be processed at
+  the same time (a job only reads the `.mp4` files directly inside its own folder), unless a file of one job would
+  get a sub folder that is the other job's folder (or one of its output folders) - the preview reports that as
+  `OUTPUT_DIRECTORY_IN_USE`.
