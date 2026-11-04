@@ -17,8 +17,8 @@ from .prompt_utils import prompt
 
 REQUEST_TIMEOUT = httpx.Timeout(60.0)  # 60s for connect, read, write, and pool
 # Minimum gap between two TPDB requests (random within the range) to stay under the API rate limit.
-REQUEST_GAP_MIN = 0.1  # seconds
-REQUEST_GAP_MAX = 0.3  # seconds
+REQUEST_GAP_MIN = 0.5  # seconds
+REQUEST_GAP_MAX = 1.0  # seconds
 _next_request_at = 0.0  # monotonic time before which the next request must not start
 
 
