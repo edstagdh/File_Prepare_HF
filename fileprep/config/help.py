@@ -46,6 +46,9 @@ HELP = {
     "VideoPreviewSettings.segment_duration": "Length of each segment cut from the video.",
     "VideoPreviewSettings.grid_columns": "Segments per row in the preview sheets.",
     "VideoPreviewSettings.webp_fps": "Frame rate of the WebP preview and sheet.",
+    "VideoPreviewSettings.webp_compression_level": "libwebp effort for the WebP preview and sheet: higher = slightly smaller files but slower "
+                                                   "(6 takes about 1.5x as long as 4 for ~3% smaller files). Encoding WebP is always done "
+                                                   "on the CPU - ffmpeg has no GPU WebP encoder. Before 14.17 the preview used 6 and the sheet 4.",
     "VideoPreviewSettings.create_avif_preview": "Animated AVIF (AV1) version of the preview: smaller than WebP at the same quality. Uploaded only to hosts that accept AVIF (Pixhost); the template and tracker keep using WebP.",
     "VideoPreviewSettings.create_avif_sheet": "Animated AVIF version of the preview sheet (Pixhost only for uploads).",
     "VideoPreviewSettings.avif_fps": "Frame rate of the AVIF preview and sheet.",

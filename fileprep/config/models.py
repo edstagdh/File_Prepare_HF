@@ -307,6 +307,7 @@ class VideoPreviewSettings(Section):
     grid_columns: Literal[3, 4] = setting(4, "Sheet grid columns")
     gif_segment_count: int = setting(8, "GIF segments", "Must not exceed the number of segments.", min=1, max=60)
     webp_fps: int = setting(24, "WebP fps", min=1, max=60)
+    webp_compression_level: int = setting(4, "WebP effort (0-6)", min=0, max=6)
     avif_fps: int = setting(24, "AVIF fps", min=1, max=60,
                             visible_if="create_avif_preview || create_avif_sheet")
     avif_crf: int = setting(35, "AVIF quality (CRF)", "AV1 CRF of the AVIF previews: lower = better quality and bigger files.",

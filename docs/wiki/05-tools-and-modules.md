@@ -45,7 +45,12 @@ driver or ffmpeg update.
 
 - **Thumbnails and preview segments** decode the source on the GPU and encode the intermediate H.264 clips with
   the GPU encoder; a failing GPU command is retried on the CPU. The final WebP / AVIF / GIF / WebM encoders
-  always use the CPU.
+  always use the CPU (ffmpeg has no GPU encoders for them), and so do the transitions (xfade), the time-stamp
+  overlay and the sheet layout - these are CPU filters. For a video preview most of the time is therefore CPU work
+  whatever the GPU setting: since 14.17 the segments are cut 3 at a time, the time stamps are drawn in parallel, the
+  transitions and the sheet are each built in a single ffmpeg run and intermediate clips use the fastest x264
+  settings (about 3x faster than 14.16). **Video preview > WebP effort** (default 4; 6 = ~1.5x slower for ~3%
+  smaller files) sets the cost of the final WebP encode, now the largest single step.
 - **Full video encoding** uses the GPU only when the job's Encoding tab selects *GPU*; the preview reports a
   missing GPU encoder (error, or warning with CPU fallback enabled).
 - Configure it in **Settings > Application > Hardware acceleration**.

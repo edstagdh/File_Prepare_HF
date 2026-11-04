@@ -6,6 +6,8 @@ transient failure".
 
 import asyncio
 import json
+import random
+import time
 from typing import Optional
 
 import httpx
@@ -14,6 +16,21 @@ from loguru import logger
 from .prompt_utils import prompt
 
 REQUEST_TIMEOUT = httpx.Timeout(60.0)  # 60s for connect, read, write, and pool
+# Minimum gap between two TPDB requests (random within the range) to stay under the API rate limit.
+REQUEST_GAP_MIN = 0.1  # seconds
+REQUEST_GAP_MAX = 0.3  # seconds
+_next_request_at = 0.0  # monotonic time before which the next request must not start
+
+
+async def _throttle() -> None:
+    """Space out TPDB requests. Each caller reserves the next free slot (no await between reading and
+    updating the slot, so concurrent callers cannot share one) and sleeps until it arrives."""
+    global _next_request_at
+    now = time.monotonic()
+    start = max(now, _next_request_at)
+    _next_request_at = start + random.uniform(REQUEST_GAP_MIN, REQUEST_GAP_MAX)
+    if start > now:
+        await asyncio.sleep(start - now)
 
 
 class TpdbConnectionError(Exception):
@@ -71,6 +88,7 @@ async def send_request(
     while True:  # allows user-triggered retry cycles once max_retries is exhausted
         for attempt in range(1, max_retries + 1):
             try:
+                await _throttle()
                 async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                     response = await client.get(url, headers=headers)
 
@@ -177,6 +195,7 @@ async def fetch_api_site_data(
 
     for attempt in range(max_retries):
         try:
+            await _throttle()
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, headers=headers)
             response.raise_for_status()
@@ -203,6 +222,7 @@ async def fetch_api_site_data(
 
                 site_parent = next_parent["uuid"]
                 url = f"{api_url}{site_parent}"
+                await _throttle()
                 async with httpx.AsyncClient() as client:
                     response = await client.get(url, headers=headers)
                 response.raise_for_status()

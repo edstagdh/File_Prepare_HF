@@ -87,7 +87,8 @@ async def process_video_preview(input_video_file_path, output_directory, new_fil
                                       blacklisted_cut_points,
                                       custom_output_path, confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif,
                                       new_filename_base_name, last_cut_point, font_path, upload_previews, add_file_info,
-                                      transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold, avif=avif)
+                                      transition_mode, available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold, avif=avif,
+                                      webp_level=settings.webp_compression_level)
     finally:
         if not keep_temp_files and os.path.isdir(temp_folder):
             shutil.rmtree(temp_folder, ignore_errors=True)
@@ -217,89 +218,87 @@ async def concat_video_segments(concat_list_file, output_file, transition_mode, 
     else:
         transitions = [transition_mode] * (len(segment_files) - 1)
 
-    # logger.debug(f'Using transitions: {transitions}")
-
-    if transition_mode in ["fade", "fadeblack"]:
-        temp_first_fade = os.path.join(temp_folder, "first_fade.mp4")
-        fade_duration = duration  # or a separate value if you want
-
-        cmd_fade_in = (
-            f'ffmpeg -hide_banner -i "{segment_files[0]}" '
-            f'-vf "fade=t=in:st=0:d={fade_duration}" '
-            f'-c:a copy -y "{temp_first_fade}"'
-        )
-        stdout, stderr, code = await run_command(cmd_fade_in)
-        if code != 0 or not os.path.exists(temp_first_fade):
-            logger.error(f'Fade-in failed for {segment_files[0]}: {stderr}')
-            return False, None
-
-        prev_clip = temp_first_fade
-    else:
-        prev_clip = segment_files[0]
-
-    temp_file_before = os.path.join(temp_folder, "before_concat.mp4")
-    temp_file_after = os.path.join(temp_folder, "after_concat.mp4")
-
-    # os.rename(old_path, new_path)
-    for i, next_clip in enumerate(segment_files[1:]):
-        transition = transitions[i]
-
-        prev_duration, _ = await get_video_duration(prev_clip)
-
-        # Offset: transition happens at the end of the previous clip
-        offset = max(prev_duration - duration, 0)
-
-        # Run ffmpeg to concat prev_clip and next_clip into temp_file
-        cmd = (
-            f'ffmpeg -hide_banner -i "{prev_clip}" -i "{next_clip}" '
-            f'-filter_complex "[0:v][1:v]xfade=transition={transition}:duration={duration}:offset={offset}[v]" '
-            f'-map "[v]" -y "{temp_file_after}"'
-        )
-
-        stdout, stderr, code = await run_command(cmd)
-        if code != 0 or not os.path.exists(temp_file_after):
-            logger.error(f'Concat failed between {prev_clip} and {next_clip}: {stderr}')
-            return False, None
-
-        # Rename after concat
-        await asyncio.sleep(0.1)
-        if os.path.exists(temp_file_after):
-            os.replace(temp_file_after, temp_file_before)
-        await asyncio.sleep(0.1)
-
-        # For the next iteration, use the same temp_file as prev_clip
-        prev_clip = temp_file_before
-
-    # Rename after finish
-    await asyncio.sleep(0.1)
-    if os.path.exists(temp_file_before):
-        os.replace(temp_file_before, output_file)
-    await asyncio.sleep(0.1)
-
-    if transition_mode in ["fade", "fadeblack"]:
-        temp_final_fade = os.path.join(temp_folder, "final_fade.mp4")
-        final_duration, _ = await get_video_duration(output_file)
-
-        cmd_fade_out = (
-            f'ffmpeg -hide_banner  -i "{output_file}" '
-            f'-vf "fade=t=out:st={final_duration - fade_duration}:d={fade_duration}" '
-            f'-c:a copy -y "{temp_final_fade}"'
-        )
-        stdout, stderr, code = await run_command(cmd_fade_out)
-        if code != 0 or not os.path.exists(temp_final_fade):
-            logger.error(f'Fade-out failed for {output_file}: {stderr}')
-            return False, None
-
-        os.replace(temp_final_fade, output_file)
-
+    # One ffmpeg run for the whole chain: every segment is decoded and the result encoded once. (Before 14.17 each
+    # transition re-encoded everything joined so far - 15 growing encodes for 16 segments, plus 2 for the fades.)
+    durations = await asyncio.gather(*(_media_duration(f) for f in segment_files))
+    if not all(durations):
+        logger.error("Could not read the duration of every preview segment")
+        return False, None
+    duration = min(duration, min(durations) / 2)  # a transition can never be longer than half a segment
+    width, height, rate = await _video_format(segment_files[0])
+    inputs = " ".join(f'-i "{f}"' for f in segment_files)
+    # xfade needs identical size, frame rate, time base and pixel format on both inputs: segments made by a GPU
+    # encoder can differ in these, so every input is normalised to the first segment. fps must come after setpts:
+    # since ffmpeg 7 setpts marks the frame rate as unknown (1/0), which xfade rejects.
+    chains = [f"[{i}:v]scale={width}:{height},setsar=1,settb=AVTB,setpts=PTS-STARTPTS,fps={rate},format=yuv420p[s{i}]"
+              for i in range(len(segment_files))]
+    fades = transition_mode in ["fade", "fadeblack"]
+    previous, offset = "s0", 0.0
+    if fades:
+        chains.append(f"[s0]fade=t=in:st=0:d={duration:.3f}[f0]")
+        previous = "f0"
+    for i, transition in enumerate(transitions, start=1):
+        offset += durations[i - 1] - duration
+        chains.append(f"[{previous}][s{i}]xfade=transition={transition}:duration={duration:.3f}:offset={offset:.3f}[x{i}]")
+        previous = f"x{i}"
+    total = offset + durations[-1]
+    if fades:
+        chains.append(f"[{previous}]fade=t=out:st={max(total - duration, 0):.3f}:d={duration:.3f}[vout]")
+        previous = "vout"
+    cmd = (f'ffmpeg -hide_banner {inputs} -filter_complex "{";".join(chains)}" -map "[{previous}]" '
+           f'{INTERMEDIATE_ENCODE} -an "{output_file}" -y')
+    stdout, stderr, code = await run_command(cmd)
+    if code == 0 and os.path.exists(output_file):
+        return True, output_file
+    logger.warning(f"Transitions failed ({ffmpeg_error(stderr)}) - joining the segments without transitions")
+    cmd = (f'ffmpeg -hide_banner {inputs} -filter_complex "{";".join(chains[:len(segment_files)])};'
+           f'{"".join(f"[s{i}]" for i in range(len(segment_files)))}concat=n={len(segment_files)}:v=1:a=0[v]" '
+           f'-map "[v]" {INTERMEDIATE_ENCODE} -an "{output_file}" -y')
+    stdout, stderr, code = await run_command(cmd)
+    if code != 0 or not os.path.exists(output_file):
+        logger.error(f"Joining the preview segments failed: {ffmpeg_error(stderr)}")
+        return False, None
     return True, output_file
+
+
+def ffmpeg_error(stderr: str) -> str:
+    """The lines of ffmpeg's output that explain a failure (not the progress / summary lines at the end)."""
+    keys = ("error", "invalid", "not match", "do not match", "failed", "no such", "cannot", "unable", "mismatch")
+    lines = [l.strip() for l in (stderr or "").splitlines() if any(k in l.lower() for k in keys)]
+    return " | ".join(dict.fromkeys(lines))[:800] or (stderr or "").strip()[-300:]
+
+
+async def _video_format(path: str) -> tuple[int, int, str]:
+    """Width, height and frame rate (as ffmpeg writes it, e.g. 30000/1001) of the first video stream."""
+    stdout, _, code = await run_command(f'ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate '
+                                        f'-of default=nw=1 "{path}"')
+    values = dict(line.split("=", 1) for line in stdout.splitlines() if "=" in line) if code == 0 else {}
+    rate = values.get("r_frame_rate", "")
+    if not rate or rate.startswith("0"):
+        rate = "30"
+    return int(values.get("width") or 1280), int(values.get("height") or 720), rate
+
+
+# Intermediate clips (segments with time stamps, joined preview, sheet) only feed the WebP/AVIF/GIF encoders:
+# fastest x264 settings at near-lossless quality.
+INTERMEDIATE_ENCODE = "-c:v libx264 -preset ultrafast -crf 16 -pix_fmt yuv420p"
+SEGMENT_JOBS = 3  # segments cut at the same time (GPU sessions / disk seeks)
+OVERLAY_JOBS = max(2, (os.cpu_count() or 2) // 2)
+
+
+async def _media_duration(path: str) -> float:
+    stdout, _, code = await run_command(f'ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "{path}"')
+    try:
+        return float(stdout.strip()) if code == 0 else 0.0
+    except ValueError:
+        return 0.0
 
 
 async def process_video(video_path, directory, keep_temp_files, black_bars, create_webp_preview, create_webp_preview_sheet, segment_duration, num_of_segments, timestamps_mode,
                         ignore_existing, grid, create_gif_preview, gif_preview_fps, webp_preview_fps, create_gif_preview_sheet, blacklisted_cut_points, custom_output_path,
                         confirm_cut_points_required, create_webm_preview_sheet, create_webm_preview, print_cut_points, number_of_segments_gif, new_filename_base_name,
                         last_cut_point, font_path, upload_previews, add_file_info, transition_mode,
-                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold, avif=None):
+                        available_transitions, transition_duration, fit_thumbs_in_less_rows, preview_quality_resolution, scene_threshold, avif=None, webp_level=4):
     avif = avif or {"preview": False, "sheet": False}
     if black_bars:
         new_filename_base_name = f'{new_filename_base_name}_black_bars'
@@ -504,7 +503,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webp_command = (
                 f'ffmpeg -hide_banner -y -i "{concat_result_path}" '
                 f'-vf "fps={webp_preview_fps},{scale_option}:flags=lanczos" '
-                f'-c:v libwebp -quality 80 -lossless 0 -compression_level 6 -loop 0 -an -vsync 0 "{output_webp}"'
+                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -vsync 0 "{output_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
@@ -571,7 +570,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
                                                    is_vertical, black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet,
                                                    preview_sheet_webm, upload_previews, new_filename_base_name, add_file_info, font_path,
                                                    num_of_segments, fit_thumbs_in_less_rows,
-                                                   avif=avif, preview_sheet_avif=preview_sheet_avif)
+                                                   avif=avif, preview_sheet_avif=preview_sheet_avif, webp_level=webp_level)
         if keep_temp_files:
             # logger.debug("Keeping temp files")
             pass
@@ -783,54 +782,48 @@ async def generate_video_segments(video_path, filename_without_ext, cut_points, 
         else:
             v_scale = "720:1280"
 
-    while len(temp_files_webp) < 15:
-        for index, start in enumerate(cut_points, start=1):
-            if start >= duration:
-                continue
+    enc_pre, enc_args, enc_vf = await gpu.segment_encode_args()
+    if is_vertical and black_bars:
+        vf_filter = f'scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2'
+    elif is_vertical:
+        vf_filter = f'scale={v_scale}'
+    else:
+        vf_filter = f'scale={h_scale}'
 
-            cut_duration = min(segment_cut_duration, duration - start)
-            start_time_formatted = await format_time_filename(start)
-            temp_file = os.path.join(
-                temp_folder,
-                f'{filename_without_ext}_start-{start_time_formatted}_cutpoint-{index}_position-{start:.2f}.mp4'
-            )
+    async def cut(index, start):
+        """One segment (GPU decode/encode when enabled), plus its time-stamped copy for the sheet."""
+        cut_duration = min(segment_cut_duration, duration - start)
+        start_time_formatted = await format_time_filename(start)
+        temp_file = os.path.join(
+            temp_folder,
+            f'{filename_without_ext}_start-{start_time_formatted}_cutpoint-{index}_position-{start:.2f}.mp4'
+        )
 
-            # Choose FFmpeg command based on aspect ratio settings
-            if is_vertical and black_bars:
-                vf_filter = f'scale={h_scale}:force_original_aspect_ratio=decrease,pad={h_scale}:(ow-iw)/2:(oh-ih)/2'
-            elif is_vertical:
-                vf_filter = f'scale={v_scale}'
-            else:
-                vf_filter = f'scale={h_scale}'
+        def ffmpeg_segment_command(hw):
+            # hw = GPU decode flags; the CPU retry ("") also uses the CPU H.264 encoder
+            pre, codec, vf_extra = (enc_pre, enc_args, enc_vf) if hw else ("", gpu.CPU_SEGMENT_ENCODE, "")
+            return (f'ffmpeg -hide_banner {pre}-ss {start} {hw}-i "{video_path}" -map 0:v:0 {codec} '
+                    f'-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} '
+                    f'-vf "{vf_filter}{vf_extra}" "{temp_file}" -y')
 
-            enc_pre, enc_args, enc_vf = await gpu.segment_encode_args()
-
-            def ffmpeg_segment_command(hw, start=start, cut_duration=cut_duration, vf_filter=vf_filter, temp_file=temp_file):
-                # hw = GPU decode flags; the CPU retry ("") also uses the CPU H.264 encoder
-                pre, codec, vf_extra = (enc_pre, enc_args, enc_vf) if hw else ("", gpu.CPU_SEGMENT_ENCODE, "")
-                return (f'ffmpeg -hide_banner {pre}-ss {start} {hw}-i "{video_path}" -map 0:v:0 {codec} '
-                        f'-map_metadata -1 -map_chapters -1 -dn -sn -an -t {cut_duration} '
-                        f'-vf "{vf_filter}{vf_extra}" "{temp_file}" -y')
-
+        async with segment_slots:
             stdout, stderr, exit_code = await gpu.run_with_cpu_fallback("previews", ffmpeg_segment_command)
-
-            if exit_code != 0 or not os.path.exists(temp_file):
-                logger.error(f'Failed to extract segment {index} at {start} seconds')
-                if temp_file in temp_files_webp:
-                    temp_files_webp.remove(temp_file)  # Remove failed segment from list
-                continue
-            if timestamps_mode in [1, 2]:
-
-                temp_files_webp.append(temp_file)
-                if preview_sheet_required:
-                    return_file = await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical, preview_quality_resolution)
-                    temp_files_webp.append(return_file)
-            else:
-                temp_files_webp.append(temp_file)
-
-        if not temp_files_webp:
-            logger.error("No segments extracted successfully.")
+        if exit_code != 0 or not os.path.exists(temp_file):
+            logger.error(f'Failed to extract segment {index} at {start} seconds')
             return []
+        if timestamps_mode in [1, 2] and preview_sheet_required:
+            async with overlay_slots:
+                return [temp_file, await overlay_timestamp(temp_folder, temp_file, font_path, is_vertical, preview_quality_resolution)]
+        return [temp_file]
+
+    # segments are cut a few at a time (and time-stamped while the next ones are cut); the list keeps the
+    # cut point order: segment 1, its time-stamped copy, segment 2, ...
+    segment_slots, overlay_slots = asyncio.Semaphore(SEGMENT_JOBS), asyncio.Semaphore(OVERLAY_JOBS)
+    results = await asyncio.gather(*(cut(index, start) for index, start in enumerate(cut_points, start=1) if start < duration))
+    temp_files_webp = [f for files in results for f in files if f]
+    if not temp_files_webp:
+        logger.error("No segments extracted successfully.")
+        return []
     return temp_files_webp  # Return list of processed segments
 
 
@@ -936,7 +929,7 @@ async def overlay_timestamp(temp_folder, video_path, font_path, is_vertical, pre
         ffmpeg_cmd = (
             f"ffmpeg -hide_banner -i \"{full_video_path}\" "
             f"-vf \"{vf_filters}\" "
-            f"-c:v libx264 -preset fast -c:a copy \"{full_output_path}\" -y"
+            f"{INTERMEDIATE_ENCODE} -c:a copy \"{full_output_path}\" -y"
         )
 
         stdout, stderr, exit_code = await run_command(ffmpeg_cmd)
@@ -1044,7 +1037,7 @@ async def filter_and_save_timestamped(file_path, timestamps_mode, is_sheet):
 async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create_webp_preview_sheet, preview_sheet_webp, file_path, segment_duration, grid, is_vertical,
                                            add_black_bars, create_gif_preview_sheet, preview_sheet_gif, gif_preview_fps, webp_preview_fps, create_webm_preview_sheet, preview_sheet_webm,
                                            upload_previews, new_filename_base_name, add_file_info, font_path,
-                                           num_of_segments, fit_thumbs_in_less_rows, avif=None, preview_sheet_avif=None):
+                                           num_of_segments, fit_thumbs_in_less_rows, avif=None, preview_sheet_avif=None, webp_level=4):
     """Generates stacked video sheet, adds preview sheets (WebP, AVIF, WebM, GIF), and renames files as needed."""
     avif = avif or {"sheet": False}
     try:
@@ -1070,9 +1063,6 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             logger.error(f'Invalid grid value: {grid}. Only 3 or 4 are allowed.')
             return
 
-        # List to store the output of intermediate stacked videos
-        intermediate_files = []
-
         # Determine char_break_line based on layout
         if grid == 3:
             char_break_line = 75 if is_vertical and not add_black_bars else 110
@@ -1091,67 +1081,30 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
             final_image_video_path = os.path.join(temp_folder, new_filename_base_name + '_image_video.mp4')
             await create_video_from_image(info_image_path, final_image_video_path, fps=original_fps, duration=segment_duration)
 
-        # Process each group of videos and stack them horizontally
-        for index, group in enumerate(video_groups):
-            input_files = ' '.join([f'-i "{file}"' for file in group])
-            output_file = os.path.join(temp_folder, f'stacked_{index + 1}.mp4')
-            intermediate_files.append(output_file)
-
-            num_inputs = len(group)
-            inputs_tags = ''.join(f'[{i}:v]' for i in range(num_inputs))
-            filter_complex = f'{inputs_tags}hstack=inputs={num_inputs}[v]'
-
-            command = f'ffmpeg -hide_banner {input_files} -filter_complex "{filter_complex}" -map "[v]" -y "{output_file}"'
-            stdout, stderr, exit_code = await run_command(command)
-            if exit_code != 0:
-                logger.error(f'Error running ffmpeg command for stacked video {index + 1}: {stdout}\n{stderr}\nCommand: {command}')
-                continue
-
-        # Stack all intermediate videos vertically with info image at top
+        # One ffmpeg run builds the whole sheet: each row hstack-ed, the rows (under the info header) vstack-ed and,
+        # with 4 columns, scaled to 1890 px wide. (Before 14.17: one encode per row, one for the stack, one to scale.)
         final_output = os.path.join(temp_folder, "final_thumbnail_sheet.mp4")
-        downscaled_output = os.path.join(temp_folder, "downscaled_thumbnail_sheet.mp4")
-
-        input_files_list = []
-        filter_inputs = []
-
+        inputs, chains, rows = [], [], []
         if add_file_info:
-            input_files_list.append(f'-i "{final_image_video_path}"')
-            filter_inputs.append(f'[0:v]')
-
-        # Add intermediate stacked video inputs
-        for idx, file in enumerate(intermediate_files):
-            input_files_list.append(f'-i "{file}"')
-            filter_inputs.append(f'[{idx + (1 if add_file_info else 0)}:v]')
-
-        input_files_str = ' '.join(input_files_list)
-        filter_complex_str = ''.join(filter_inputs) + f'vstack=inputs={len(filter_inputs)}[v]'
-
-        command = f'ffmpeg -hide_banner {input_files_str} -filter_complex "{filter_complex_str}" -map "[v]" -y "{final_output}"'
+            inputs.append(f'-i "{final_image_video_path}"')
+            rows.append("[0:v]")
+        for row, group in enumerate(video_groups):
+            first = len(inputs)
+            inputs.extend(f'-i "{file}"' for file in group)
+            tags = "".join(f"[{first + i}:v]" for i in range(len(group)))
+            chains.append(f"{tags}hstack=inputs={len(group)}[r{row}]" if len(group) > 1 else f"{tags}null[r{row}]")
+            rows.append(f"[r{row}]")
+        chains.append(f"{''.join(rows)}vstack=inputs={len(rows)}[sheet]" if len(rows) > 1 else f"{rows[0]}null[sheet]")
+        last = "sheet"
+        if grid == 4:
+            chains.append(f"[sheet]scale=1890:{(num_of_segments / grid) * 270}[scaled]")
+            last = "scaled"
+        command = (f'ffmpeg -hide_banner {" ".join(inputs)} -filter_complex "{";".join(chains)}" -map "[{last}]" '
+                   f'{INTERMEDIATE_ENCODE} -an -y "{final_output}"')
         stdout, stderr, exit_code = await run_command(command)
         if exit_code != 0:
-            logger.error(f'Error running ffmpeg command for vertical stack: {stdout}\n{stderr}\nCommand: {command}')
+            logger.error(f'Building the preview sheet failed: {ffmpeg_error(stderr)}')
             return
-
-        # Add scale if grid is 4
-        if grid == 4:
-            # if not is_vertical or (is_vertical and add_black_bars):
-            downscale_filter = f'scale=1890:{(num_of_segments / grid) * 270}'
-            downscale_command = f'ffmpeg -i "{final_output}" -filter_complex "{downscale_filter}" -y "{downscaled_output}"'
-            # logger.debug(downscale_command)
-            stdout, stderr, exit_code = await run_command(downscale_command)
-            if exit_code != 0:
-                logger.error(f'Error running downscaling stacking command: {stdout}\n{stderr}')
-                return
-            # Renaming the final output with the "_og" suffix
-            base, ext = os.path.splitext(final_output)
-            final_output_og = f'{base}_og{ext}'
-            if not os.path.exists(final_output_og):
-                os.rename(final_output, final_output_og)
-            else:
-                logger.warning(f'The file {final_output_og} already exists, skipping renaming.')
-
-            # Replace the final output with the downscaled version
-            os.rename(downscaled_output, final_output)
 
         # Generate previews (WebP, WebM, GIF)
         results = ""
@@ -1159,7 +1112,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         if create_webp_preview_sheet:
             webp_command = (
                 f'ffmpeg -hide_banner -y -i "{final_output}" -vf "fps={webp_preview_fps},scale=iw:ih:flags=lanczos" '
-                f'-c:v libwebp -quality 80 -lossless 0 -loop 0 -an -vsync 0 "{preview_sheet_webp}"'
+                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -vsync 0 "{preview_sheet_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code != 0:

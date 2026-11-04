@@ -13,6 +13,7 @@
   "grid_columns": 4,
   "gif_segment_count": 8,
   "webp_fps": 24,
+  "webp_compression_level": 4,
   "avif_fps": 24,
   "avif_crf": 35,
   "gif_fps": 15,
