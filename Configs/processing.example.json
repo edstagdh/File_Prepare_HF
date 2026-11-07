@@ -25,11 +25,13 @@
     "approve_performers": false,
     "approve_date": false,
     "approve_title": false,
+    "approve_studio": false,
     "warn_on_duration_mismatch": true,
     "add_chapter_markers": false
   },
   "naming": {
     "filename_mode": "names",
+    "studio_mode": "site_studio",
     "title_date_format": "YYYY-Month-DD",
     "title_strip_strings": [],
     "ignore_part_number": false,

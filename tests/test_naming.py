@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from fileprep.config.models import NamingSettings
 from fileprep.pipeline import naming
 
@@ -51,3 +53,38 @@ def test_title_builder():
     assert tags == ["Site", "Studio"] and has_performers
     title, *_, has_performers = run(naming.build_title("Site", "Site", date, "Scene", [], ""))
     assert title == "Site - 2024-January-15 - Scene" and not has_performers
+
+
+def test_studio_display_modes():
+    assert naming.studio_display("Site", "Network", "site_studio") == ("Site(Network)", ["Site", "Network"])
+    assert naming.studio_display("Site", "Network", "site") == ("Site", ["Site"])
+    assert naming.studio_display("Site", "Network", "studio") == ("Network", ["Network"])
+    for studio in (None, "", "Site"):  # no different parent studio: always the site
+        assert all(naming.studio_display("Site", studio, m) == ("Site", ["Site"]) for m in naming.STUDIO_MODES)
+    with pytest.raises(ValueError):
+        naming.studio_display("Site", "Network", "bogus")
+
+
+def test_approve_studio(monkeypatch):
+    import asyncio
+
+    from fileprep.tpdb import scene_review
+
+    def run(*answers):
+        queue = iter(answers)
+
+        async def fake_prompt(_=""):
+            return next(queue)
+
+        async def no_pause(*_):
+            return None
+
+        monkeypatch.setattr(scene_review, "prompt", fake_prompt)
+        monkeypatch.setattr(scene_review, "notify_and_pause", no_pause)
+        return asyncio.run(scene_review.approve_studio("Site", "Network", "site_studio", None))
+
+    assert run("") == ("Network", None)  # Enter approves, the job's display applies
+    assert run("2", "a") == ("Network", "site")  # chosen display
+    assert run("2", "s") == ("Network", None)  # skipped
+    assert run("Other", "r", "-", "a") == (None, None)  # restart, then no studio
+    assert run("Other", "a") == ("Other", None)

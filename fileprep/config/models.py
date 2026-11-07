@@ -99,6 +99,8 @@ class ReviewSettings(Section):
     approve_performers: bool = setting(False, "Review performers", "Interactively edit the performer list of every match.")
     approve_date: bool = setting(False, "Review date", "Confirm or replace the scene date of every match.")
     approve_title: bool = setting(False, "Review title", "Confirm or replace the scene title of every match.")
+    approve_studio: bool = setting(False, "Review studio", "Confirm the studio of every match: choose how it is shown (site, studio or "
+                                                           "site(studio)) or type another studio.")
     warn_on_duration_mismatch: bool = setting(True, "Warn on duration mismatch",
                                               "Warn when the file length differs from the TPDB scene length.")
     add_chapter_markers: bool = setting(False, "Add chapter markers", "Write TPDB scene markers as MP4 chapters.")
@@ -115,6 +117,15 @@ class NamingSettings(Section):
     title_date_format: TitleDateFormat = setting("YYYY-Month-DD", "Title date format",
                                                  "Date format used in the generated video title.",
                                                  choices_help=TITLE_DATE_FORMATS)
+    studio_mode: Literal["site_studio", "site", "studio"] = setting(
+        "site_studio", "Studio display", "How the studio appears in the video title, metadata, tags and upload template "
+                                         "(the file name always starts with the site).",
+        choices_help={"site_studio": "Site(Studio), e.g. Brazzers Exxtra(Brazzers); only the site when there is no other studio",
+                      "site": "Site only",
+                      "studio": "Parent studio only (the site when there is none)"})
+    studio_mode_overrides: dict[str, Literal["site_studio", "site", "studio"]] = setting(
+        dict, "Studio display per file", "Original file name -> studio display for that file, set from the preview ('Studio' list). "
+                                         "Overrides the job's studio display and the choice made in the studio review.", hidden=True)
     title_strip_strings: list[str] = setting(list, "Strings removed from titles", "One per line.")
     ignore_part_number: bool = setting(False, "Ignore 'Part N' in file name",
                                        "Do not carry a detected 'Part N' token into the new name.")

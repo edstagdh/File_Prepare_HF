@@ -148,13 +148,25 @@ def folder_name(base_name: str, suffix: str) -> str:
     return f"{base_name}.{suffix}" if suffix else base_name
 
 
+STUDIO_MODES = ("site_studio", "site", "studio")
+
+
+def studio_display(site: str, studio: str | None, mode: str) -> tuple[str, list[str]]:
+    """How the studio is shown in the title, metadata and template. Returns (studio_info, studio_tags).
+    A scene without a (different) parent studio always shows the site."""
+    if mode not in STUDIO_MODES:
+        raise ValueError(f"Invalid studio mode: {mode}")
+    if mode == "site" or not studio or studio == site:
+        return site, [site]
+    if mode == "studio":
+        return studio, [studio]
+    return f"{site}({studio})", [site, studio]
+
+
 async def build_title(site: str, studio: str | None, date: SceneDate, scene_title: str, performers,
-                      suffix: str) -> tuple[str, str, list[str], bool]:
+                      suffix: str, studio_mode: str = "site_studio") -> tuple[str, str, list[str], bool]:
     """Video title. Returns (title, studio_info, studio_tags, has_performers)."""
-    if site != studio and studio:
-        studio_info, studio_tags = f"{site}({studio})", [site, studio]
-    else:
-        studio_info, studio_tags = site, [site]
+    studio_info, studio_tags = studio_display(site, studio, studio_mode)
     formatted_names = await format_performers(performers, mode=1)
     parts = [studio_info, date.pretty, scene_title, formatted_names]
     has_performers = bool(parts[-1])

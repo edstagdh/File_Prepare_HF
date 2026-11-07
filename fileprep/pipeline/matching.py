@@ -12,6 +12,7 @@ from fileprep.pipeline.naming import SITES_WITHOUT_STUDIO, FileFlags, clean_scen
 from fileprep.pipeline.plan import PlanIssue, SceneMatch
 from fileprep.runtime import NotifyFn
 from fileprep.tpdb import query_api
+from fileprep.tpdb.scene_review import approve_studio
 from fileprep.utils.text import validate_date
 
 DESCRIPTION_NOT_FOUND = "Scene description not found"
@@ -89,6 +90,8 @@ async def resolve_match(file: Path, flags: FileFlags, settings: ProcessingSettin
     match.scene_title = clean_scene_title(match.scene_title)
     if not match.site:
         return None, issues + [_err("NO_SITE", "No site/studio returned for this scene", name)]
+    if r.approve_studio and not match.full_manual:
+        match.studio, match.studio_mode = await approve_studio(match.site, match.studio, settings.naming.studio_mode, notify)
     if settings.naming.filename_mode in ("names", "both") and (not match.performers or match.performers == "Invalid"):
         return None, issues + [_err("NO_PERFORMERS", "Missing or invalid performers (required by the file name mode)", name)]
     return match, issues

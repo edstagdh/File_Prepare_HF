@@ -378,7 +378,8 @@ def _register_routes(app: FastAPI) -> None:  # noqa: C901 - flat route table
             if action == "names":
                 body = await request.json()
                 return manager.set_names(job_id, suffix=body.get("suffix"), file_name=body.get("file"),
-                                         new_name=body.get("name"), mode=body.get("mode")).summary()
+                                         new_name=body.get("name"), mode=body.get("mode"),
+                                         studio_mode=body.get("studio_mode")).summary()
             if action == "uuid":
                 body = await request.json()
                 return manager.set_uuid(job_id, body.get("file", ""), body.get("uuid", "")).summary()

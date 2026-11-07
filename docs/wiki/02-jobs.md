@@ -42,6 +42,11 @@ The new names come from the TPDB data. Without running the preview again you can
   chosen name is longer than the maximum (a `NAME_FALLBACK` warning). Saved per job in
   `naming.filename_mode_overrides`. Not available while a custom name is set, nor for previews made before 14.15
   (run the preview again).
+- **Studio display per file** (second list under the file name, shown when the scene has a different parent studio):
+  *Site(Studio)*, *site only* or *studio only* for that file - each option shows the text it gives. It changes the
+  video title, metadata, tags and `{SCENE_STUDIO}` of the upload template, not the file name (which starts with the
+  site). *Job default* goes back to the job's **Studio display** (or to the choice made in the studio review).
+  Saved per job in `naming.studio_mode_overrides`; not available for previews made before 14.21.
 - **Rename** on a file row: type the new name (without `.mp4`); it is used exactly as typed, the suffix is not added
   again, and the row shows a *custom* badge. An empty name goes back to the name from TPDB.
 

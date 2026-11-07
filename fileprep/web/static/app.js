@@ -613,11 +613,27 @@ function renderPlan(job, id, refresh) {
     sel.value = f.name_mode && f.name_mode !== jobMode ? f.name_mode : "";
     return h("div", { class: "small" }, sel);
   };
+  // per-file studio display (title, metadata, tags, template): each option shows the studio text it gives
+  const STUDIO_LABELS = { site_studio: "Site(Studio)", site: "site only", studio: "studio only" };
+  const studioSelect = (f) => {
+    const c = f.studio_candidates || {};
+    if (!f.match || new Set(Object.values(c)).size < 2) return null;
+    const def = f.match.studio_mode || job.config.processing.naming.studio_mode;
+    const sel = h("select", { class: "small", style: "max-width:100%;margin-top:4px", disabled: !editable, title: "Studio display for this file",
+      onchange: async () => {
+        try { await api("POST", `/api/jobs/${id}/names`, { file: f.source_name, studio_mode: sel.value }); toast("Studio display updated", "ok", 4000); refresh(); }
+        catch (e) { toast(e.message, "error"); refresh(); }
+      } },
+      h("option", { value: "" }, `Studio: ${f.match.studio_mode ? "approved" : "job default"} (${STUDIO_LABELS[def] || def})${c[def] ? ": " + c[def] : ""}`),
+      Object.keys(c).filter((m) => m !== def && c[m] !== c[def]).map((m) => h("option", { value: m }, `Studio: ${STUDIO_LABELS[m]}: ${c[m]}`)));
+    sel.value = f.studio_mode && f.studio_mode !== def ? f.studio_mode : "";
+    return h("div", { class: "small" }, sel);
+  };
   const files = plan.files.map((f) => {
     const r = job.results[f.source_name];
     return h("tr", {},
       h("td", {}, h("div", { class: "mono small" }, f.source_name), f.new_file_name && f.new_file_name !== f.source_name ? h("div", { class: "mono small" }, "→ " + f.new_file_name, f.custom_name ? h("span", { style: "margin-left:6px" }, badge("custom", "info")) : null) : null,
-        f.title ? h("div", { class: "small muted" }, f.title) : null, modeSelect(f)),
+        f.title ? h("div", { class: "small muted" }, f.title) : null, modeSelect(f), studioSelect(f)),
       h("td", {}, badge(f.status), r ? h("div", {}, badge(r.status)) : null),
       h("td", { class: "small" }, f.steps.length ? stepList(f, r) : "—", r?.error ? h("div", { style: "color:var(--err)" }, r.error) : null),
       h("td", {}, f.issues.map(issueRow)),

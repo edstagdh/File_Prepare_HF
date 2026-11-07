@@ -188,9 +188,9 @@ class JobManager:
             return job
 
     def set_names(self, job_id: str, suffix: Optional[str] = None, file_name: Optional[str] = None,
-                  new_name: Optional[str] = None, mode: Optional[str] = None) -> Job:
-        """Change the suffix for all files, one file's name or one file's file name mode after the preview
-        (no new preview needed). ``mode`` "" returns the file to the job's file name mode."""
+                  new_name: Optional[str] = None, mode: Optional[str] = None, studio_mode: Optional[str] = None) -> Job:
+        """Change the suffix for all files, one file's name, file name mode or studio display after the preview
+        (no new preview needed). ``mode`` / ``studio_mode`` "" return the file to the job's setting."""
         from fileprep.pipeline.naming import clean_suffix
         with self._lock:
             job = self.get(job_id)
@@ -205,7 +205,19 @@ class JobManager:
                 originals = {new: old for old, new in (job.plan.renames if job.plan else [])}
                 key = originals.get(file_name, file_name)
                 new_name = (new_name or "").strip()
-                if mode is not None:
+                if studio_mode is not None:
+                    from fileprep.pipeline.naming import STUDIO_MODES
+                    if studio_mode and studio_mode not in STUDIO_MODES:
+                        raise JobError(f"Unknown studio display: {studio_mode}")
+                    fp = next(f for f in job.plan.files if f.source_name == file_name)
+                    if studio_mode and not fp.studio_candidates:
+                        raise JobError("This preview is from an older version - run the preview again to change the studio display.")
+                    default = (fp.match.studio_mode if fp.match else None) or config.processing.naming.studio_mode
+                    if studio_mode and studio_mode != default:
+                        config.processing.naming.studio_mode_overrides[key] = studio_mode
+                    else:
+                        config.processing.naming.studio_mode_overrides.pop(key, None)
+                elif mode is not None:
                     modes = config.processing.naming.filename_mode_overrides
                     if mode and mode not in ("names", "title", "both", "tpdb_id"):
                         raise JobError(f"Unknown file name mode: {mode}")
@@ -651,12 +663,13 @@ class JobManager:
 
 
 def _only_names_changed(old: JobConfig, new: JobConfig) -> bool:
-    """True when the two configs differ only in the suffix for all files / custom file names."""
+    """True when the two configs differ only in the suffix for all files / per-file names, file name modes and studio displays."""
     def strip(config: JobConfig) -> dict:
         data = config.model_dump(mode="json")
         data["processing"]["naming"].pop("extra_suffix", None)
         data["processing"]["naming"].pop("filename_overrides", None)
         data["processing"]["naming"].pop("filename_mode_overrides", None)
+        data["processing"]["naming"].pop("studio_mode_overrides", None)
         return data
     return strip(old) == strip(new)
 

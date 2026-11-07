@@ -280,8 +280,12 @@ async def apply_names(job: JobConfig, directory: str, original_name: str, fp: Fi
         fp.issues.append(PlanIssue(level="error", code="TARGET_EXISTS", file=original_name,
                                    message=f"A different file already uses the target name: {fp.new_file_name}"))
 
+    studio_overrides = p.naming.studio_mode_overrides
+    fp.studio_mode = (studio_overrides.get(original_name) or studio_overrides.get(fp.source_name) or match.studio_mode
+                      or p.naming.studio_mode)
+    fp.studio_candidates = {m: naming.studio_display(match.site, match.studio, m)[0] for m in naming.STUDIO_MODES}
     fp.title, fp.studio_info, fp.studio_tags, has_performers = await naming.build_title(
-        match.site, match.studio, date, match.scene_title, match.performers, fp.suffix)
+        match.site, match.studio, date, match.scene_title, match.performers, fp.suffix, fp.studio_mode)
     if match.slug:
         m = p.matching
         base_url = {"jav": m.jav_url, "movies": m.movies_url}.get(m.api_mode, m.scenes_url)

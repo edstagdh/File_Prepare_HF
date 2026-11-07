@@ -101,3 +101,34 @@ def test_file_name_mode_per_file_without_new_preview(job, tmp_path):
     assert any(i.code == "NAME_FALLBACK" for i in files["a.mp4"].issues)
     with pytest.raises(JobError):
         manager.set_names("j1", file_name="a.mp4", mode="bogus")
+
+
+def test_studio_display_per_file_without_new_preview(job, tmp_path):
+    manager = JobManager(jobs_dir=str(tmp_path / "jobs"))
+    (tmp_path / "jobs").mkdir()
+    manager._jobs[job.id] = job
+    for f in job.plan.files:
+        f.match.site, f.match.studio = "Site", "Network"
+    asyncio.run(planner.reapply_names(job.config, job.plan))
+    a = job.plan.files[0]
+    assert a.studio_info == "Site(Network)" and a.title.startswith("Site(Network) - ")
+    assert a.studio_candidates == {"site_studio": "Site(Network)", "site": "Site", "studio": "Network"}
+    manager.set_names(job.id, file_name="a.mp4", studio_mode="studio")
+    files = {f.source_name: f for f in manager.get(job.id).plan.files}
+    assert files["a.mp4"].studio_info == "Network" and files["a.mp4"].studio_tags == ["Network"]
+    assert files["a.mp4"].new_file_name.startswith("Studio.")  # the file name keeps the site
+    assert files["b.mp4"].studio_info == "Site(Network)"
+    assert manager.get(job.id).config.processing.naming.studio_mode_overrides == {"a.mp4": "studio"}
+    assert manager.get(job.id).state == "ready" and manager.get(job.id).plan_is_current
+    manager.set_names(job.id, file_name="a.mp4", studio_mode="")
+    assert manager.get(job.id).plan.files[0].studio_info == "Site(Network)"
+    assert not manager.get(job.id).config.processing.naming.studio_mode_overrides
+    with pytest.raises(JobError):
+        manager.set_names(job.id, file_name="a.mp4", studio_mode="bogus")
+    # the studio chosen in the review is the file's default; the override wins over it
+    job.plan.files[0].match.studio_mode = "site"
+    manager.set_names(job.id, file_name="a.mp4", studio_mode="studio")
+    assert manager.get(job.id).plan.files[0].studio_info == "Network"
+    manager.set_names(job.id, file_name="a.mp4", studio_mode="site")  # equals the file's default -> no override
+    assert manager.get(job.id).plan.files[0].studio_info == "Site"
+    assert not manager.get(job.id).config.processing.naming.studio_mode_overrides

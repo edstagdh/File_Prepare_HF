@@ -2,7 +2,7 @@
 The interactive "review this before we use it" steps that happen after a
 scene entry is selected: checking file duration against markers, optionally
 appending a scene number to the title, and letting the user approve/edit the
-date and title.
+date, title and studio.
 """
 
 import asyncio
@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Optional
 
 from loguru import logger
+
+from fileprep.pipeline.naming import STUDIO_MODES, studio_display
 
 from .prompt_utils import NotifyFn, notify_and_pause, prompt
 
@@ -317,3 +319,65 @@ async def approve_scene_title(
             logger.info("Restarting title input...")
             continue
         logger.warning("Unrecognised input, restarting title input...")
+
+
+async def approve_studio(
+        site: str,
+        studio: Optional[str],
+        default_mode: str,
+        send_notification: NotifyFn,
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Interactively approve the studio of a scene: choose how it is shown
+    (1 Site(Studio), 2 site only, 3 studio only) or type another studio.
+
+    Args:
+        site: The scene's site (also the start of the file name; not editable here).
+        studio: The scene's parent studio, or None.
+        default_mode: The job's studio display, used for the preview.
+        send_notification: Optional async push-notification callback.
+
+    Returns:
+        ``(studio, mode)``: the approved studio (None = none) and the chosen
+        display mode, or None when the job's studio display applies.
+    """
+    choices = dict(zip("123", STUDIO_MODES))
+    while True:
+        await notify_and_pause(send_notification, "User input required - Studio Approval")
+        shown = "\n".join(f"  [{key}] {studio_display(site, studio, mode)[0]}" for key, mode in choices.items())
+        logger.info(
+            f"Studio approval required.\n"
+            f"Site: {site} | Studio: {studio or '(none)'} | Current display: {studio_display(site, studio, default_mode)[0]}\n"
+            f"{shown}\n"
+            f"Press Enter to approve, 1-3 to choose the display, or type another studio ('-' = no studio):"
+        )
+        raw = (await prompt("> ")).strip()
+
+        if raw == "":
+            logger.info("Studio approved as-is.")
+            return studio, None
+
+        new_studio, mode = studio, None
+        if raw in choices:
+            mode = choices[raw]
+        else:
+            new_studio = None if raw == "-" else raw
+        result = studio_display(site, new_studio, mode or default_mode)[0]
+        logger.info(
+            f"\nPreview of new studio:\n"
+            f"  {result}\n"
+            f"\n  [a] Approve  [r] Restart  [s] Skip (keep original studio)"
+        )
+        await notify_and_pause(send_notification, "User input required - Confirm Studio")
+        confirm = (await prompt("> ")).strip().lower()
+
+        if confirm in ("a", "approve"):
+            logger.info(f"New studio accepted: {result}")
+            return new_studio, mode
+        if confirm in ("s", "skip"):
+            logger.info("Skipping studio change, keeping original.")
+            return studio, None
+        if confirm in ("r", "restart"):
+            logger.info("Restarting studio input...")
+            continue
+        logger.warning("Unrecognised input, restarting studio input...")

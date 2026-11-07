@@ -35,6 +35,7 @@ class SceneMatch(BaseModel):
     markers: Optional[list[Any]] = None
     manual_suffix: str = ""
     full_manual: bool = False
+    studio_mode: Optional[str] = None  # studio display chosen in the studio review (None = the job's studio display)
 
     @classmethod
     def from_api_tuple(cls, result: tuple) -> "SceneMatch":
@@ -70,6 +71,8 @@ class FilePlan(BaseModel):
     new_file_name: str = ""  # with suffix and extension
     title: str = ""
     studio_info: str = ""
+    studio_candidates: dict[str, str] = Field(default_factory=dict)  # studio display mode -> studio text (from the preview)
+    studio_mode: str = ""  # studio display used for this file
     studio_tags: list[str] = Field(default_factory=list)
     scene_pretty_date: str = ""
     tpdb_url: Optional[str] = None
