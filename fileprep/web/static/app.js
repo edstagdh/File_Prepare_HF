@@ -434,6 +434,7 @@ async function viewJob(id) {
       can && ["stopped", "interrupted", "failed"].includes(st) && job.plan_is_current ? h("button", { class: "primary", onclick: () => act("start") }, "Resume") : null,
       can && ["running", "previewing", "queued"].includes(st) ? h("button", { onclick: () => act("stop") }, st === "queued" ? "Unqueue" : "Stop after current file") : null,
       can && ["running", "previewing", "stopping", "queued"].includes(st) ? h("button", { class: "danger", onclick: () => act("cancel", "Cancel now? The current step (e.g. encoding) is aborted.") }, "Cancel") : null,
+      h("button", { title: "Download this job's settings, plan, results and log tail as JSON (for bug reports)", onclick: () => { location.href = `${A.base}/api/jobs/${id}/export`; } }, "Export"),
       can ? h("button", { onclick: async () => { const r = await api("POST", `/api/jobs/${id}/duplicate`); location.hash = `#job/${r.id}`; } }, "Duplicate") : null,
       can && !["running", "previewing", "stopping", "queued"].includes(st) ? h("button", { class: "danger", onclick: async () => { if (confirm("Delete this job and its log?")) { await api("DELETE", `/api/jobs/${id}`); location.hash = "#jobs"; } } }, "Delete") : null);
 

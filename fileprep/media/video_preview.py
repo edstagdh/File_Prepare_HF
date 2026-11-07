@@ -503,7 +503,7 @@ async def process_video(video_path, directory, keep_temp_files, black_bars, crea
             webp_command = (
                 f'ffmpeg -hide_banner -y -i "{concat_result_path}" '
                 f'-vf "fps={webp_preview_fps},{scale_option}:flags=lanczos" '
-                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -vsync 0 "{output_webp}"'
+                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -fps_mode passthrough "{output_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code == 0 and os.path.exists(output_webp):
@@ -1112,7 +1112,7 @@ async def generate_and_run_ffmpeg_commands(concat_file_path, temp_folder, create
         if create_webp_preview_sheet:
             webp_command = (
                 f'ffmpeg -hide_banner -y -i "{final_output}" -vf "fps={webp_preview_fps},scale=iw:ih:flags=lanczos" '
-                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -vsync 0 "{preview_sheet_webp}"'
+                f'-c:v libwebp -quality 80 -lossless 0 -compression_level {webp_level} -loop 0 -an -fps_mode passthrough "{preview_sheet_webp}"'
             )
             stdout, stderr, exit_code = await run_command(webp_command)
             if exit_code != 0:

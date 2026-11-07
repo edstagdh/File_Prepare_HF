@@ -55,3 +55,14 @@ def test_template_preview_renders_and_escapes(monkeypatch, tmp_path):
     assert "Sample Scene Title" in body and "font-size:24px" in body and "<details><summary>More</summary>" in body
     assert "<script>" not in body and "javascript:" not in body and "[" not in body.replace("&#x27;", "")
     assert "{NEW_TITLE}" in r["placeholders"]
+
+
+def test_job_export_has_settings_and_log_tail(tmp_path):
+    from fileprep.config.models import JobConfig
+    from fileprep.jobs.manager import JobManager
+    m = JobManager(jobs_dir=tmp_path)
+    job = m.create(JobConfig(), "My job", "tester")
+    m._append_log(job.id, "line one")
+    data = m.export(job.id)
+    assert data["job"]["name"] == "My job" and data["job"]["state"] == "draft"
+    assert "processing" in data["config"] and data["log_tail"][-1].endswith("line one")

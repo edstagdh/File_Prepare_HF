@@ -132,6 +132,8 @@ completed, failed...) also show a short toast with a link to the job.
   [Image hosts and tracker](04-image-hosts-and-tracker.md)); *keep* leaves them. Files that finished before the
   cancel are never touched. The job's tracker browser is closed.
 - **Duplicate** - new draft with the same settings.
+- **Export** - downloads a JSON file with the job's settings, state, plan, results, the last 300 log lines and the environment
+  (version, OS, Python, ffmpeg). It contains no credentials; send it with a bug report.
 
 ## Scheduling rules
 

@@ -325,6 +325,23 @@ def _register_routes(app: FastAPI) -> None:  # noqa: C901 - flat route table
         data["plan_is_current"] = manager.get(job_id).plan_is_current
         return data
 
+    @app.get("/api/jobs/{job_id}/export")
+    async def export_job(job_id: str, user=Depends(require())):
+        """Download the job's settings, state, plan, results and log tail as JSON (for bug reports)."""
+        import json
+        import time
+        from fileprep.system.ffmpeg import check_ffmpeg
+        try:
+            data = manager.export(job_id)
+        except KeyError:
+            raise HTTPException(404, "Job not found")
+        ffmpeg = (await check_ffmpeg()).ffmpeg
+        data = {"export": {"format": 1, "created_at": time.strftime("%Y-%m-%d %H:%M:%S"), "version": __version__},
+                "environment": {"OS": f"{platform.system()} {platform.release()}", "Python": platform.python_version(),
+                                "ffmpeg": ffmpeg.version or ("not found" if not ffmpeg.found else "?")}, **data}
+        name = "".join(c if c.isalnum() or c in "-_" else "_" for c in data["job"]["name"])[:40] or "job"
+        return JSONResponse(data, headers={"Content-Disposition": f'attachment; filename="job_{name}_{job_id[:8]}.json"'})
+
     @app.put("/api/jobs/{job_id}")
     async def update_job(job_id: str, body: JobBody, user=Depends(require("operator"))):
         try:

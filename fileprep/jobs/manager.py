@@ -127,6 +127,15 @@ class JobManager:
         with self._lock:
             return json.loads(self.get(job_id).model_dump_json())
 
+    def export(self, job_id: str, log_lines: int = 300) -> dict:
+        """Debug export of one job: settings, state, plan, results and the log tail (no credentials are part of a job)."""
+        data = self.snapshot(job_id)
+        lines, _ = self.logs(job_id)
+        return {"job": {k: data.pop(k) for k in ("id", "name", "state", "error", "created_by", "created_at", "updated_at",
+                                                 "queued_at", "started_at", "finished_at", "activity")},
+                "config": data.pop("config"), "plan": data.pop("plan"), "results": data.pop("results"),
+                "progress": data.pop("progress"), "log_tail": lines[-log_lines:]}
+
     def logs(self, job_id: str, after: int = 0) -> tuple[list[str], int]:
         """Log lines with index >= ``after`` and the next index to ask for."""
         buffer = self._logs.get(job_id)
